@@ -1,6 +1,7 @@
 name = "civil-exam-drill"
 compatibility_date = "2026-08-31"
 pages_build_output_dir = "dist"
+migrations_dir = "migrations"
 
 [[d1_databases]]
 binding = "DB"
