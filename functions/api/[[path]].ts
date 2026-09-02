@@ -28,7 +28,8 @@ interface Database {
 type Bindings = {
   DB: Database;
   SESSION_HMAC_SECRET: string;
-  INVITE_CODE_PEPPER: string;
+  // 登录前置门控邀请码（env 直比，大小写不敏感；参考 money-growth-system 模式，V2 2026-09-03）
+  INVITE_CODE: string;
   // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
   ASSETS?: { fetch(input: string | URL | Request): Promise<Response> };
 };
@@ -203,33 +204,40 @@ app.post("/auth/login", async (c) => {
     .first<{ count: number }>();
   if ((attempts?.count ?? 0) >= 10)
     return c.json(fail("RATE_LIMITED", "登录尝试过于频繁，请稍后再试"), 429);
-  const codeHash = await hmac(
-    body.inviteCode.toUpperCase(),
-    c.env.INVITE_CODE_PEPPER,
-  );
-  const invite = await c.env.DB.prepare(
-    `SELECT id FROM invite_codes WHERE code_hash=? AND enabled=1 AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP)`,
-  )
-    .bind(codeHash)
-    .first<{ id: number }>();
+  // 邀请码 env 直比（大小写不敏感）；未配置 INVITE_CODE 时拒绝
+  const expected = String(c.env.INVITE_CODE ?? "").trim().toUpperCase();
+  const valid = expected !== "" && body.inviteCode.trim().toUpperCase() === expected;
   await c.env.DB.prepare(
     "INSERT INTO auth_attempts(client_key,succeeded) VALUES(?,?)",
   )
-    .bind(clientKey, invite ? 1 : 0)
+    .bind(clientKey, valid ? 1 : 0)
     .run();
-  if (!invite) return c.json(fail("INVITE_INVALID", "邀请码无效或已停用"), 401);
+  if (!valid) return c.json(fail("INVITE_INVALID", "邀请码无效或已停用"), 401);
+  // 兼容 users.invite_code_id 外键：为 env 邀请码维护一条固定绑定记录
+  const bindHash = await hmac(expected, c.env.SESSION_HMAC_SECRET);
+  await c.env.DB.prepare(
+    "INSERT INTO invite_codes(code_hash,label,enabled) VALUES(?,?,1) ON CONFLICT(code_hash) DO NOTHING",
+  )
+    .bind(bindHash, "invite-code-env")
+    .run();
+  const invite = await c.env.DB.prepare(
+    "SELECT id FROM invite_codes WHERE code_hash=?",
+  )
+    .bind(bindHash)
+    .first<{ id: number }>();
+  const inviteId = invite?.id ?? 1;
   const normalized = body.nickname.toLocaleLowerCase("zh-CN");
   let user = await c.env.DB.prepare(
     "SELECT id,nickname FROM users WHERE invite_code_id=? AND nickname_normalized=?",
   )
-    .bind(invite.id, normalized)
+    .bind(inviteId, normalized)
     .first<{ id: string; nickname: string }>();
   if (!user) {
     user = { id: uuid("usr"), nickname: body.nickname };
     await c.env.DB.prepare(
       "INSERT INTO users(id,invite_code_id,nickname,nickname_normalized) VALUES(?,?,?,?)",
     )
-      .bind(user.id, invite.id, user.nickname, normalized)
+      .bind(user.id, inviteId, user.nickname, normalized)
       .run();
   } else {
     await c.env.DB.prepare(
