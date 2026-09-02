@@ -65,7 +65,6 @@ class FakeDb {
 
 const env = {
   DB: new FakeDb(),
-  SESSION_HMAC_SECRET: "test",
   INVITE_CODE: "TEST2026",
   // 静态内容（public/generated/knowledge/*.json）mock：读取本地生成文件，等价 Pages ASSETS.fetch
   ASSETS: {

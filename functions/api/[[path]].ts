@@ -27,7 +27,6 @@ interface Database {
 }
 type Bindings = {
   DB: Database;
-  SESSION_HMAC_SECRET: string;
   // 登录前置门控邀请码（env 直比，大小写不敏感；参考 money-growth-system 模式，V2 2026-09-03）
   INVITE_CODE: string;
   // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
@@ -97,20 +96,6 @@ const iso = (date = new Date()) => date.toISOString();
 const uuid = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const encoder = new TextEncoder();
 const SESSION_COOKIE = "civil_exam_session";
-
-async function hmac(value: string, secret: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const bytes = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
-  return [...new Uint8Array(bytes)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 async function sha(value: string) {
   const bytes = await crypto.subtle.digest("SHA-256", encoder.encode(value));
@@ -214,16 +199,15 @@ app.post("/auth/login", async (c) => {
     .run();
   if (!valid) return c.json(fail("INVITE_INVALID", "邀请码无效或已停用"), 401);
   // 兼容 users.invite_code_id 外键：为 env 邀请码维护一条固定绑定记录
-  const bindHash = await hmac(expected, c.env.SESSION_HMAC_SECRET);
   await c.env.DB.prepare(
     "INSERT INTO invite_codes(code_hash,label,enabled) VALUES(?,?,1) ON CONFLICT(code_hash) DO NOTHING",
   )
-    .bind(bindHash, "invite-code-env")
+    .bind("env-mode", "invite-code-env")
     .run();
   const invite = await c.env.DB.prepare(
     "SELECT id FROM invite_codes WHERE code_hash=?",
   )
-    .bind(bindHash)
+    .bind("env-mode")
     .first<{ id: number }>();
   const inviteId = invite?.id ?? 1;
   const normalized = body.nickname.toLocaleLowerCase("zh-CN");
