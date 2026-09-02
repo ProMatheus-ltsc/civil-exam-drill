@@ -84,7 +84,6 @@ const categoryLabels: Record<string, string> = {
   geometry: "几何问题",
   counting: "排列组合与概率",
   questions: "题型方法",
-  foundation: "基础认知",
   writing: "文章写作",
   "standard-terms": "规范表达",
   politics: "政治理论",

@@ -9,17 +9,47 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@shared/core": ["../shared-core/src/index.ts"],
-      "@shared/core/*": ["../shared-core/src/*"],
-      "react": ["./node_modules/@types/react"],
-      "react-dom": ["./node_modules/@types/react-dom"],
-      "react-router-dom": ["./node_modules/react-router-dom"]
+      "@shared/core": [
+        "../shared-core/src/index.ts"
+      ],
+      "@shared/core/*": [
+        "../shared-core/src/*"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react-dom": [
+        "./node_modules/@types/react-dom"
+      ],
+      "react-router-dom": [
+        "./node_modules/react-router-dom"
+      ],
+      "react/jsx-runtime": [
+        "./node_modules/@types/react/jsx-runtime"
+      ],
+      "react/jsx-dev-runtime": [
+        "./node_modules/@types/react/jsx-dev-runtime"
+      ],
+      "react-dom/jsx-runtime": [
+        "./node_modules/@types/react-dom/jsx-runtime"
+      ]
     },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "react", "react-dom"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client",
+      "react",
+      "react-dom"
+    ]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }

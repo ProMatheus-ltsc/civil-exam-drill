@@ -170,12 +170,26 @@ export function generateQuestion(input: { topicId: TopicId; difficulty: Difficul
       const answer = round(r1 + r2 + product, 2)
       const r1Desc = r1 >= 0 ? `增长 ${r1}%` : `下降 ${Math.abs(r1)}%`
       const r2Desc = r2 >= 0 ? `增长 ${r2}%` : `下降 ${Math.abs(r2)}%`
-      draft = {
-        templateId: 'interval-growth-v1',
-        params: { r1, r2, answer },
-        stem: `某地区去年${r1Desc}，今年${r2Desc}，两年累计增长了多少？`,
-        ...options(answer, [round(r1 + r2, 2), round(product, 2), round(r1 + r2 + 2 * product, 2)], '%', random, 2),
-        explanation: `间隔增长率 R = r₁ + r₂ + r₁×r₂。代入：${r1}%${r2 >= 0 ? '+' : ''}${r2}%${product >= 0 ? '+' : ''}${product}% = ${answer}%。选项 ${r1 + r2}% 漏掉了${product >= 0 ? '正的' : '负的'}乘积项${product >= 0 ? '+' : ''}${product}%，可以排除。`,
+      const variant = integer(0, 1)
+      if (variant === 0) {
+        draft = {
+          templateId: 'interval-growth-v1',
+          params: { r1, r2, answer },
+          stem: `某地区去年${r1Desc}，今年${r2Desc}，两年累计增长了多少？`,
+          ...options(answer, [round(r1 + r2, 2), round(product, 2), round(r1 + r2 + 2 * product, 2)], '%', random, 2),
+          explanation: `间隔增长率 R = r₁ + r₂ + r₁×r₂。代入：${r1}%${r2 >= 0 ? '+' : ''}${r2}%${product >= 0 ? '+' : ''}${product}% = ${answer}%。选项 ${r1 + r2}% 漏掉了${product >= 0 ? '正的' : '负的'}乘积项${product >= 0 ? '+' : ''}${product}%，可以排除。`,
+        }
+      } else {
+        // v2 逆向：已知累计增长率 R 与首年增速 r1，求次年增速 r2 = (R − r1)/(1 + r1/100)
+        const R = answer
+        const back = round((R - r1) / (1 + r1 / 100), 2)
+        draft = {
+          templateId: 'interval-growth-v2',
+          params: { R, r1, back },
+          stem: `某地区去年${r1Desc}，两年累计增长 ${R}%，则今年增速约为多少？`,
+          ...options(back, [round(R - r1, 2), round(r1 + product, 2), round(R - product, 2)], '%', random, 2),
+          explanation: `由间隔增长率公式 R = r₁ + r₂ + r₁×r₂ 反解：r₂ = (R − r₁) ÷ (1 + r₁/100) = (${R} − ${r1}) ÷ ${round(1 + r1 / 100, 2)} = ${back}%。选项 ${round(R - r1, 2)}% 直接相减，漏掉了需要除以 (1 + r₁) 的基数放大。`,
+        }
       }
     } else if (input.topicId === 'mixed-growth') {
       const minR = level === 1 ? 3 : level === 2 ? 5 : -10
@@ -189,16 +203,30 @@ export function generateQuestion(input: { topicId: TopicId; difficulty: Difficul
       const aDesc = a >= 0 ? `增长 ${a}%` : `下降 ${Math.abs(a)}%`
       const bDesc = b >= 0 ? `增长 ${b}%` : `下降 ${Math.abs(b)}%`
       const swapSide = random() > .5
-      draft = {
-        templateId: 'mixed-growth-v1',
-        params: swapSide ? { a, b, ratioA, ratioB, answer } : { a, b, ratioA: ratioB, ratioB: ratioA, answer },
-        stem: swapSide
-          ? `某企业上半年产值${aDesc}，下半年产值${bDesc}，上、下半年产值之比为 ${ratioA}:${ratioB}。全年产值增长率约为多少？`
-          : `某企业上半年产值${bDesc}，下半年产值${aDesc}，上、下半年产值之比为 ${ratioB}:${ratioA}。全年产值增长率约为多少？`,
-        ...options(answer, [a, b, avg], '%', random, 2),
-        explanation: swapSide
-          ? `整体增速介于 ${a}%~${b}% 之间。上半年占比为 ${Math.round(ratioA / (ratioA + ratioB) * 100)}%，远大于下半年，故整体增速应偏向 ${a}%（${avg}% 直接平均忽略权重，${b}% 则无视了慢的部分）。正确答案为 ${answer}%。`
-          : `整体增速介于 ${a}%~${b}% 之间。下半年占比为 ${Math.round(ratioA / (ratioA + ratioB) * 100)}%，远大于上半年，故整体增速应偏向 ${a}%（${avg}% 直接平均忽略权重，${b}% 则无视了慢的部分）。正确答案为 ${answer}%。`,
+      const variant = integer(0, 1)
+      if (variant === 0) {
+        draft = {
+          templateId: 'mixed-growth-v1',
+          params: swapSide ? { a, b, ratioA, ratioB, answer } : { a, b, ratioA: ratioB, ratioB: ratioA, answer },
+          stem: swapSide
+            ? `某企业上半年产值${aDesc}，下半年产值${bDesc}，上、下半年产值之比为 ${ratioA}:${ratioB}。全年产值增长率约为多少？`
+            : `某企业上半年产值${bDesc}，下半年产值${aDesc}，上、下半年产值之比为 ${ratioB}:${ratioA}。全年产值增长率约为多少？`,
+          ...options(answer, [a, b, avg], '%', random, 2),
+          explanation: swapSide
+            ? `整体增速介于 ${a}%~${b}% 之间。上半年占比为 ${Math.round(ratioA / (ratioA + ratioB) * 100)}%，远大于下半年，故整体增速应偏向 ${a}%（${avg}% 直接平均忽略权重，${b}% 则无视了慢的部分）。正确答案为 ${answer}%。`
+            : `整体增速介于 ${a}%~${b}% 之间。下半年占比为 ${Math.round(ratioA / (ratioA + ratioB) * 100)}%，远大于上半年，故整体增速应偏向 ${a}%（${avg}% 直接平均忽略权重，${b}% 则无视了慢的部分）。正确答案为 ${answer}%。`,
+        }
+      } else {
+        // v2 逆向：已知整体增速 R 与上半年增速 a、产值比，求下半年增速 b = [R×(ratioA+1) − a×ratioA]/ratioB
+        const R = answer
+        const back = round((R * (ratioA + ratioB) - a * ratioA) / ratioB, 2)
+        draft = {
+          templateId: 'mixed-growth-v2',
+          params: { a, R, ratioA, ratioB, back },
+          stem: `某企业上半年产值${aDesc}，全年产值增长 ${R}%，上、下半年产值之比为 ${ratioA}:${ratioB}。下半年产值增速约为多少？`,
+          ...options(back, [round(R - a, 2), avg, R], '%', random, 2),
+          explanation: `全年增速是两部分按产值占比的加权平均：${a}%×${ratioA}/${ratioA + ratioB} + r₂×${ratioB}/${ratioA + ratioB} = ${R}%。反解 r₂ = [${R}×${ratioA + ratioB} − ${a}×${ratioA}] ÷ ${ratioB} = ${back}%。不能直接用 R − a 相减。`,
+        }
       }
     } else if (input.topicId === 'multiples') {
       const n = pick(level === 1 ? [1, 2] : level === 2 ? [1, 2, 3] : [1, 2, 3, 4])
@@ -243,23 +271,38 @@ export function generateQuestion(input: { topicId: TopicId; difficulty: Difficul
       while (round(bigVal, 2) === round(absChange, 2)) bigVal = round(bigVal + 0.5, 2)
       const aDesc = a >= 0 ? `增长 ${a}%` : `下降 ${Math.abs(a)}%`
       const bDesc = b >= 0 ? `增长 ${b}%` : `下降 ${Math.abs(b)}%`
-      const optStrs = [
-        `${direction} ${absChange} 个百分点`,
-        `${opposite} ${absChange} 个百分点`,
-        `${direction} ${bigVal} 个百分点`,
-        `${opposite} ${bigVal} 个百分点`,
-      ]
-      for (let i = optStrs.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(random() * (i + 1))
-        ;[optStrs[i], optStrs[j]] = [optStrs[j], optStrs[i]]
-      }
-      draft = {
-        templateId: 'ratio-change-v1',
-        params: { a, b, partRatio, exactChange },
-        stem: `某行业产值同比${aDesc}，全国规上工业增加值同比${bDesc}，该行业占规上工业增加值的比重比上年：`,
-        options: optStrs as [string, string, string, string],
-        answerIndex: optStrs.indexOf(`${direction} ${absChange} 个百分点`) as 0 | 1 | 2 | 3,
-        explanation: `部分增速（${a}%）${a > b ? '>' : '<'}整体增速（${b}%），比重${direction}。且 |Δ| < |a−b| = ${diff}%，故 ${bigVal} 个百分点的选项可排除（超出上限），方向相反的也排除。`,
+      const variant = integer(0, 1)
+      if (variant === 0) {
+        const optStrs = [
+          `${direction} ${absChange} 个百分点`,
+          `${opposite} ${absChange} 个百分点`,
+          `${direction} ${bigVal} 个百分点`,
+          `${opposite} ${bigVal} 个百分点`,
+        ]
+        for (let i = optStrs.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(random() * (i + 1))
+          ;[optStrs[i], optStrs[j]] = [optStrs[j], optStrs[i]]
+        }
+        draft = {
+          templateId: 'ratio-change-v1',
+          params: { a, b, partRatio, exactChange },
+          stem: `某行业产值同比${aDesc}，全国规上工业增加值同比${bDesc}，该行业占规上工业增加值的比重比上年：`,
+          options: optStrs as [string, string, string, string],
+          answerIndex: optStrs.indexOf(`${direction} ${absChange} 个百分点`) as 0 | 1 | 2 | 3,
+          explanation: `部分增速（${a}%）${a > b ? '>' : '<'}整体增速（${b}%），比重${direction}。且 |Δ| < |a−b| = ${diff}%，故 ${bigVal} 个百分点的选项可排除（超出上限），方向相反的也排除。`,
+        }
+      } else {
+        // v2 求基期比重：基期比重 = 现期比重 × (1 + 整体增速) / (1 + 部分增速)
+        const share = partRatio
+        const base = round(share * (100 + b) / (100 + a), 2)
+        const wrongReverse = round(share * (100 + a) / (100 + b), 2)
+        draft = {
+          templateId: 'ratio-change-v2',
+          params: { share, a, b, base },
+          stem: `某行业今年产值占规上工业增加值的 ${share}%，该行业产值同比${aDesc}，规上工业增加值同比${bDesc}。上年该行业占比约为多少？`,
+          ...options(base, [share, wrongReverse, round(share + Math.abs(a - b) * .5, 2)], '%', random, 2),
+          explanation: `基期比重 = 现期比重 × (1 + 整体增速) ÷ (1 + 部分增速) = ${share}% × ${100 + b} ÷ ${100 + a} = ${base}%。不能直接取现期比重 ${share}%（漏掉增速差），也不能把 (1+b)/(1+a) 写成反比（${wrongReverse}%）。`,
+        }
       }
     } else {
       const years = pick(level === 1 ? [2, 3] : [3, 4, 5])
