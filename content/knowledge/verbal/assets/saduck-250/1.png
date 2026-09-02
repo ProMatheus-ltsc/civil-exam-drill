@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="aplus-core" content="aplus.js">
+    <meta http-equiv="x-ua-compatible" content="ie=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width" />
+    <title>域名拦截</title>
+    <link rel="icon" href="https://img.alicdn.com/tfs/TB1ORCWcUGF3KVjSZFoXXbmpFXa-32-32.bmp" />
+    <script>
+        window.sessionStorage.setItem("p_csrf", "7b70caba-0274-4b16-8078-2f83d141722e");
+        window.serverContext = {
+            userId : "-99999"
+        };
+    </script>
+    <script>
+        (function(w, d, s, q, i) {
+            w[q] = w[q] || [];
+            var f = d.getElementsByTagName(s)[0],j = d.createElement(s);
+            j.async = true;
+            j.id = 'beacon-aplus';
+            j.setAttribute('exparams','userid=-99999&aplus&sidx=aplusSidx&ckx=aplusCkx');
+            j.src = "//g.alicdn.com/alilog/mlog/aplus_v2.js";
+            j.crossorigin = 'anonymous';
+            f.parentNode.insertBefore(j, f);
+        })(window, document, 'script', 'aplus_queue');
+    </script>
+    <link rel="icon" href="https://g.alicdn.com/data-security-manager/dialog/0.0.35/favicon.png">
+    <link href="https://g.alicdn.com/data-security-manager/dialog/0.0.35/umi.css" rel="stylesheet">
+</head>
+
+<body>
+<div id="root" style="height: 100%;"></div>
+<script crossorigin="anonymous" src="https://g.alicdn.com/data-security-manager/dialog/0.0.35/umi.js"></script>
+</body>
+</html>

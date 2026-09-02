@@ -1,0 +1,8 @@
+name = "civil-exam-drill"
+compatibility_date = "2026-08-31"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "civil-exam-drill-db"
+database_id = "replace-after-wrangler-d1-create"

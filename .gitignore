@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.env
+.env.*
+!.env.example
+src/generated/knowledge/*.json
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store

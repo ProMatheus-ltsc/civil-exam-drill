@@ -1,0 +1,39 @@
+name: Deploy Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone shared-core
+        run: |
+          git clone https://github.com/ProMatheus-ltsc/shared-core.git ../shared-core
+          git -C ../shared-core checkout 971b3e6999fc7fc77af16e6af52775ad3fbaa628
+      - name: Install shared-core dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: ../shared-core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run content:validate
+      - run: npm test
+      - run: npm run build
+      - name: Create Pages project (wrangler4 first deploy)
+        if: github.event_name == 'push'
+        run: npx wrangler pages project create civil-exam-drill --production-branch main || echo "Pages 项目已存在，跳过创建"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy production
+        if: github.event_name == 'push'
+        run: npx wrangler pages deploy dist --project-name civil-exam-drill
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
