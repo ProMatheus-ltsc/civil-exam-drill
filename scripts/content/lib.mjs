@@ -8,8 +8,11 @@ import { z } from "zod";
 
 export const root = new URL("../../", import.meta.url);
 export const contentDir = new URL("../../content/knowledge/", import.meta.url);
+// V2（2026-09-03）：输出到 public/generated/knowledge/（静态资源，随 Pages 发布）。
+// 原先 src/generated/knowledge 被 functions 静态 import → 11MB 打进 Worker bundle → 超 3MiB 免费限制；
+// 现由 functions 经 env.ASSETS 运行时读取（静态路径 /generated/knowledge/*.json）。
 export const outputDir = new URL(
-  "../../src/generated/knowledge/",
+  "../../public/generated/knowledge/",
   import.meta.url,
 );
 export const modules = [

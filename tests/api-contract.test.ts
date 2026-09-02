@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { app } from "../functions/api/[[path]]";
 
@@ -66,6 +67,21 @@ const env = {
   DB: new FakeDb(),
   SESSION_HMAC_SECRET: "test",
   INVITE_CODE_PEPPER: "test",
+  // 静态内容（public/generated/knowledge/*.json）mock：读取本地生成文件，等价 Pages ASSETS.fetch
+  ASSETS: {
+    async fetch(input: string | URL | Request) {
+      const url = new URL(String(input));
+      const file = new URL(
+        `../public${url.pathname}`,
+        import.meta.url,
+      );
+      const text = readFileSync(file, "utf8");
+      return new Response(text, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  },
 };
 const auth = { cookie: "civil_exam_session=test-session" };
 

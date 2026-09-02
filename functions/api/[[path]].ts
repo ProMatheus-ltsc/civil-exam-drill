@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { handle } from "hono/cloudflare-pages";
 import { z } from "zod";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import entriesData from "../../src/generated/knowledge/entries.json";
-import searchData from "../../src/generated/knowledge/search-index.json";
 import {
   difficulties,
   generateQuestion,
@@ -31,8 +29,58 @@ type Bindings = {
   DB: Database;
   SESSION_HMAC_SECRET: string;
   INVITE_CODE_PEPPER: string;
+  // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
+  ASSETS?: { fetch(input: string | URL | Request): Promise<Response> };
 };
 type Variables = { userId: string; tokenHash: string; nickname: string };
+
+// ---- 知识内容加载（静态 JSON 经 env.ASSETS 运行时读取，isolate 级缓存；避免打进 Worker bundle 超 3MiB）----
+interface KnowledgeEntry {
+  id: string;
+  module: string;
+  category: string;
+  title: string;
+  order: number;
+  markdown: string;
+  html: string;
+  source?: string | null;
+}
+interface KnowledgeIndex {
+  version: string;
+  items: Array<Record<string, unknown>>;
+}
+let entriesCache: KnowledgeEntry[] | null = null;
+let entriesVersion = "";
+let searchCache: KnowledgeIndex["items"] | null = null;
+
+async function fetchJson<T>(c: { env: Bindings }, path: string): Promise<T> {
+  const asset = c.env.ASSETS;
+  if (!asset) throw new Error("ASSETS binding 未配置");
+  const url = new URL(path, "https://pages.dev");
+  const res = await asset.fetch(url.toString());
+  if (!res.ok) throw new Error(`读取静态资源失败 ${path}: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function loadEntries(c: { env: Bindings }): Promise<KnowledgeEntry[]> {
+  if (entriesCache && entriesVersion) return entriesCache;
+  const data = await fetchJson<{
+    version: string;
+    entries: KnowledgeEntry[];
+  }>(c, "/generated/knowledge/entries.json");
+  entriesCache = data.entries;
+  entriesVersion = data.version;
+  return entriesCache;
+}
+
+async function loadSearch(c: {
+  env: Bindings;
+}): Promise<KnowledgeIndex["items"]> {
+  if (searchCache) return searchCache;
+  const data = await fetchJson<KnowledgeIndex>(c, "/generated/knowledge/search-index.json");
+  searchCache = data.items;
+  return searchCache;
+}
 
 export const app = new Hono<{
   Bindings: Bindings;
@@ -233,7 +281,7 @@ app.get("/auth/me", async (c) => {
   );
 });
 
-app.get("/knowledge", (c) => {
+app.get("/knowledge", async (c) => {
   const params = z
     .object({
       module: z
@@ -256,14 +304,16 @@ app.get("/knowledge", (c) => {
   const query = params.q?.trim().toLocaleLowerCase("zh-CN");
   const limit = integerQuery(c.req.query("limit"), 20, 1, 100);
   const offset = integerQuery(c.req.query("cursor"), 0, 0, 1000000);
-  let items = entriesData.entries.map(
+  const entries = await loadEntries(c);
+  const search = query ? await loadSearch(c) : [];
+  let items = entries.map(
     ({ markdown: _markdown, html: _html, source: _source, ...entry }) => entry,
   );
   if (module) items = items.filter((item) => item.module === module);
   if (category) items = items.filter((item) => item.category === category);
   if (query) {
     const ids = new Set(
-      searchData.items
+      search
         .filter((item) =>
           `${item.title} ${item.summary} ${item.text}`
             .toLocaleLowerCase("zh-CN")
@@ -315,9 +365,9 @@ function stableTermId(entryId: string, front: string, back: string) {
   }
   return `${entryId}:${hash.toString(16).padStart(16, "0")}`;
 }
-function essayCards(): EssayCard[] {
+function essayCards(entries: KnowledgeEntry[]): EssayCard[] {
   const cards: EssayCard[] = [];
-  for (const entry of entriesData.entries.filter(
+  for (const entry of entries.filter(
     (item) => item.module === "essay" && item.category === "standard-terms",
   )) {
     for (const line of entry.markdown.split("\n")) {
@@ -353,7 +403,8 @@ app.get("/essay/cards", async (c) => {
     .optional()
     .parse(c.req.query("category"));
   const now = iso();
-  let cards = essayCards();
+  const entries = await loadEntries(c);
+  let cards = essayCards(entries);
   if (category) cards = cards.filter((card) => card.category === category);
   const rows = await c.env.DB.prepare(
     "SELECT term_id AS termId,repetitions,interval_days AS intervalDays,ease,due_at AS dueAt,last_reviewed_at AS lastReviewedAt,remembered_count AS rememberedCount,forgot_count AS forgotCount FROM essay_term_progress WHERE user_id=?",
@@ -411,7 +462,8 @@ app.post("/essay/reviews", async (c) => {
       idempotencyKey: z.string().uuid(),
     }),
   );
-  const card = essayCards().find(
+  const entriesForCards = await loadEntries(c);
+  const card = essayCards(entriesForCards).find(
     (candidate) => candidate.termId === body.termId,
   );
   if (!card) return c.json(fail("NOT_FOUND", "规范词卡片不存在"), 404);
@@ -485,7 +537,8 @@ app.get("/essay/reviews/history", async (c) => {
   )
     .bind(c.get("userId"), limit)
     .all<Record<string, unknown>>();
-  const cards = new Map(essayCards().map((card) => [card.termId, card]));
+  const entriesForHistory = await loadEntries(c);
+  const cards = new Map(essayCards(entriesForHistory).map((card) => [card.termId, card]));
   const items = rows.results.map((row) => ({
     ...row,
     card: cards.get(String(row.termId)) ?? null,
@@ -503,8 +556,9 @@ app.get("/essay/reviews/history", async (c) => {
   );
 });
 
-app.get("/knowledge/:id", (c) => {
-  const entry = entriesData.entries.find(
+app.get("/knowledge/:id", async (c) => {
+  const entries = await loadEntries(c);
+  const entry = entries.find(
     (candidate) => candidate.id === c.req.param("id"),
   );
   if (!entry) return c.json(fail("NOT_FOUND", "知识条目不存在"), 404);
