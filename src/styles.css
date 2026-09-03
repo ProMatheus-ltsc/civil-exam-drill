@@ -214,6 +214,11 @@ select {
   border-color: #1b8a5a;
   background: #e7f6ee;
 }
+.options button.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  cursor: wait;
+}
 .explanation,
 .mistake {
   margin-top: 18px;
