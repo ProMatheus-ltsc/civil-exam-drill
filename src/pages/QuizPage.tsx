@@ -46,9 +46,12 @@ export function QuizPage() {
       setAnswer(null);
       started.current = performance.now();
     });
+  // pending 记录用户点了哪个选项（未等网络响应即高亮），同时阻止连点
+  const [pending, setPending] = useState<number | null>(null);
   const submit = (selectedIndex: number) => {
-    if (!question || answer) return;
+    if (!question || answer || pending !== null) return;
     const elapsedMs = Math.round(performance.now() - started.current);
+    setPending(selectedIndex);
     void run(async () => {
       const result = await api<Answer>("/quiz/answers", {
         method: "POST",
@@ -60,6 +63,7 @@ export function QuizPage() {
         }),
       });
       setAnswer(result);
+      setPending(null);
       setSession((current) => ({
         total: current.total + 1,
         correct: current.correct + Number(result.correct),
@@ -124,9 +128,13 @@ export function QuizPage() {
             {question.options.map((option, index) => (
               <button
                 key={option}
-                disabled={!!answer}
+                disabled={!!answer || pending !== null}
                 className={
-                  answer && index === answer.answerIndex ? "correct" : ""
+                  answer && index === answer.answerIndex
+                    ? "correct"
+                    : pending === index
+                      ? "selected"
+                      : ""
                 }
                 onClick={() => submit(index)}
               >
