@@ -294,7 +294,8 @@ app.get("/knowledge", async (c) => {
   const module = params.module;
   const category = params.category;
   const query = params.q?.trim().toLocaleLowerCase("zh-CN");
-  const limit = integerQuery(c.req.query("limit"), 20, 1, 100);
+  // limit 放宽到 200 以覆盖全部 164 条知识条目（避免按 module 切换时截断）
+  const limit = integerQuery(c.req.query("limit"), 20, 1, 200);
   const offset = integerQuery(c.req.query("cursor"), 0, 0, 1000000);
   const entries = await loadEntries(c);
   const search = query ? await loadSearch(c) : [];
