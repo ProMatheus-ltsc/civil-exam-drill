@@ -52,6 +52,9 @@ interface KnowledgeIndex {
 let entriesCache: KnowledgeEntry[] | null = null;
 let entriesVersion = "";
 let searchCache: KnowledgeIndex["items"] | null = null;
+// 尽力节流：同一 token 的 last_seen_at 更新间隔 ≥60s（isolate 级近似，回收后重置不影响正确性）
+const lastSeenAt = new Map<string, number>();
+const LAST_SEEN_THROTTLE_MS = 60_000;
 
 async function fetchJson<T>(c: { env: Bindings }, path: string): Promise<T> {
   const asset = c.env.ASSETS;
@@ -160,11 +163,16 @@ app.use("*", async (c, next) => {
   c.set("userId", session.userId);
   c.set("tokenHash", tokenHash);
   c.set("nickname", session.nickname);
-  await c.env.DB.prepare(
-    "UPDATE sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?",
-  )
-    .bind(tokenHash)
-    .run();
+  const now = Date.now();
+  const lastSeen = lastSeenAt.get(tokenHash);
+  if (!lastSeen || now - lastSeen > LAST_SEEN_THROTTLE_MS) {
+    lastSeenAt.set(tokenHash, now);
+    await c.env.DB.prepare(
+      "UPDATE sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?",
+    )
+      .bind(tokenHash)
+      .run();
+  }
   await next();
 });
 
@@ -672,17 +680,19 @@ app.post("/quiz/answers", async (c) => {
       idempotencyKey: z.string().uuid(),
     }),
   );
-  const previous = await c.env.DB.prepare(
-    "SELECT a.id AS attemptId,a.correct,q.answer_index AS answerIndex,q.explanation,a.created_at AS savedAt FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.idempotency_key=?",
-  )
-    .bind(c.get("userId"), body.idempotencyKey)
-    .first<Record<string, unknown>>();
+  const [previous, question] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT a.id AS attemptId,a.correct,q.answer_index AS answerIndex,q.explanation,a.created_at AS savedAt FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.idempotency_key=?",
+    )
+      .bind(c.get("userId"), body.idempotencyKey)
+      .first<Record<string, unknown>>(),
+    c.env.DB.prepare(
+      "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt FROM generated_questions WHERE id=? AND user_id=?",
+    )
+      .bind(body.questionId, c.get("userId"))
+      .first<{ answerIndex: number; explanation: string; expiresAt: string }>(),
+  ]);
   if (previous) return c.json(ok(previous));
-  const question = await c.env.DB.prepare(
-    "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt FROM generated_questions WHERE id=? AND user_id=?",
-  )
-    .bind(body.questionId, c.get("userId"))
-    .first<{ answerIndex: number; explanation: string; expiresAt: string }>();
   if (!question) return c.json(fail("NOT_FOUND", "题目不存在或无权访问"), 404);
   if (new Date(question.expiresAt).getTime() < Date.now())
     return c.json(fail("QUESTION_EXPIRED", "题目已过期"), 410);
