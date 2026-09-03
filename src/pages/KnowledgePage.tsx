@@ -101,6 +101,7 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ limit: "100" });
       if (essay) params.set("module", "essay");
+      else if (module) params.set("module", module);
       if (query.trim()) params.set("q", query.trim());
       void run(async () => {
         const result = await api<{ items: KnowledgeItem[] }>(
@@ -113,7 +114,7 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
       ignore = true;
       window.clearTimeout(timer);
     };
-  }, [essay, query]);
+  }, [essay, module, query]);
   const filtered = useMemo(
     () =>
       items.filter(
