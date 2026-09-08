@@ -13,7 +13,7 @@ export function ProfilePage() {
   const { busy, run } = useAsync();
   useEffect(() => {
     void run(async () => {
-      const [a, b] = await Promise.all([
+      const [a, b]: [QuizStats, SchulteStats] = await Promise.all([
         api<QuizStats>("/quiz/stats"),
         api<SchulteStats>("/schulte/results?limit=20"),
       ]);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
   BookOpen,
@@ -45,7 +46,9 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
             邀请码
             <input
               value={inviteCode}
-              onChange={(event) => setInviteCode(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setInviteCode(event.target.value)
+              }
               placeholder="请输入邀请码"
             />
           </label>
@@ -53,10 +56,14 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
             昵称
             <input
               value={nickname}
-              onChange={(event) => setNickname(event.target.value)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setNickname(event.target.value)
+              }
               maxLength={12}
               placeholder="1～12 个字符"
-              onKeyDown={(event) => event.key === "Enter" && submit()}
+              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) =>
+                event.key === "Enter" && submit()
+              }
             />
           </label>
           <button

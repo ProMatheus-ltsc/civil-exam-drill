@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import type { ChangeEvent } from "react";
+
 import { Calculator } from "lucide-react";
 import { EmptyState } from "@shared/core/components/EmptyState";
 import { Stack } from "@shared/core/components/responsive/Stack";
@@ -80,7 +82,9 @@ export function QuizPage() {
           专题
           <select
             value={topicId}
-            onChange={(event) => setTopicId(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setTopicId(event.target.value)
+            }
           >
             {topics.map((item) => (
               <option key={item[0]} value={item[0]}>
@@ -93,7 +97,9 @@ export function QuizPage() {
           难度
           <select
             value={difficulty}
-            onChange={(event) => setDifficulty(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setDifficulty(event.target.value)
+            }
           >
             <option value="easy">简单</option>
             <option value="medium">中等</option>

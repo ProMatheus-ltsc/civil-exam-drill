@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
+
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
@@ -124,7 +126,9 @@ export function SchultePage() {
           阶数
           <select
             value={size}
-            onChange={(event) => setSize(Number(event.target.value))}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setSize(Number(event.target.value))
+            }
           >
             {Array.from(
               { length: variant === "color_letters" ? 4 : 9 },
@@ -138,7 +142,7 @@ export function SchultePage() {
           变体
           <select
             value={variant}
-            onChange={(event) => {
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => {
               setVariant(event.target.value);
               if (event.target.value === "color_letters" && size > 5)
                 setSize(5);
