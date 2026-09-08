@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
+
 import { BookOpen, Brain, FileText, History, RotateCcw } from "lucide-react";
 import { EmptyState } from "@shared/core/components/EmptyState";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
@@ -47,6 +49,15 @@ type ReviewHistory = {
   rating: "forgot" | "hard" | "remembered";
   reviewedAt: string;
   card: { front: string } | null;
+};
+type CardsResponse = {
+  cards: EssayCard[];
+  summary: CardSummary;
+  categories: string[];
+};
+type HistoryResponse = {
+  items: ReviewHistory[];
+  todayCount: number;
 };
 const modules = [
   ["data_analysis", "资料分析"],
@@ -214,13 +225,9 @@ function EssayCards() {
     [todayCount, setTodayCount] = useState(0);
   const { busy, run } = useAsync();
   const refresh = async () => {
-    const [data, records] = await Promise.all([
-      api<{ cards: EssayCard[]; summary: CardSummary; categories: string[] }>(
-        "/essay/cards",
-      ),
-      api<{ items: ReviewHistory[]; todayCount: number }>(
-        "/essay/reviews/history?limit=12",
-      ),
+    const [data, records]: [CardsResponse, HistoryResponse] = await Promise.all([
+      api<CardsResponse>("/essay/cards"),
+      api<HistoryResponse>("/essay/reviews/history?limit=12"),
     ]);
     setCards(data.cards);
     setSummary(data.summary);
@@ -293,7 +300,9 @@ function EssayCards() {
           分类
           <select
             value={category}
-            onChange={(event) => setCategory(event.target.value)}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+              setCategory(event.target.value)
+            }
           >
             <option value="">全部规范词</option>
             {categories.map((item) => (
