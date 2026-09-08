@@ -2,13 +2,14 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body != null && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
   const response = await fetch(`/api${path}`, {
     ...options,
     credentials: "same-origin",
-    headers: {
-      ...(options.body ? { "content-type": "application/json" } : {}),
-      ...options.headers,
-    },
+    headers,
   });
   const payload = (await response.json()) as {
     success: boolean;
