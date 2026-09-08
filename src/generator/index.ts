@@ -51,7 +51,7 @@ function seeded(seed: string) {
 }
 
 function canonical(params: Record<string, number | string>) {
-  return JSON.stringify(Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))))
+  return JSON.stringify(Object.fromEntries(Object.entries(params).sort((a, b) => a[0].localeCompare(b[0]))))
 }
 
 function round(value: number, digits = 2) {
