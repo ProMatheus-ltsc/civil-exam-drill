@@ -118,18 +118,30 @@ const CATALOG = [
   budgetMs: 600000,
 }))
 const RUN_LENGTH = 10
+const DIFFS = ['easy', 'medium', 'hard']
 const quizState = {
   questions: new Map(),
-  runs: new Map(), // runId -> { topicId, answered: [] }
+  runs: new Map(), // runId -> { topicId, difficulty, answered: [] }
 }
 const topicOfId = (id) => CATALOG.find((t) => t.id === id)
-const passedTopics = () => {
-  const passed = new Set()
+/** 各难度局是否通过（stars ≥1）；模块解锁看前置模块 high 局 */
+const passedRuns = () => {
+  const starsByKey = new Map() // `${topicId}|${difficulty}` -> stars
   for (const run of quizState.runs.values()) {
+    if (run.answered.length < RUN_LENGTH) continue
     const correct = run.answered.filter((a) => a.correct).length
-    if (run.answered.length >= RUN_LENGTH && correct >= 8) passed.add(run.topicId)
+    if (correct < 8) continue
+    const key = `${run.topicId}|${run.difficulty}`
+    const accuracy = correct / run.answered.length
+    const stars = accuracy >= 1 ? 3 : accuracy >= 0.9 ? 2 : 1
+    starsByKey.set(key, Math.max(starsByKey.get(key) ?? 0, stars))
   }
-  return passed
+  return starsByKey
+}
+const topicUnlocked = (starsByKey, topicId) => {
+  const topic = topicOfId(topicId)
+  if (!topic) return false
+  return (topic.unlock || []).every((prereq) => (starsByKey.get(`${prereq}|hard`) ?? 0) >= 1)
 }
 
 const server = http.createServer(async (req, res) => {
@@ -252,11 +264,17 @@ const server = http.createServer(async (req, res) => {
         runLength: RUN_LENGTH,
         passAccuracy: 0.8,
         generatorVersion: 3,
+        difficultyRuns: [
+          { id: 'easy', label: '低难度', short: '低', description: '选项差异大、数字简洁' },
+          { id: 'medium', label: '中难度', short: '中', description: '选项更接近、数字更复杂' },
+          { id: 'hard', label: '高难度 · 实战', short: '高', description: '资料速算附文字/表格/图表材料' },
+        ],
         tracks: ['speed', 'sequence'].map((trackId) => ({
           id: trackId,
           title: trackId === 'speed' ? '资料速算' : '数字推理',
           description: '',
-          topics: CATALOG.filter((t) => (trackId === 'speed' ? !t.id.startsWith('seq-') : t.id.startsWith('seq-'))),
+          topics: CATALOG.filter((t) => (trackId === 'speed' ? !t.id.startsWith('seq-') : t.id.startsWith('seq-')))
+            .map((t) => ({ ...t, budgetsMs: { easy: 200000, medium: 380000, hard: 600000 } })),
         })),
       },
       error: null,
@@ -264,18 +282,22 @@ const server = http.createServer(async (req, res) => {
     return
   }
   
-  // GET /api/quiz/progress
+  // GET /api/quiz/progress：按（模块 × 难度局）返回；解锁看前置模块高难度局
   if (pathname === '/api/quiz/progress' && req.method === 'GET') {
-    const passed = passedTopics()
-    const data = CATALOG.map((topic) => ({
-      topicId: topic.id,
-      unlocked: topic.unlock.every((u) => passed.has(u)),
-      stars: 0,
-      total: 0,
-      accuracy: 0,
-      averageMs: 0,
-      lastRunAt: null,
-    }))
+    const starsByKey = passedRuns()
+    const data = CATALOG.flatMap((topic) => {
+      const unlocked = topicUnlocked(starsByKey, topic.id)
+      return DIFFS.map((difficulty) => ({
+        topicId: topic.id,
+        difficulty,
+        unlocked,
+        stars: starsByKey.get(`${topic.id}|${difficulty}`) ?? 0,
+        total: 0,
+        accuracy: 0,
+        averageMs: 0,
+        lastRunAt: null,
+      }))
+    })
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ success: true, data, error: null }))
     return
@@ -287,34 +309,34 @@ const server = http.createServer(async (req, res) => {
     try {
       const { topicId, runId, index = 0, difficulty = 'medium' } = JSON.parse(body)
       if (runId) {
-        const passed = passedTopics()
+        const starsByKey = passedRuns()
         const topic = topicOfId(topicId)
-        const locked = topic && topic.unlock.filter((u) => !passed.has(u))
+        const locked = topic && (topic.unlock || []).filter((u) => (starsByKey.get(`${u}|hard`) ?? 0) < 1)
         if (locked && locked.length) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡：${locked.map((u) => (CATALOG_RAW.find((x) => x[0] === u) || [u, u])[1]).join('、')}` } }))
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map((u) => (CATALOG_RAW.find((x) => x[0] === u) || [u, u])[1]).join('、')}` } }))
           return
         }
-        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, answered: [] })
+        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [] })
         const run = quizState.runs.get(runId)
         if (run.answered.length >= RUN_LENGTH) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_COMPLETE', message: '本关已完成，请重新开始新一局' } }))
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_COMPLETE', message: '本局已完成，请重新开始' } }))
           return
         }
         if (run.answered.length !== index) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '关卡题目序号不连续，请重新开始本关' } }))
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '题目序号不连续，请重新开始本局' } }))
           return
         }
       }
       const questionId = `q_${crypto.randomUUID()}`
       const stem = topicId.startsWith('seq-')
         ? `模拟数推题（${topicOfId(topicId)?.title ?? topicId}）：3、7、11、15、（ ），求括号中的数。`
-        : `模拟${topicOfId(topicId)?.title ?? topicId}题（难度 ${difficulty}）：请选出正确选项。`
+        : `模拟${topicOfId(topicId)?.title ?? topicId}题（${difficulty}局）：请选出正确选项。`
       const options = topicId.startsWith('seq-') ? ['19', '21', '17', '18'] : ['选项 A', '选项 B', '选项 C', '选项 D']
       const answerIndex = topicId.startsWith('seq-') ? 0 : index % 4
-      quizState.questions.set(questionId, { topicId, runId: runId ?? null, answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。', options })
+      quizState.questions.set(questionId, { topicId, difficulty, runId: runId ?? null, answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。', options })
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         success: true,

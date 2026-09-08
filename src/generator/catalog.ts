@@ -74,6 +74,64 @@ export const BUDGET_SECONDS: Record<BudgetClass, Record<Difficulty, number>> = {
   sequence: { easy: 45, medium: 65, hard: 85 },
 };
 
+/**
+ * 难度局语义：模块内区分 低/中/高 三个难度局，每题同难度、共 10 题。
+ * - 难度高低取决于：题干数字复杂度（档位越高数值越非整、多步换算）+ 选项接近程度；
+ * - 资料速算的高难度局为“实战难度”：题目一律附文字/表格/图表短材料；
+ * - 模块通关 = 通过本模块“高难度局”（数字推理高局仍为纯数列，仅提高复杂度与区分度）。
+ */
+export const difficultyRuns: Array<{
+  id: Difficulty;
+  label: string;
+  short: string;
+  description: string;
+}> = [
+  {
+    id: "easy",
+    label: "低难度",
+    short: "低",
+    description: "选项差异大、数字简洁，掌握基本算法",
+  },
+  {
+    id: "medium",
+    label: "中难度",
+    short: "中",
+    description: "选项更接近、数字更复杂，需要两步换算",
+  },
+  {
+    id: "hard",
+    label: "高难度 · 实战",
+    short: "高",
+    description: "贴近实战：资料速算附文字/表格/图表材料，选项接近、数字复杂",
+  },
+];
+
+/** 资料速算高难度局材料化的读题加时（秒/题） */
+const MATERIAL_READ_SECONDS: Partial<Record<BudgetClass, number>> = {
+  tool: 12,
+  concept: 15,
+};
+
+/** 指定难度局的单题预算（秒）；资料速算高局自动叠加材料读题时间 */
+export function perQuestionBudgetSeconds(
+  topic: Pick<TrainingTopic, "budgetClass" | "track">,
+  difficulty: Difficulty,
+) {
+  const base = BUDGET_SECONDS[topic.budgetClass][difficulty];
+  if (topic.track === "speed" && difficulty === "hard") {
+    return base + (MATERIAL_READ_SECONDS[topic.budgetClass] ?? 0);
+  }
+  return base;
+}
+
+/** 难度局总时间预算（毫秒）：10 题 × 单题预算 */
+export function difficultyBudgetMs(
+  topic: Pick<TrainingTopic, "budgetClass" | "track">,
+  difficulty: Difficulty,
+) {
+  return perQuestionBudgetSeconds(topic, difficulty) * 10 * 1000;
+}
+
 function topic(
   id: TopicId,
   rating: 1 | 2 | 3,
@@ -99,10 +157,10 @@ function topic(
   };
 }
 
-/** 关卡总时间预算（毫秒） */
+/** 关卡总时间预算（毫秒）——历史阶梯口径（r1=4易3中3难、r2=2易4中4难、r3=2中8难），保留用于展示/兼容 */
 export function topicBudget(t: TrainingTopic) {
   return t.ladder.reduce(
-    (sum, difficulty) => sum + BUDGET_SECONDS[t.budgetClass][difficulty] * 1000,
+    (sum, difficulty) => sum + perQuestionBudgetSeconds(t, difficulty) * 1000,
     0,
   );
 }

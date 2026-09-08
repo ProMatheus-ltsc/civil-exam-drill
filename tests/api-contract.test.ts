@@ -256,7 +256,7 @@ describe("API contract guards", () => {
     expect(seqTrack.topics.every((t) => t.budgetMs > 0)).toBe(true);
   });
 
-  it("locks stages until prerequisites are cleared", async () => {
+  it("locks stages until the hard (combat) run of prerequisites is cleared", async () => {
     const progressResponse = await app.request(
       "/api/quiz/progress",
       { headers: auth },
@@ -264,9 +264,13 @@ describe("API contract guards", () => {
     );
     const progress = (await progressResponse.json()).data;
     expect(progressResponse.status).toBe(200);
-    const byId = new Map(progress.map((p) => [p.topicId, p]));
-    expect(byId.get("arithmetic").unlocked).toBe(true);
-    expect(byId.get("multiply").unlocked).toBe(false);
+    const byId = new Map(
+      progress.map((p) => [`${p.topicId}:${p.difficulty}`, p]),
+    );
+    expect(progress).toHaveLength(32 * 3);
+    expect(byId.get("arithmetic:easy").unlocked).toBe(true);
+    expect(byId.get("arithmetic:hard").unlocked).toBe(true);
+    expect(byId.get("multiply:easy").unlocked).toBe(false);
 
     const lockedResponse = await app.request(
       "/api/quiz/questions",
@@ -275,6 +279,7 @@ describe("API contract guards", () => {
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
           topicId: "multiply",
+          difficulty: "hard",
           runId: crypto.randomUUID(),
           index: 0,
         }),
@@ -285,7 +290,7 @@ describe("API contract guards", () => {
     expect((await lockedResponse.json()).error.code).toBe("TOPIC_LOCKED");
   });
 
-  it("generates the first run question with a ladder difficulty", async () => {
+  it("generates the first run question of the requested difficulty run", async () => {
     const response = await app.request(
       "/api/quiz/questions",
       {
@@ -293,6 +298,7 @@ describe("API contract guards", () => {
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
           topicId: "arithmetic",
+          difficulty: "hard",
           runId: crypto.randomUUID(),
           index: 0,
         }),
@@ -301,7 +307,7 @@ describe("API contract guards", () => {
     );
     const payload = await response.json();
     expect(response.status).toBe(200);
-    expect(payload.data.difficulty).toBe("easy");
+    expect(payload.data.difficulty).toBe("hard");
     expect(payload.data.runLength).toBe(10);
     expect(payload.data.index).toBe(0);
   });

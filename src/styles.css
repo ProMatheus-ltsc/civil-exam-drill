@@ -1189,3 +1189,93 @@ select {
     display: none;
   }
 }
+
+/* ===== 关卡卡：低/中/高难度局选择 ===== */
+.stage-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d8e1e5;
+  border-radius: 16px;
+  background: #fbfcfd;
+  animation: rise 0.18s ease-out;
+}
+.stage-card.is-locked {
+  background: #f2f5f6;
+}
+.stage-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stage-card-head .stage-text {
+  flex: 1;
+  min-width: 0;
+}
+.stage-card-head .stage-text strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.difficulty-runs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.run-chip {
+  display: grid;
+  gap: 5px;
+  justify-items: start;
+  min-height: 66px;
+  padding: 9px 12px;
+  border: 1px solid #ccd6dd;
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+.run-chip:hover:not(.locked) {
+  border-color: #bb623a;
+  box-shadow: 0 4px 12px #17324d12;
+}
+.run-chip.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.run-chip.deasy { border-left: 4px solid #4d8f6e; }
+.run-chip.dmedium { border-left: 4px solid #c98a2e; }
+.run-chip.dhard { border-left: 4px solid #b3402f; }
+.run-chip.combat {
+  background: linear-gradient(160deg, #fff7f5, #fff);
+}
+.run-chip-label {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: #17324d;
+}
+.run-chip.dhard .run-chip-label {
+  color: #a33a2e;
+}
+.run-chip small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #71818d;
+  font-size: 0.72rem;
+}
+.run-chip .lock-hint {
+  color: #8b6b55;
+  font-size: 0.7rem;
+}
+@media (max-width: 640px) {
+  .difficulty-runs {
+    grid-template-columns: 1fr;
+  }
+  .run-chip {
+    min-height: 52px;
+  }
+}
+.run-result-sub {
+  font-weight: 800;
+  color: #516676;
+}

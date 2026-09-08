@@ -7,6 +7,7 @@ import {
   isCatalogTopic,
   topicById,
   topicBudget,
+  difficultyBudgetMs,
   topics,
   titleOf,
   legacyTopics,
@@ -90,14 +91,25 @@ async function loadSearch(c: {
   return searchCache;
 }
 
-// ==================== 闯关题库：局次/通关/星级 ====================
+// ==================== 闯关题库：难度局/通关/星级 ====================
 export const RUN_LENGTH = 10;
+export const RUN_DIFFICULTIES = ["easy", "medium", "hard"] as const;
+type RunDifficulty = (typeof RUN_DIFFICULTIES)[number];
 
-/** 单次运行判定：完整 10 题、答对 ≥8、总用时不超过关卡预算 */
-function runStars(agg: { topicId: string; total: number; correct: number; durationMs: number }): number {
+/** 难度局 key：topicId|difficulty */
+const diffKey = (topicId: string, difficulty: RunDifficulty) => `${topicId}|${difficulty}`;
+
+/** 单局判定：完整 10 题、答对 ≥8、总用时不超过该难度局预算 */
+function runStars(agg: {
+  topicId: string;
+  difficulty: RunDifficulty;
+  total: number;
+  correct: number;
+  durationMs: number;
+}): number {
   if (agg.total < RUN_LENGTH) return 0;
   const topic = topicById.get(agg.topicId as TopicId);
-  if (topic && agg.durationMs > topicBudget(topic)) return 0;
+  if (topic && agg.durationMs > difficultyBudgetMs(topic, agg.difficulty)) return 0;
   const accuracy = agg.correct / agg.total;
   if (accuracy >= 1) return 3;
   if (accuracy >= 0.9) return 2;
@@ -107,6 +119,7 @@ function runStars(agg: { topicId: string; total: number; correct: number; durati
 
 interface RunAgg {
   topicId: string;
+  difficulty: RunDifficulty;
   runId: string;
   total: number;
   correct: number;
@@ -117,37 +130,40 @@ async function loadQuizStatus(c: { env: Bindings; get(key: string): string }) {
   const userId = c.get("userId");
   const [runRows, statRows] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT q.topic_id AS topicId,a.run_id AS runId,COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs
+      `SELECT q.topic_id AS topicId,q.difficulty AS difficulty,a.run_id AS runId,COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs
        FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
-       WHERE a.user_id=? AND a.run_id IS NOT NULL GROUP BY q.topic_id,a.run_id`,
+       WHERE a.user_id=? AND a.run_id IS NOT NULL GROUP BY q.topic_id,q.difficulty,a.run_id`,
     )
       .bind(userId)
       .all<RunAgg>(),
     c.env.DB.prepare(
-      `SELECT q.topic_id AS topicId,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs,MAX(a.created_at) AS lastRunAt
+      `SELECT q.topic_id AS topicId,q.difficulty AS difficulty,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs,MAX(a.created_at) AS lastRunAt
        FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
-       WHERE a.user_id=? GROUP BY q.topic_id`,
+       WHERE a.user_id=? GROUP BY q.topic_id,q.difficulty`,
     )
       .bind(userId)
       .all<Record<string, unknown>>(),
   ]);
-  // 每关最佳星级（stars ≥1 视为已通关，可解锁后续）
+  // 各难度局最佳星级（stars ≥1 即通过该局；模块“高难度局”通过才解锁下一模块）
   const passStars = new Map<string, number>();
   for (const row of runRows.results) {
+    const difficulty = (String(row.difficulty) as RunDifficulty) ?? "hard";
     const stars = runStars({
       topicId: row.topicId,
+      difficulty,
       total: Number(row.total),
       correct: Number(row.correct),
       durationMs: Number(row.durationMs),
     });
-    if (stars > (passStars.get(row.topicId) ?? 0)) passStars.set(row.topicId, stars);
+    const key = diffKey(row.topicId, difficulty);
+    if (stars > (passStars.get(key) ?? 0)) passStars.set(key, stars);
   }
   const stats = new Map<string, { total: number; correct: number; accuracy: number; averageMs: number; lastRunAt: string | null }>();
   for (const row of statRows.results) {
     const total = Number(row.total) || 0;
     const correct = Number(row.correct) || 0;
     const averageMs = Math.round(Number(row.averageMs) || 0);
-    stats.set(String(row.topicId), {
+    stats.set(diffKey(String(row.topicId), String(row.difficulty) as RunDifficulty), {
       total,
       correct,
       accuracy: total ? correct / total : 0,
@@ -158,10 +174,11 @@ async function loadQuizStatus(c: { env: Bindings; get(key: string): string }) {
   return { passStars, stats };
 }
 
+/** 模块是否解锁：前置模块的“高难度局（实战）”均通过 */
 function isUnlocked(passStars: Map<string, number>, topicId: TopicId) {
   const topic = topicById.get(topicId);
   if (!topic) return false;
-  return topic.unlock.every((prereq) => (passStars.get(prereq) ?? 0) >= 1);
+  return topic.unlock.every((prereq) => (passStars.get(diffKey(prereq, "hard")) ?? 0) >= 1);
 }
 
 // 生成节流：isolate 内存滑动窗口（尽力近似，冷启动后重置不影响正确性）
@@ -725,13 +742,18 @@ app.get("/quiz/topics", (c) =>
   ),
 );
 
-/** 关卡目录（含每关预算/前置/文档链接；进度由 /quiz/progress 单独提供） */
+/** 关卡目录（含每关按难度局的预算/前置/文档链接；进度由 /quiz/progress 单独提供） */
 app.get("/quiz/catalog", (c) =>
   c.json(
     ok({
       runLength: RUN_LENGTH,
       passAccuracy: 0.8,
       generatorVersion: 3,
+      difficultyRuns: [
+        { id: "easy", label: "低难度", short: "低", description: "选项差异大、数字简洁，掌握基本算法" },
+        { id: "medium", label: "中难度", short: "中", description: "选项更接近、数字更复杂，需要两步换算" },
+        { id: "hard", label: "高难度 · 实战", short: "高", description: "资料速算附文字/表格/图表材料，选项接近、数字复杂" },
+      ],
       tracks: ["speed", "sequence"].map((trackId) => {
         const items = topics.filter((t) => t.track === trackId);
         return {
@@ -744,6 +766,11 @@ app.get("/quiz/catalog", (c) =>
           topics: items.map((t) => ({
             ...t,
             budgetMs: topicBudget(t),
+            budgetsMs: {
+              easy: difficultyBudgetMs(t, "easy"),
+              medium: difficultyBudgetMs(t, "medium"),
+              hard: difficultyBudgetMs(t, "hard"),
+            },
             unlockTitles: t.unlock.map(titleOf),
             docId: t.docId ?? null,
           })),
@@ -753,25 +780,27 @@ app.get("/quiz/catalog", (c) =>
   ),
 );
 
-/** 关卡进度：解锁状态/最佳星级/作答统计 */
+/** 关卡进度：按（模块 × 难度局）返回 解锁/星级/统计；模块解锁取决于前置模块高难度局通关 */
 app.get("/quiz/progress", async (c) => {
   const { passStars, stats } = await loadQuizStatus(c);
-  return c.json(
-    ok(
-      topics.map((topic) => {
-        const run = stats.get(topic.id);
-        return {
-          topicId: topic.id,
-          unlocked: isUnlocked(passStars, topic.id),
-          stars: passStars.get(topic.id) ?? 0,
-          total: run?.total ?? 0,
-          accuracy: run?.accuracy ?? 0,
-          averageMs: run?.averageMs ?? 0,
-          lastRunAt: run?.lastRunAt ?? null,
-        };
-      }),
-    ),
-  );
+  const rows = topics.flatMap((topic) => {
+    const unlocked = isUnlocked(passStars, topic.id);
+    return RUN_DIFFICULTIES.map((difficulty) => {
+      const key = diffKey(topic.id, difficulty);
+      const run = stats.get(key);
+      return {
+        topicId: topic.id,
+        difficulty,
+        unlocked,
+        stars: passStars.get(key) ?? 0,
+        total: run?.total ?? 0,
+        accuracy: run?.accuracy ?? 0,
+        averageMs: run?.averageMs ?? 0,
+        lastRunAt: run?.lastRunAt ?? null,
+      };
+    });
+  });
+  return c.json(ok(rows));
 });
 
 app.post("/quiz/questions", async (c) => {
@@ -779,7 +808,7 @@ app.post("/quiz/questions", async (c) => {
     c.req.raw,
     z.object({
       topicId: z.string().min(2).max(40),
-      difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+      difficulty: z.enum(["easy", "medium", "hard"]),
       runId: z.string().uuid().optional(),
       index: z.number().int().min(0).max(RUN_LENGTH - 1).optional(),
     }),
@@ -797,15 +826,17 @@ app.post("/quiz/questions", async (c) => {
       400,
     );
   }
-  let difficulty = body.difficulty;
+  const difficulty = body.difficulty;
   if (body.runId !== undefined) {
     if (body.index === undefined)
       return c.json(fail("INVALID_PARAM", "闯关模式需要题目序号 index"), 400);
     const status = await loadQuizStatus(c);
-    const locked = topic.unlock.filter((prereq) => (status.passStars.get(prereq) ?? 0) < 1);
+    const locked = topic.unlock.filter(
+      (prereq) => (status.passStars.get(diffKey(prereq, "hard")) ?? 0) < 1,
+    );
     if (locked.length > 0)
       return c.json(
-        fail("TOPIC_LOCKED", `请先通过前置关卡：${locked.map(titleOf).join("、")}`),
+        fail("TOPIC_LOCKED", `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`),
         409,
       );
     const countRow = await c.env.DB.prepare(
@@ -815,18 +846,14 @@ app.post("/quiz/questions", async (c) => {
       .first<{ total: number }>();
     const generated = Number(countRow?.total ?? 0);
     if (generated >= RUN_LENGTH)
-      return c.json(fail("RUN_COMPLETE", "本关已完成，请重新开始新一局"), 409);
+      return c.json(fail("RUN_COMPLETE", "本局已完成，请重新开始"), 409);
     if (generated !== body.index)
       return c.json(
-        fail("RUN_STATE", "关卡题目序号不连续，请重新开始本关"),
+        fail("RUN_STATE", "题目序号不连续，请重新开始本局"),
         409,
       );
-    difficulty = topic.ladder[body.index];
-  } else {
-    if (!difficulty)
-      return c.json(fail("INVALID_PARAM", "缺少难度参数"), 400);
   }
-  if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}`))
+  if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}:${difficulty}`))
     return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);
   const recent = await c.env.DB.prepare(
     "SELECT fingerprint FROM generated_questions WHERE user_id=? AND topic_id=? AND difficulty=? ORDER BY created_at DESC LIMIT 50",
@@ -901,10 +928,10 @@ app.post("/quiz/answers", async (c) => {
       .bind(c.get("userId"), body.idempotencyKey)
       .first<Record<string, unknown>>(),
     c.env.DB.prepare(
-      "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt,run_id AS runId,topic_id AS topicId FROM generated_questions WHERE id=? AND user_id=?",
+      "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt,run_id AS runId,topic_id AS topicId,difficulty FROM generated_questions WHERE id=? AND user_id=?",
     )
       .bind(body.questionId, c.get("userId"))
-      .first<{ answerIndex: number; explanation: string; expiresAt: string; runId: string | null; topicId: string }>(),
+      .first<{ answerIndex: number; explanation: string; expiresAt: string; runId: string | null; topicId: string; difficulty: RunDifficulty }>(),
   ]);
   if (previous) return c.json(ok(previous));
   if (!question) return c.json(fail("NOT_FOUND", "题目不存在或无权访问"), 404);
@@ -934,18 +961,21 @@ app.post("/quiz/answers", async (c) => {
       question.runId,
     )
     .run();
-  // 局次完成时回传通关判定（正确率与总用时均达标）
+  // 局次完成时回传通关判定（该难度局正确率与总用时均达标）
   let run = null;
   if (question.runId) {
     const agg = await c.env.DB.prepare(
-      "SELECT COUNT(*) AS total,SUM(correct) AS correct,SUM(duration_ms) AS durationMs FROM quiz_attempts WHERE user_id=? AND run_id=?",
+      `SELECT COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs,MAX(q.topic_id) AS topicId,MAX(q.difficulty) AS difficulty
+       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+       WHERE a.user_id=? AND a.run_id=?`,
     )
       .bind(c.get("userId"), question.runId)
-      .first<{ total: number; correct: number; durationMs: number }>();
+      .first<{ total: number; correct: number; durationMs: number; topicId: string; difficulty: RunDifficulty }>();
     if (agg && Number(agg.total) >= RUN_LENGTH) {
       const total = Number(agg.total);
       const aggData = {
-        topicId: question.topicId,
+        topicId: String(agg.topicId),
+        difficulty: agg.difficulty ?? "hard",
         total,
         correct: Number(agg.correct),
         durationMs: Number(agg.durationMs),
@@ -953,6 +983,7 @@ app.post("/quiz/answers", async (c) => {
       const stars = runStars(aggData);
       run = {
         finished: true,
+        difficulty: aggData.difficulty,
         total,
         correct: aggData.correct,
         accuracy: aggData.correct / total,

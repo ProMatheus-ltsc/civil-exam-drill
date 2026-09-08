@@ -1,7 +1,10 @@
 /**
  * 专项训练：资料速算 × 数字推理 双轨闯关。
- * 关卡地图 → 关内 10 题（先难度提升）→ 结算（限时 + ≥80% 通关、1~3 星、可刷星重练）。
- * 交互：答题乐观过渡（选项 spinner）、展示答案期间预取下一题、骨架屏与失败重试。
+ * 每个模块区分 低/中/高 三个“难度局”（各 10 题、同难度）：
+ * - 难度由题干数字复杂度与选项接近程度决定；
+ * - 通过本模块「高难度 · 实战」局（≥8 对且限时内）才算模块通关，解锁下一模块；
+ * - 低/中局用于练习与刷星，通关关卡可反复重练。
+ * 交互：答题乐观过渡、答案期间预取下一题、骨架屏与失败重试。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -23,14 +26,19 @@ import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
-import { BUDGET_SECONDS } from "../generator/catalog";
+import { perQuestionBudgetSeconds } from "../generator/catalog";
 import type { MaterialSpec } from "../generator/types";
 import { MaterialView } from "../components/MaterialView";
 
 type TrackId = "speed" | "sequence";
 type Difficulty = "easy" | "medium" | "hard";
 type BudgetClass = "tool" | "concept" | "material" | "sequence";
-
+type RunDifficultyMeta = {
+  id: Difficulty;
+  label: string;
+  short: string;
+  description: string;
+};
 type TopicMeta = {
   id: string;
   track: TrackId;
@@ -39,17 +47,19 @@ type TopicMeta = {
   rating: 1 | 2 | 3;
   material: boolean;
   docId: string | null;
-  budgetMs: number;
   budgetClass: BudgetClass;
+  budgetsMs: Record<Difficulty, number>;
   unlockTitles: string[];
 };
 type CatalogData = {
   runLength: number;
   passAccuracy: number;
+  difficultyRuns: RunDifficultyMeta[];
   tracks: Array<{ id: TrackId; title: string; topics: TopicMeta[] }>;
 };
 type ProgressItem = {
   topicId: string;
+  difficulty: Difficulty;
   unlocked: boolean;
   stars: number;
   total: number;
@@ -71,6 +81,7 @@ type Grade = {
   explanation: string;
   run: {
     finished: boolean;
+    difficulty: Difficulty;
     total: number;
     correct: number;
     accuracy: number;
@@ -86,6 +97,11 @@ type RunItem = {
 };
 
 const RATING_LABEL = ["", "基础", "进阶", "高阶"] as const;
+const DIFF_LABEL: Record<Difficulty, string> = {
+  easy: "低难度",
+  medium: "中难度",
+  hard: "高难度 · 实战",
+};
 const msText = (ms: number) => `${(ms / 1000).toFixed(0)} 秒`;
 
 export function QuizPage() {
@@ -98,6 +114,7 @@ export function QuizPage() {
 
   // 关卡运行状态
   const [topic, setTopic] = useState<TopicMeta | null>(null);
+  const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [runId, setRunId] = useState<string | null>(null);
   const [items, setItems] = useState<RunItem[]>([]);
   const [current, setCurrent] = useState<QuestionData | null>(null);
@@ -108,15 +125,15 @@ export function QuizPage() {
   const [questionStartedAt, setQuestionStartedAt] = useState(0);
   const [summary, setSummary] = useState<Grade["run"] | null>(null);
 
-  const progressRef = useRef<Map<string, ProgressItem> | null>(null);
-  progressRef.current = progress;
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const prefetching = useRef(false);
 
   const loadProgress = useCallback(async () => {
     const list = await api<ProgressItem[]>("/quiz/progress");
-    setProgress(new Map(list.map((item) => [item.topicId, item])));
+    setProgress(
+      new Map(list.map((item) => [`${item.topicId}:${item.difficulty}`, item])),
+    );
   }, []);
 
   useEffect(() => {
@@ -127,7 +144,7 @@ export function QuizPage() {
         if (!cancelled) setCatalog(data);
         await loadProgress();
       } catch {
-        /* 空态提示由下方兜底渲染负责 */
+        /* 空态兜底 */
       }
     })();
     return () => {
@@ -135,9 +152,11 @@ export function QuizPage() {
     };
   }, [loadProgress]);
 
-  /** 取题：优先命中预取，否则网络拉取 */
+  const progressKey = (topicId: string, diff: Difficulty) => `${topicId}:${diff}`;
+
   const ensureQuestion = useCallback(
     async (index: number): Promise<QuestionData | null> => {
+      if (!topic || !runId) return null;
       setFetching(true);
       setLoadError(null);
       try {
@@ -148,7 +167,7 @@ export function QuizPage() {
         }
         return await api<QuestionData>("/quiz/questions", {
           method: "POST",
-          body: JSON.stringify({ topicId: topic?.id, runId, index }),
+          body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
         });
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "题目加载失败");
@@ -157,21 +176,19 @@ export function QuizPage() {
         setFetching(false);
       }
     },
-    [prefetched, runId, topic],
+    [difficulty, prefetched, runId, topic],
   );
 
-  const openQuestion = useCallback(
-    (q: QuestionData | null) => {
-      setCurrent(q);
-      setQuestionStartedAt(Date.now());
-    },
-    [],
-  );
+  const openQuestion = useCallback((q: QuestionData | null) => {
+    setCurrent(q);
+    setQuestionStartedAt(Date.now());
+  }, []);
 
   const startRun = useCallback(
-    async (nextTopic: TopicMeta) => {
+    async (nextTopic: TopicMeta, nextDifficulty: Difficulty) => {
       const nextRunId = crypto.randomUUID();
       setTopic(nextTopic);
+      setDifficulty(nextDifficulty);
       setRunId(nextRunId);
       setItems([]);
       setSummary(null);
@@ -184,6 +201,7 @@ export function QuizPage() {
         method: "POST",
         body: JSON.stringify({
           topicId: nextTopic.id,
+          difficulty: nextDifficulty,
           runId: nextRunId,
           index: 0,
         }),
@@ -194,14 +212,14 @@ export function QuizPage() {
     [openQuestion],
   );
 
-  /** 预取下一题（当前题展示解析期间执行，静默失败） */
+  /** 展示答案期间预取下一题（静默失败） */
   const prefetchNext = useCallback(() => {
     const index = itemsRef.current.length;
-    if (index >= 10 || prefetching.current) return;
+    if (index >= 10 || prefetching.current || !topic || !runId) return;
     prefetching.current = true;
     void api<QuestionData>("/quiz/questions", {
       method: "POST",
-      body: JSON.stringify({ topicId: topic?.id, runId, index }),
+      body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
     })
       .then((q) => {
         if (q.index === itemsRef.current.length) setPrefetched(q);
@@ -210,7 +228,7 @@ export function QuizPage() {
       .finally(() => {
         prefetching.current = false;
       });
-  }, [runId, topic]);
+  }, [difficulty, runId, topic]);
 
   useEffect(() => {
     if (screen === "run" && items.length > 0 && !summary) prefetchNext();
@@ -245,9 +263,8 @@ export function QuizPage() {
   };
 
   const goNext = async () => {
-    if (!topic) return;
     const index = itemsRef.current.length;
-    if (index >= 10) return;
+    if (index >= 10 || !topic) return;
     const q = await ensureQuestion(index);
     openQuestion(q);
   };
@@ -258,15 +275,14 @@ export function QuizPage() {
     void loadProgress();
   };
 
-  if (!catalog)
-    return <LoadingSpinner message="关卡加载中…" />;
+  if (!catalog) return <LoadingSpinner message="关卡加载中…" />;
   const answered = items.length;
   const showingAnswer = items.length > 0 && current !== null && answered === current.index + 1;
   const lastItem = showingAnswer ? items[items.length - 1] : null;
 
   return (
     <section className="panel">
-      <p className="eyebrow">双轨闯关 · 先难度提升，再模块进阶</p>
+      <p className="eyebrow">双轨闯关 · 低/中/高难度局</p>
       <h2>专项训练</h2>
 
       {screen === "map" && (
@@ -286,10 +302,12 @@ export function QuizPage() {
           </div>
           <StageMap
             topics={catalog.tracks.find((t) => t.id === track)?.topics ?? []}
+            difficultyRuns={catalog.difficultyRuns}
             progressMap={progress}
-            onStart={(t) => void startRun(t)}
+            progressKey={progressKey}
+            onStart={(t, d) => void startRun(t, d)}
             onDocs={(docId) => navigate(`/knowledge/${docId}`)}
-            onLocked={(names) => showToast(`需先通过：${names.join("、")}`, "info")}
+            onLocked={(names) => showToast(`需先通过前置模块的高难度局：${names.join("、")}`, "info")}
           />
         </>
       )}
@@ -297,6 +315,7 @@ export function QuizPage() {
       {screen === "run" && topic && (
         <RunView
           topic={topic}
+          difficulty={difficulty}
           current={current}
           answered={answered}
           showingAnswer={showingAnswer}
@@ -310,7 +329,7 @@ export function QuizPage() {
           onAnswer={(i) => void answer(i)}
           onNext={() => void goNext()}
           onRetry={() => {
-            if (itemsRef.current.length === 0) void startRun(topic);
+            if (itemsRef.current.length === 0) void startRun(topic, difficulty);
             else void goNext();
           }}
         />
@@ -319,9 +338,10 @@ export function QuizPage() {
       {screen === "result" && topic && summary && (
         <ResultView
           topic={topic}
+          difficulty={difficulty}
           items={items}
           summary={summary}
-          onRestart={() => void startRun(topic)}
+          onRestart={() => void startRun(topic, difficulty)}
           onMap={goBackToMap}
         />
       )}
@@ -331,35 +351,37 @@ export function QuizPage() {
 
 function StageMap({
   topics,
+  difficultyRuns,
   progressMap,
+  progressKey,
   onStart,
   onDocs,
   onLocked,
 }: {
   topics: TopicMeta[];
+  difficultyRuns: RunDifficultyMeta[];
   progressMap: Map<string, ProgressItem> | null;
-  onStart: (topic: TopicMeta) => void;
+  progressKey: (topicId: string, difficulty: Difficulty) => string;
+  onStart: (topic: TopicMeta, difficulty: Difficulty) => void;
   onDocs: (docId: string) => void;
   onLocked: (unlockNames: string[]) => void;
 }) {
   if (!topics.length)
-    return (
-      <EmptyState icon={Calculator} title="暂无关卡" description="稍后再来看看" />
-    );
+    return <EmptyState icon={Calculator} title="暂无关卡" description="稍后再来看看" />;
   return (
-    <Stack gap="0.875rem">
+    <Stack gap="1rem">
       <p className="muted">
-        每关 10 题，答对 ≥8 且总用时在预算内即通关（1★）；9 题 2★、全对 3★，可反复刷星，已通关关卡仍可重练。
+        每个模块分「低 / 中 / 高」三个难度局（各 10 题）。难度越高，题干数字越复杂、选项越接近；
+        <strong> 通过“高难度 · 实战”局（≥8 对且限时内）才算模块通关</strong>
+        ，可解锁下一模块；低/中局用于练习与刷星，已通关模块可反复重练。
       </p>
       {topics.map((topic) => {
-        const item = progressMap?.get(topic.id);
-        const unlocked = item?.unlocked ?? false;
+        const itemByDiff = (difficulty: Difficulty) =>
+          progressMap?.get(progressKey(topic.id, difficulty));
+        const unlocked = itemByDiff("easy")?.unlocked ?? false;
         return (
-          <div className={`stage-row ${unlocked ? "" : "is-locked"}`} key={topic.id}>
-            <button
-              className="stage-main"
-              onClick={() => (unlocked ? onStart(topic) : onLocked(topic.unlockTitles))}
-            >
+          <div className={`stage-card ${unlocked ? "" : "is-locked"}`} key={topic.id}>
+            <div className="stage-card-head">
               <span className={`stage-badge r${topic.rating}`}>
                 {RATING_LABEL[topic.rating]}
               </span>
@@ -370,42 +392,56 @@ function StageMap({
                 </strong>
                 <small>{topic.description || "逐题闯关"}</small>
               </span>
-              <span className="stage-meta">
-                {unlocked ? (
-                  <>
-                    <span className="stars" aria-label={`${item?.stars ?? 0} 星`}>
+              {topic.docId && (
+                <button
+                  className="stage-doc"
+                  title="查看知识讲解"
+                  onClick={() => onDocs(topic.docId as string)}
+                >
+                  <BookOpen size={15} />
+                </button>
+              )}
+            </div>
+            <div className="difficulty-runs">
+              {difficultyRuns.map((meta) => {
+                const item = itemByDiff(meta.id);
+                const stars = item?.stars ?? 0;
+                const practice = item && item.total > 0;
+                return (
+                  <button
+                    key={meta.id}
+                    className={`run-chip d${meta.id} ${unlocked ? "" : "locked"} ${meta.id === "hard" ? "combat" : ""}`}
+                    disabled={!unlocked}
+                    title={meta.description}
+                    onClick={() =>
+                      unlocked ? onStart(topic, meta.id) : onLocked(topic.unlockTitles)
+                    }
+                  >
+                    <span className="run-chip-label">
+                      {meta.short === "高" ? "高 · 实战" : `${meta.label}`}
+                    </span>
+                    <span className="stars" aria-label={`${meta.label} ${stars} 星`}>
                       {Array.from({ length: 3 }, (_, i) => (
-                        <Star key={i} size={15} className={i < (item?.stars ?? 0) ? "filled" : ""} />
+                        <Star key={i} size={13} className={i < stars ? "filled" : ""} />
                       ))}
                     </span>
                     <small>
-                      <Clock size={12} /> 预算 {msText(topic.budgetMs)}
+                      <Clock size={11} /> {msText(topic.budgetsMs[meta.id])}
                     </small>
-                    {item && item.total > 0 && (
+                    {practice && (
                       <small>
-                        已练 {item.total} 题 · {Math.round(item.accuracy * 100)}%
+                        {item.total} 题 · {Math.round(item.accuracy * 100)}%
                       </small>
                     )}
-                  </>
-                ) : (
-                  <small className="lock-hint">
-                    <Lock size={13} /> 需先通过：{topic.unlockTitles.join("、")}
-                  </small>
-                )}
-              </span>
-              <span className="stage-arrow">
-                {unlocked ? <ChevronRight size={18} /> : <Lock size={15} />}
-              </span>
-            </button>
-            {topic.docId && (
-              <button
-                className="stage-doc"
-                title="查看知识讲解"
-                onClick={() => onDocs(topic.docId as string)}
-              >
-                <BookOpen size={15} />
-              </button>
-            )}
+                    {!unlocked && meta.id === "easy" && (
+                      <small className="lock-hint">
+                        <Lock size={11} /> 需先通关前置模块
+                      </small>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         );
       })}
@@ -415,6 +451,7 @@ function StageMap({
 
 function RunView({
   topic,
+  difficulty,
   current,
   answered,
   showingAnswer,
@@ -430,6 +467,7 @@ function RunView({
   onRetry,
 }: {
   topic: TopicMeta;
+  difficulty: Difficulty;
   current: QuestionData | null;
   answered: number;
   showingAnswer: boolean;
@@ -445,21 +483,22 @@ function RunView({
   onRetry: () => void;
 }) {
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
-  const budgetSeconds = useMemo(
-    () => (current ? BUDGET_SECONDS[topic.budgetClass][current.difficulty] * 1000 : null),
-    [current, topic.budgetClass],
-  );
+  const perQuestionMs = useMemo(() => {
+    if (!current || !topic) return null;
+    return perQuestionBudgetSeconds(topic, current.difficulty) * 1000;
+  }, [current, topic]);
+
   useEffect(() => {
-    if (!current || showingAnswer || !budgetSeconds) {
+    if (!current || showingAnswer || !perQuestionMs) {
       setSecondsLeft(null);
       return;
     }
     const tick = window.setInterval(() => {
-      const left = budgetSeconds - (Date.now() - startedAt);
+      const left = perQuestionMs - (Date.now() - startedAt);
       setSecondsLeft(left);
     }, 250);
     return () => window.clearInterval(tick);
-  }, [current?.questionId, showingAnswer, budgetSeconds, startedAt]);
+  }, [current?.questionId, showingAnswer, perQuestionMs, startedAt]);
 
   if (!current && loadError)
     return (
@@ -467,12 +506,8 @@ function RunView({
         <h3>题目加载失败</h3>
         <p>{loadError}</p>
         <Stack direction="horizontal" gap="0.75rem">
-          <button className="primary" onClick={onRetry}>
-            重试
-          </button>
-          <button className="secondary" onClick={onBack}>
-            返回关卡地图
-          </button>
+          <button className="primary" onClick={onRetry}>重试</button>
+          <button className="secondary" onClick={onBack}>返回关卡地图</button>
         </Stack>
       </div>
     );
@@ -485,17 +520,18 @@ function RunView({
       </div>
     );
 
-  const qIndex = current.index;
   return (
     <div className="run-view">
       <div className="run-head">
         <button className="back" onClick={onBack}>
-          <ArrowLeft size={16} /> 退出本关
+          <ArrowLeft size={16} /> 退出本局
         </button>
         <div className="run-progress">
           <span className="run-title">
-            {topic.title} · 第 {qIndex + 1}/{current.runLength} 题
-            {topic.material && <em className="stage-material">含材料</em>}
+            {topic.title} · {DIFF_LABEL[difficulty]} · 第 {current.index + 1}/{current.runLength} 题
+            {difficulty === "hard" && topic.track === "speed" && (
+              <em className="stage-material">实战材料</em>
+            )}
           </span>
           <div className="progress-track">
             <div className="progress-fill" style={{ width: `${(answered / 10) * 100}%` }} />
@@ -528,7 +564,7 @@ function RunView({
               <button
                 key={option}
                 className={`${cls} ${submitting && isPicked ? "pending" : ""}`}
-                disabled={submitting || !!showingAnswer || answered !== qIndex}
+                disabled={submitting || !!showingAnswer || answered !== current.index}
                 onClick={() => onAnswer(index)}
               >
                 <span className="option-key">{String.fromCharCode(65 + index)}</span>
@@ -563,12 +599,14 @@ function RunView({
 
 function ResultView({
   topic,
+  difficulty,
   items,
   summary,
   onRestart,
   onMap,
 }: {
   topic: TopicMeta;
+  difficulty: Difficulty;
   items: RunItem[];
   summary: NonNullable<Grade["run"]>;
   onRestart: () => void;
@@ -576,11 +614,16 @@ function ResultView({
 }) {
   const stars = summary.passed ? summary.stars : 0;
   const missed = items.filter((item) => !item.grade.correct);
+  const isModuleCleared = difficulty === "hard" && summary.passed;
   return (
     <div className="run-result">
       <div className="result-hero">
         {stars > 0 ? <Trophy size={44} /> : <Target size={44} />}
-        <h3>{summary.passed ? "通关成功" : "本关未通过"}</h3>
+        <h3>{summary.passed ? "通关成功" : "本局未通过"}</h3>
+        <p className="run-result-sub">
+          {topic.title} · {DIFF_LABEL[difficulty]}
+          {difficulty === "hard" && topic.track === "speed" && "（实战）"}
+        </p>
         <div className="stars big" aria-label={`${stars} 星`}>
           {Array.from({ length: 3 }, (_, i) => (
             <Star key={i} size={36} className={i < stars ? "filled" : ""} />
@@ -588,14 +631,16 @@ function ResultView({
         </div>
         <p>
           答对 {summary.correct}/{summary.total} · 正确率 {Math.round(summary.accuracy * 100)}% ·
-          用时 {msText(summary.durationMs)}（预算 {msText(topic.budgetMs)}）
+          用时 {msText(summary.durationMs)}（预算 {msText(topic.budgetsMs[difficulty])}）
         </p>
         <p className="muted">
           {summary.passed
             ? stars >= 3
               ? "满分通关，太强了！"
-              : "通关成功！可继续下一关，也可回来刷满 3 星。"
-            : "答对 ≥8 题且不超过时间预算才可通关，再来一次吧。"}
+              : isModuleCleared
+                ? "高难度 · 实战通关：本模块已通关，下一模块已解锁，也可回来刷满 3 星。"
+                : "本局通过！可继续挑战更高难度或刷星。"
+            : "每局答对 ≥8 题且不超过时间预算才可通过；高难度局通过即完成本模块。"}
         </p>
         <Stack direction="horizontal" gap="0.75rem" align="center">
           <button className="primary" onClick={onRestart}>
@@ -608,7 +653,7 @@ function ResultView({
       </div>
       {missed.length > 0 && (
         <details className="result-review" open>
-          <summary>本关错题与解析（{missed.length} 题，已自动收入错题本）</summary>
+          <summary>本局错题与解析（{missed.length} 题，已自动收入错题本）</summary>
           <Stack gap="0.75rem">
             {items.map((item, index) =>
               item.grade.correct ? null : (

@@ -1,7 +1,7 @@
 /** 训练题生成器统一入口（双轨：资料速算 + 数字推理） */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import { topicById, topics, difficulties, legacyTopics, tracks, topicBudget, titleOf } from "./catalog";
+import { topicById, topics, difficulties, legacyTopics, tracks, topicBudget, titleOf, difficultyRuns, difficultyBudgetMs, perQuestionBudgetSeconds } from "./catalog";
 import type { Difficulty, QuestionDraft, Rng, GeneratedQuestion } from "./types";
 import { makeRng, canonical } from "./random";
 import type { TopicId } from "./catalog";
@@ -35,6 +35,7 @@ import {
   generateContributionRate,
   generatePullGrowth,
 } from "./speed/proportion";
+import { contextMaterial } from "./speed/context";
 // 数字推理
 import {
   generateSeqBasic,
@@ -52,7 +53,7 @@ import {
 
 export type { TopicId } from "./catalog";
 export type { GeneratedQuestion, Difficulty, MaterialSpec } from "./types";
-export { topics, difficulties, legacyTopics, tracks, topicBudget, titleOf, topicById };
+export { topics, difficulties, legacyTopics, tracks, topicBudget, titleOf, topicById, difficultyRuns, difficultyBudgetMs, perQuestionBudgetSeconds };
 
 type Generator = (r: Rng) => QuestionDraft | null;
 
@@ -106,8 +107,16 @@ export function generateQuestion(input: {
   if (!generate) throw new Error("UNKNOWN_TOPIC");
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const rng = makeRng(`${seed}:${attempt}`, input.difficulty);
-    const draft = generate(rng);
+    let draft = generate(rng);
     if (!draft) continue;
+    // 高难度局·实战：资料速算任意模块的题目都包装为文字/表格/图表短材料（数推高局保持纯数列）
+    if (
+      input.difficulty === "hard" &&
+      !draft.material &&
+      topicById.get(input.topicId)?.track === "speed"
+    ) {
+      draft = { ...draft, material: contextMaterial(draft) };
+    }
     const materialJson = draft.material ? JSON.stringify(draft.material) : "";
     const fingerprint = bytesToHex(
       sha256(
@@ -117,7 +126,12 @@ export function generateQuestion(input: {
       ),
     );
     if (!input.excludedFingerprints.includes(fingerprint))
-      return { ...draft, templateVersion: 1, fingerprint };
+      return {
+        ...draft,
+        templateVersion: 1,
+        fingerprint,
+        material: draft.material ?? null,
+      };
   }
   throw new Error("GENERATION_FAILED");
 }

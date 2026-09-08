@@ -67,6 +67,27 @@ describe("question generator", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
+  it("hard runs of every speed module ship a context material; sequences stay pure", () => {
+    for (const topic of topics) {
+      for (let seed = 0; seed < 12; seed += 1) {
+        const question = generateQuestion({
+          topicId: topic.id,
+          difficulty: "hard",
+          excludedFingerprints: [],
+          randomSeed: `combat-${topic.id}-${seed}`,
+        });
+        if (topic.track === "speed") {
+          expect(
+            question.material?.paragraphs.length,
+            `${topic.id} 高难度应附材料`,
+          ).toBeGreaterThan(0);
+        } else {
+          expect(question.material).toBeNull();
+        }
+      }
+    }
+  });
+
   it("multiply questions lock the trailing digit of every option", () => {
     for (let seed = 0; seed < 60; seed += 1) {
       for (const difficulty of difficulties) {
