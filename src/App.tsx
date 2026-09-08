@@ -15,7 +15,7 @@ import { Stack } from "@shared/core/components/responsive/Stack";
 import { ToastContainer } from "@shared/core/components/Toast";
 import { api } from "./api/client";
 import { useAsync } from "./hooks/useAsync";
-import { EssayPage, KnowledgePage } from "./pages/KnowledgePage";
+import { EssayPage, KnowledgeDocPage, KnowledgePage } from "./pages/KnowledgePage";
 import { MistakesPage } from "./pages/MistakesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QuizPage } from "./pages/QuizPage";
@@ -83,7 +83,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
   const nav = [
     { to: "/knowledge", icon: BookOpen, label: "知识库" },
     { to: "/essay", icon: FileText, label: "申论" },
-    { to: "/quiz", icon: Calculator, label: "速算训练" },
+    { to: "/quiz", icon: Calculator, label: "专项训练" },
     { to: "/mistakes", icon: ListChecks, label: "错题本" },
     { to: "/schulte", icon: Brain, label: "舒尔特方格" },
     { to: "/profile", icon: ChartNoAxesColumn, label: "个人统计" },
@@ -98,6 +98,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
     >
       <Routes>
         <Route path="/knowledge" element={<KnowledgePage />} />
+        <Route path="/knowledge/:id" element={<KnowledgeDocPage />} />
         <Route path="/essay" element={<EssayPage />} />
         <Route path="/quiz" element={<QuizPage />} />
         <Route path="/mistakes" element={<MistakesPage />} />

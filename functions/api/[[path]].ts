@@ -3,12 +3,17 @@ import { handle } from "hono/cloudflare-pages";
 import { z } from "zod";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
-  difficulties,
   generateQuestion,
+  isCatalogTopic,
+  topicById,
+  topicBudget,
   topics,
-  type Difficulty,
-  type TopicId,
+  titleOf,
+  legacyTopics,
+  difficulties,
 } from "../../src/generator";
+import type { TopicId } from "../../src/generator";
+import type { MaterialSpec } from "../../src/generator/types";
 import {
   initialProgress,
   scheduleReview,
@@ -83,6 +88,125 @@ async function loadSearch(c: {
   const data = await fetchJson<KnowledgeIndex>(c, "/generated/knowledge/search-index.json");
   searchCache = data.items;
   return searchCache;
+}
+
+// ==================== 闯关题库：局次/通关/星级 ====================
+export const RUN_LENGTH = 10;
+
+/** 单次运行判定：完整 10 题、答对 ≥8、总用时不超过关卡预算 */
+function runStars(agg: { topicId: string; total: number; correct: number; durationMs: number }): number {
+  if (agg.total < RUN_LENGTH) return 0;
+  const topic = topicById.get(agg.topicId as TopicId);
+  if (topic && agg.durationMs > topicBudget(topic)) return 0;
+  const accuracy = agg.correct / agg.total;
+  if (accuracy >= 1) return 3;
+  if (accuracy >= 0.9) return 2;
+  if (accuracy >= 0.8) return 1;
+  return 0;
+}
+
+interface RunAgg {
+  topicId: string;
+  runId: string;
+  total: number;
+  correct: number;
+  durationMs: number;
+}
+
+async function loadQuizStatus(c: { env: Bindings; get(key: string): string }) {
+  const userId = c.get("userId");
+  const [runRows, statRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT q.topic_id AS topicId,a.run_id AS runId,COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs
+       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+       WHERE a.user_id=? AND a.run_id IS NOT NULL GROUP BY q.topic_id,a.run_id`,
+    )
+      .bind(userId)
+      .all<RunAgg>(),
+    c.env.DB.prepare(
+      `SELECT q.topic_id AS topicId,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs,MAX(a.created_at) AS lastRunAt
+       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+       WHERE a.user_id=? GROUP BY q.topic_id`,
+    )
+      .bind(userId)
+      .all<Record<string, unknown>>(),
+  ]);
+  // 每关最佳星级（stars ≥1 视为已通关，可解锁后续）
+  const passStars = new Map<string, number>();
+  for (const row of runRows.results) {
+    const stars = runStars({
+      topicId: row.topicId,
+      total: Number(row.total),
+      correct: Number(row.correct),
+      durationMs: Number(row.durationMs),
+    });
+    if (stars > (passStars.get(row.topicId) ?? 0)) passStars.set(row.topicId, stars);
+  }
+  const stats = new Map<string, { total: number; correct: number; accuracy: number; averageMs: number; lastRunAt: string | null }>();
+  for (const row of statRows.results) {
+    const total = Number(row.total) || 0;
+    const correct = Number(row.correct) || 0;
+    const averageMs = Math.round(Number(row.averageMs) || 0);
+    stats.set(String(row.topicId), {
+      total,
+      correct,
+      accuracy: total ? correct / total : 0,
+      averageMs,
+      lastRunAt: row.lastRunAt ? String(row.lastRunAt) : null,
+    });
+  }
+  return { passStars, stats };
+}
+
+function isUnlocked(passStars: Map<string, number>, topicId: TopicId) {
+  const topic = topicById.get(topicId);
+  if (!topic) return false;
+  return topic.unlock.every((prereq) => (passStars.get(prereq) ?? 0) >= 1);
+}
+
+// 生成节流：isolate 内存滑动窗口（尽力近似，冷启动后重置不影响正确性）
+const generationWindow = new Map<string, number[]>();
+function allowGeneration(key: string, now = Date.now()): boolean {
+  const recent = (generationWindow.get(key) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= 120) {
+    generationWindow.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  generationWindow.set(key, recent);
+  return true;
+}
+
+/** 规范词卡片解析缓存：内容随部署静态不变，isolate 级缓存一次 */
+let essayCardsCache: EssayCard[] | null = null;
+async function getEssayCards(c: { env: Bindings }): Promise<EssayCard[]> {
+  if (essayCardsCache) return essayCardsCache;
+  const entries = await loadEntries(c);
+  essayCardsCache = essayCards(entries);
+  return essayCardsCache;
+}
+
+// ==================== 个人统计（/profile/summary 聚合） ====================
+/** 将记录时刻按东八区折算到自然日 */
+function cnDay(raw: string, offsetHours = 8) {
+  const normalized = raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`;
+  const time = Date.parse(normalized);
+  if (Number.isNaN(time)) return raw.slice(0, 10);
+  return new Date(time + offsetHours * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 连续学习天数：days 为含全部学习日的 Set（'YYYY-MM-DD'，按东八区） */
+function streakOf(days: Set<string>) {
+  const today = cnDay(iso());
+  const toDayKey = (time: number) =>
+    new Date(time + 8 * 3600_000).toISOString().slice(0, 10);
+  let streak = days.has(today) ? 1 : 0;
+  let cursor = Date.now() - 86400_000;
+  while (days.has(toDayKey(cursor))) {
+    streak += 1;
+    cursor -= 86400_000;
+  }
+  return { streak, activeToday: days.has(today) };
 }
 
 export const app = new Hono<{
@@ -404,9 +528,9 @@ app.get("/essay/cards", async (c) => {
     .optional()
     .parse(c.req.query("category"));
   const now = iso();
-  const entries = await loadEntries(c);
-  let cards = essayCards(entries);
-  if (category) cards = cards.filter((card) => card.category === category);
+  const cards = await getEssayCards(c);
+  let list = cards;
+  if (category) list = list.filter((card) => card.category === category);
   const rows = await c.env.DB.prepare(
     "SELECT term_id AS termId,repetitions,interval_days AS intervalDays,ease,due_at AS dueAt,last_reviewed_at AS lastReviewedAt,remembered_count AS rememberedCount,forgot_count AS forgotCount FROM essay_term_progress WHERE user_id=?",
   )
@@ -415,7 +539,7 @@ app.get("/essay/cards", async (c) => {
   const progress = new Map(
     rows.results.map((row) => [String(row.termId), row]),
   );
-  const enriched = cards.map((card) => ({
+  const enriched = list.map((card) => ({
     ...card,
     progress: progress.get(card.termId) ?? null,
   }));
@@ -448,7 +572,7 @@ app.get("/essay/cards", async (c) => {
   return c.json(
     ok({
       cards: enriched,
-      categories: [...new Set(cards.map((card) => card.category))],
+      categories: [...new Set(list.map((card) => card.category))],
       summary,
     }),
   );
@@ -463,8 +587,8 @@ app.post("/essay/reviews", async (c) => {
       idempotencyKey: z.string().uuid(),
     }),
   );
-  const entriesForCards = await loadEntries(c);
-  const card = essayCards(entriesForCards).find(
+  const cards = await getEssayCards(c);
+  const card = cards.find(
     (candidate) => candidate.termId === body.termId,
   );
   if (!card) return c.json(fail("NOT_FOUND", "规范词卡片不存在"), 404);
@@ -538,8 +662,9 @@ app.get("/essay/reviews/history", async (c) => {
   )
     .bind(c.get("userId"), limit)
     .all<Record<string, unknown>>();
-  const entriesForHistory = await loadEntries(c);
-  const cards = new Map(essayCards(entriesForHistory).map((card) => [card.termId, card]));
+  const cards = new Map(
+    (await getEssayCards(c)).map((card) => [card.termId, card]),
+  );
   const items = rows.results.map((row) => ({
     ...row,
     card: cards.get(String(row.termId)) ?? null,
@@ -584,86 +709,175 @@ app.get("/knowledge/:id", async (c) => {
 });
 
 app.get("/quiz/topics", (c) =>
-  c.json(ok({ topics, difficulties, generatorVersion: 2, recentWindow: 50 })),
+  c.json(
+    ok({
+      topics: topics.map((t) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        rating: t.rating,
+        track: t.track,
+      })),
+      difficulties,
+      generatorVersion: 3,
+      recentWindow: 50,
+    }),
+  ),
 );
+
+/** 关卡目录（含每关预算/前置/文档链接；进度由 /quiz/progress 单独提供） */
+app.get("/quiz/catalog", (c) =>
+  c.json(
+    ok({
+      runLength: RUN_LENGTH,
+      passAccuracy: 0.8,
+      generatorVersion: 3,
+      tracks: ["speed", "sequence"].map((trackId) => {
+        const items = topics.filter((t) => t.track === trackId);
+        return {
+          id: trackId,
+          title: trackId === "speed" ? "资料速算" : "数字推理",
+          description:
+            trackId === "speed"
+              ? "计算功底 → 增长 → 比重与平均数 → 实战高阶"
+              : "按数字排列规律与难度划分的 9 类数列",
+          topics: items.map((t) => ({
+            ...t,
+            budgetMs: topicBudget(t),
+            unlockTitles: t.unlock.map(titleOf),
+            docId: t.docId ?? null,
+          })),
+        };
+      }),
+    }),
+  ),
+);
+
+/** 关卡进度：解锁状态/最佳星级/作答统计 */
+app.get("/quiz/progress", async (c) => {
+  const { passStars, stats } = await loadQuizStatus(c);
+  return c.json(
+    ok(
+      topics.map((topic) => {
+        const run = stats.get(topic.id);
+        return {
+          topicId: topic.id,
+          unlocked: isUnlocked(passStars, topic.id),
+          stars: passStars.get(topic.id) ?? 0,
+          total: run?.total ?? 0,
+          accuracy: run?.accuracy ?? 0,
+          averageMs: run?.averageMs ?? 0,
+          lastRunAt: run?.lastRunAt ?? null,
+        };
+      }),
+    ),
+  );
+});
 
 app.post("/quiz/questions", async (c) => {
   const body = await jsonBody(
     c.req.raw,
     z.object({
-      topicId: z.enum([
-        "arithmetic",
-        "multiply",
-        "divide",
-        "sensitive",
-        "decimal",
-        "growth",
-        "ratio",
-        "annual",
-        "interval-growth",
-        "mixed-growth",
-        "multiples",
-        "ratio-change",
-      ]),
-      difficulty: z.enum(["easy", "medium", "hard"]),
+      topicId: z.string().min(2).max(40),
+      difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+      runId: z.string().uuid().optional(),
+      index: z.number().int().min(0).max(RUN_LENGTH - 1).optional(),
     }),
   );
-  const generationKey = `generation:${c.get("userId")}`;
-  const generatedLastMinute = await c.env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM auth_attempts WHERE client_key=? AND created_at>datetime('now','-1 minute')",
-  )
-    .bind(generationKey)
-    .first<{ count: number }>();
-  if ((generatedLastMinute?.count ?? 0) >= 120)
+  const topic = topicById.get(body.topicId as TopicId);
+  if (!topic) {
+    const retired = legacyTopics.find((item) => item.id === body.topicId);
+    return c.json(
+      fail(
+        "TOPIC_RETIRED",
+        retired
+          ? `${retired.title}已拆分为独立关卡，请从“专项训练”关卡地图进入`
+          : "未知专题",
+      ),
+      400,
+    );
+  }
+  let difficulty = body.difficulty;
+  if (body.runId !== undefined) {
+    if (body.index === undefined)
+      return c.json(fail("INVALID_PARAM", "闯关模式需要题目序号 index"), 400);
+    const status = await loadQuizStatus(c);
+    const locked = topic.unlock.filter((prereq) => (status.passStars.get(prereq) ?? 0) < 1);
+    if (locked.length > 0)
+      return c.json(
+        fail("TOPIC_LOCKED", `请先通过前置关卡：${locked.map(titleOf).join("、")}`),
+        409,
+      );
+    const countRow = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM generated_questions WHERE user_id=? AND run_id=?",
+    )
+      .bind(c.get("userId"), body.runId)
+      .first<{ total: number }>();
+    const generated = Number(countRow?.total ?? 0);
+    if (generated >= RUN_LENGTH)
+      return c.json(fail("RUN_COMPLETE", "本关已完成，请重新开始新一局"), 409);
+    if (generated !== body.index)
+      return c.json(
+        fail("RUN_STATE", "关卡题目序号不连续，请重新开始本关"),
+        409,
+      );
+    difficulty = topic.ladder[body.index];
+  } else {
+    if (!difficulty)
+      return c.json(fail("INVALID_PARAM", "缺少难度参数"), 400);
+  }
+  if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}`))
     return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);
-  await c.env.DB.prepare(
-    "INSERT INTO auth_attempts(client_key,succeeded) VALUES(?,1)",
-  )
-    .bind(generationKey)
-    .run();
   const recent = await c.env.DB.prepare(
     "SELECT fingerprint FROM generated_questions WHERE user_id=? AND topic_id=? AND difficulty=? ORDER BY created_at DESC LIMIT 50",
   )
-    .bind(c.get("userId"), body.topicId, body.difficulty)
+    .bind(c.get("userId"), body.topicId, difficulty)
     .all<{ fingerprint: string }>();
   const seed = crypto.randomUUID();
-  const generated = generateQuestion({
+  const generatedQuestion = generateQuestion({
     topicId: body.topicId as TopicId,
-    difficulty: body.difficulty as Difficulty,
+    difficulty,
     excludedFingerprints: recent.results.map((row) => row.fingerprint),
     randomSeed: seed,
   });
   const questionId = uuid("q");
   const generatedAt = iso();
   const expiresAt = iso(new Date(Date.now() + 7 * 86400000));
+  const materialJson = generatedQuestion.material ? JSON.stringify(generatedQuestion.material) : null;
   await c.env.DB.prepare(
-    "INSERT INTO generated_questions(id,user_id,topic_id,difficulty,template_id,template_version,fingerprint,seed,stem,options_json,answer_index,explanation,params_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "INSERT INTO generated_questions(id,user_id,topic_id,difficulty,template_id,template_version,fingerprint,seed,stem,options_json,answer_index,explanation,params_json,created_at,expires_at,material_json,run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   )
     .bind(
       questionId,
       c.get("userId"),
       body.topicId,
-      body.difficulty,
-      generated.templateId,
-      generated.templateVersion,
-      generated.fingerprint,
+      difficulty,
+      generatedQuestion.templateId,
+      generatedQuestion.templateVersion,
+      generatedQuestion.fingerprint,
       seed,
-      generated.stem,
-      JSON.stringify(generated.options),
-      generated.answerIndex,
-      generated.explanation,
-      JSON.stringify(generated.params),
+      generatedQuestion.stem,
+      JSON.stringify(generatedQuestion.options),
+      generatedQuestion.answerIndex,
+      generatedQuestion.explanation,
+      JSON.stringify(generatedQuestion.params),
       generatedAt,
       expiresAt,
+      materialJson,
+      body.runId ?? null,
     )
     .run();
   return c.json(
     ok({
       questionId,
       topicId: body.topicId,
-      difficulty: body.difficulty,
-      stem: generated.stem,
-      options: generated.options,
+      difficulty,
+      runId: body.runId ?? null,
+      index: body.index ?? null,
+      runLength: RUN_LENGTH,
+      stem: generatedQuestion.stem,
+      options: generatedQuestion.options,
+      material: generatedQuestion.material ?? null,
       generatedAt,
       expiresAt,
     }),
@@ -687,10 +901,10 @@ app.post("/quiz/answers", async (c) => {
       .bind(c.get("userId"), body.idempotencyKey)
       .first<Record<string, unknown>>(),
     c.env.DB.prepare(
-      "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt FROM generated_questions WHERE id=? AND user_id=?",
+      "SELECT answer_index AS answerIndex,explanation,expires_at AS expiresAt,run_id AS runId,topic_id AS topicId FROM generated_questions WHERE id=? AND user_id=?",
     )
       .bind(body.questionId, c.get("userId"))
-      .first<{ answerIndex: number; explanation: string; expiresAt: string }>(),
+      .first<{ answerIndex: number; explanation: string; expiresAt: string; runId: string | null; topicId: string }>(),
   ]);
   if (previous) return c.json(ok(previous));
   if (!question) return c.json(fail("NOT_FOUND", "题目不存在或无权访问"), 404);
@@ -706,7 +920,7 @@ app.post("/quiz/answers", async (c) => {
   const correct = body.selectedIndex === question.answerIndex;
   const savedAt = iso();
   await c.env.DB.prepare(
-    "INSERT INTO quiz_attempts(id,user_id,question_id,selected_index,correct,duration_ms,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    "INSERT INTO quiz_attempts(id,user_id,question_id,selected_index,correct,duration_ms,idempotency_key,created_at,run_id) VALUES(?,?,?,?,?,?,?,?,?)",
   )
     .bind(
       attemptId,
@@ -717,8 +931,37 @@ app.post("/quiz/answers", async (c) => {
       body.elapsedMs,
       body.idempotencyKey,
       savedAt,
+      question.runId,
     )
     .run();
+  // 局次完成时回传通关判定（正确率与总用时均达标）
+  let run = null;
+  if (question.runId) {
+    const agg = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS total,SUM(correct) AS correct,SUM(duration_ms) AS durationMs FROM quiz_attempts WHERE user_id=? AND run_id=?",
+    )
+      .bind(c.get("userId"), question.runId)
+      .first<{ total: number; correct: number; durationMs: number }>();
+    if (agg && Number(agg.total) >= RUN_LENGTH) {
+      const total = Number(agg.total);
+      const aggData = {
+        topicId: question.topicId,
+        total,
+        correct: Number(agg.correct),
+        durationMs: Number(agg.durationMs),
+      };
+      const stars = runStars(aggData);
+      run = {
+        finished: true,
+        total,
+        correct: aggData.correct,
+        accuracy: aggData.correct / total,
+        durationMs: aggData.durationMs,
+        passed: stars > 0,
+        stars,
+      };
+    }
+  }
   return c.json(
     ok({
       attemptId,
@@ -726,6 +969,7 @@ app.post("/quiz/answers", async (c) => {
       answerIndex: question.answerIndex,
       explanation: question.explanation,
       savedAt,
+      run,
     }),
   );
 });
@@ -733,22 +977,7 @@ app.post("/quiz/answers", async (c) => {
 app.get("/quiz/stats", async (c) => {
   const filters = z
     .object({
-      topicId: z
-        .enum([
-          "arithmetic",
-          "multiply",
-          "divide",
-          "sensitive",
-          "decimal",
-          "growth",
-          "ratio",
-          "annual",
-          "interval-growth",
-          "mixed-growth",
-          "multiples",
-          "ratio-change",
-        ])
-        .optional(),
+      topicId: z.string().min(2).max(40).optional(),
       difficulty: z.enum(["easy", "medium", "hard"]).optional(),
     })
     .passthrough()
@@ -801,18 +1030,23 @@ app.get("/quiz/stats", async (c) => {
 app.get("/quiz/mistakes", async (c) => {
   const limit = integerQuery(c.req.query("limit"), 20, 1, 100);
   const rows = await c.env.DB.prepare(
-    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.answer_index AS answerIndex,q.explanation,a.mastered,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 ORDER BY lastWrongAt DESC LIMIT ?`,
+    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.material_json AS materialJson,q.answer_index AS answerIndex,q.explanation,a.mastered,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 ORDER BY lastWrongAt DESC LIMIT ?`,
   )
     .bind(c.get("userId"), limit)
     .all<Record<string, unknown>>();
   return c.json(
     ok({
-      items: rows.results.map((row) => ({
-        ...row,
-        options: JSON.parse(String(row.optionsJson)),
-        optionsJson: undefined,
-        mastered: Boolean(row.mastered),
-      })),
+      items: rows.results.map((row) => {
+        const materialJson = row.materialJson;
+        return {
+          ...row,
+          options: JSON.parse(String(row.optionsJson)),
+          optionsJson: undefined,
+          materialJson: undefined,
+          material: materialJson ? JSON.parse(String(materialJson)) : null,
+          mastered: Boolean(row.mastered),
+        };
+      }),
       nextCursor: null,
     }),
   );
@@ -893,6 +1127,190 @@ app.patch("/quiz/mistakes/:questionId/mastery", async (c) => {
     .run();
   return c.json(
     ok({ questionId: c.req.param("questionId"), mastered: body.mastered }),
+  );
+});
+
+/** 个人统计聚合（一次请求汇总六大维度，供学习统计页展示） */
+app.get("/profile/summary", async (c) => {
+  const userId = c.get("userId");
+  const now = iso();
+  const start45 = new Date(Date.now() - 45 * 86400000).toISOString();
+  const [attempts, retries, essayEvents, schulte, quizRows, cardRows, mistakeRows, retryAcc, schulteBests, cards] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT created_at,correct,duration_ms FROM quiz_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
+    )
+      .bind(userId, start45)
+      .all<{ created_at: string; correct: number; duration_ms: number }>(),
+    c.env.DB.prepare(
+      "SELECT created_at,correct FROM quiz_retry_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
+    )
+      .bind(userId, start45)
+      .all<{ created_at: string; correct: number }>(),
+    c.env.DB.prepare(
+      "SELECT reviewed_at FROM essay_review_events WHERE user_id=? AND reviewed_at>=? ORDER BY reviewed_at DESC LIMIT 5000",
+    )
+      .bind(userId, start45)
+      .all<{ reviewed_at: string }>(),
+    c.env.DB.prepare(
+      "SELECT created_at,duration_ms FROM schulte_results WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
+    )
+      .bind(userId, start45)
+      .all<{ created_at: string; duration_ms: number }>(),
+    c.env.DB.prepare(
+      `SELECT q.topic_id AS topicId,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs
+       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? GROUP BY q.topic_id`,
+    )
+      .bind(userId)
+      .all<Record<string, unknown>>(),
+    c.env.DB.prepare(
+      "SELECT repetitions,interval_days AS intervalDays,due_at AS dueAt,remembered_count AS rememberedCount,forgot_count AS forgotCount FROM essay_term_progress WHERE user_id=?",
+    )
+      .bind(userId)
+      .all<Record<string, unknown>>(),
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS total,SUM(CASE WHEN mastered=1 THEN 1 ELSE 0 END) AS mastered FROM quiz_attempts WHERE user_id=? AND correct=0",
+    )
+      .bind(userId)
+      .first<{ total: number; mastered: number }>(),
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS total,SUM(correct) AS correct FROM quiz_retry_attempts WHERE user_id=?",
+    )
+      .bind(userId)
+      .first<{ total: number; correct: number }>(),
+    c.env.DB.prepare(
+      "SELECT grid_size AS gridSize,variant,MIN(duration_ms) AS bestMs FROM schulte_results WHERE user_id=? GROUP BY grid_size,variant",
+    )
+      .bind(userId)
+      .all<{ gridSize: number; variant: string; bestMs: number }>(),
+    getEssayCards(c),
+  ]);
+
+  // —— 30 日学习趋势（本地自然日） ——
+  const dayMap = new Map<
+    string,
+    { quizCount: number; correct: number; durationMs: number; retries: number; retryCorrect: number; cardReviews: number; schulteRuns: number }
+  >();
+  const bump = (day: string, key: "quizCount" | "correct" | "durationMs" | "retries" | "retryCorrect" | "cardReviews" | "schulteRuns", amount = 1) => {
+    const entry = dayMap.get(day) ?? { quizCount: 0, correct: 0, durationMs: 0, retries: 0, retryCorrect: 0, cardReviews: 0, schulteRuns: 0 };
+    entry[key] += amount;
+    dayMap.set(day, entry);
+  };
+  for (const row of attempts.results) {
+    const day = cnDay(row.created_at);
+    bump(day, "quizCount");
+    bump(day, "correct", Number(row.correct));
+    bump(day, "durationMs", Number(row.duration_ms));
+  }
+  for (const row of retries.results) {
+    const day = cnDay(row.created_at);
+    bump(day, "retries");
+    bump(day, "retryCorrect", Number(row.correct));
+  }
+  for (const row of essayEvents.results) {
+    bump(cnDay(row.reviewed_at), "cardReviews");
+  }
+  for (const row of schulte.results) {
+    bump(cnDay(row.created_at), "schulteRuns");
+  }
+  const activityDays = new Set(dayMap.keys());
+  const { streak, activeToday } = streakOf(activityDays);
+  const today = cnDay(now);
+  const trend30: Array<{ date: string; quizCount: number; correct: number; accuracy: number; durationMs: number; cardReviews: number; schulteRuns: number; retries: number }> = [];
+  for (let offset = 29; offset >= 0; offset -= 1) {
+    const date = new Date(Date.now() + 8 * 3600000 - offset * 86400000).toISOString().slice(0, 10);
+    const entry = dayMap.get(date);
+    trend30.push({
+      date,
+      quizCount: entry?.quizCount ?? 0,
+      correct: entry?.correct ?? 0,
+      accuracy: entry?.quizCount ? (entry.correct ?? 0) / entry.quizCount : 0,
+      durationMs: entry?.durationMs ?? 0,
+      cardReviews: entry?.cardReviews ?? 0,
+      schulteRuns: entry?.schulteRuns ?? 0,
+      retries: entry?.retries ?? 0,
+    });
+  }
+  const todayEntry = dayMap.get(today);
+
+  // —— 速算/数推按专题统计 ——
+  let quizTotal = 0;
+  let quizCorrect = 0;
+  let quizMsSum = 0;
+  const quizItems = quizRows.results.map((row) => {
+    const total = Number(row.total) || 0;
+    const correct = Number(row.correct) || 0;
+    const averageMs = Math.round(Number(row.averageMs) || 0);
+    quizTotal += total;
+    quizCorrect += correct;
+    quizMsSum += averageMs * total;
+    return {
+      topicId: String(row.topicId),
+      total,
+      correct,
+      accuracy: total ? correct / total : 0,
+      averageMs,
+    };
+  });
+
+  // —— 规范词卡片 ——
+  const rows = cardRows.results;
+  const reviewed = rows.length;
+  const remembered = rows.reduce((sum, row) => sum + Number(row.rememberedCount ?? 0), 0);
+  const forgot = rows.reduce((sum, row) => sum + Number(row.forgotCount ?? 0), 0);
+  const due = rows.filter((row) => String(row.dueAt) <= now).length;
+  const summary = {
+    total: cards.length,
+    new: cards.length - reviewed,
+    due,
+    learning: rows.filter((row) => Number(row.repetitions) < 3).length,
+    mastered: rows.filter((row) => Number(row.repetitions) >= 3).length,
+    accuracy: remembered + forgot ? remembered / (remembered + forgot) : 0,
+  };
+  const last7 = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(Date.now() + 8 * 3600000 - i * 86400000).toISOString().slice(0, 10);
+    return dayMap.get(date)?.cardReviews ?? 0;
+  }).reduce((a, b) => a + b, 0);
+
+  // —— 错题本 ——
+  const openMistakes = (Number(mistakeRows?.total) || 0) - (Number(mistakeRows?.mastered) || 0);
+  const retryTotal = Number(retryAcc?.total) || 0;
+  const retryAccuracy = retryTotal ? (Number(retryAcc?.correct) || 0) / retryTotal : 0;
+
+  return c.json(
+    ok({
+      activity: {
+        studyDays: activityDays.size,
+        streak,
+        activeToday,
+        today: {
+          quizCount: todayEntry?.quizCount ?? 0,
+          cardReviews: todayEntry?.cardReviews ?? 0,
+          schulteRuns: todayEntry?.schulteRuns ?? 0,
+          retries: todayEntry?.retries ?? 0,
+        },
+      },
+      trend30,
+      quiz: {
+        items: quizItems,
+        overall: {
+          total: quizTotal,
+          correct: quizCorrect,
+          accuracy: quizTotal ? quizCorrect / quizTotal : 0,
+          averageMs: quizTotal ? Math.round(quizMsSum / quizTotal) : 0,
+        },
+      },
+      cards: { summary, today: todayEntry?.cardReviews ?? 0, last7 },
+      mistakes: {
+        open: Math.max(0, openMistakes),
+        mastered: Number(mistakeRows?.mastered) || 0,
+        retryTotal,
+        retryAccuracy,
+      },
+      schulte: {
+        bests: schulteBests.results,
+        runs30: schulte.results.length,
+      },
+    }),
   );
 });
 

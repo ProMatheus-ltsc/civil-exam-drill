@@ -238,4 +238,122 @@ describe("API contract guards", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).data.personalBestMs).toBe(22000);
   });
+
+  it("exposes the dual-track quiz catalog", async () => {
+    const response = await app.request(
+      "/api/quiz/catalog",
+      { headers: auth },
+      env,
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data.runLength).toBe(10);
+    expect(payload.data.passAccuracy).toBe(0.8);
+    const speedTrack = payload.data.tracks.find((t) => t.id === "speed");
+    const seqTrack = payload.data.tracks.find((t) => t.id === "sequence");
+    expect(speedTrack.topics.length).toBeGreaterThanOrEqual(20);
+    expect(seqTrack.topics.length).toBeGreaterThanOrEqual(9);
+    expect(seqTrack.topics.every((t) => t.budgetMs > 0)).toBe(true);
+  });
+
+  it("locks stages until prerequisites are cleared", async () => {
+    const progressResponse = await app.request(
+      "/api/quiz/progress",
+      { headers: auth },
+      env,
+    );
+    const progress = (await progressResponse.json()).data;
+    expect(progressResponse.status).toBe(200);
+    const byId = new Map(progress.map((p) => [p.topicId, p]));
+    expect(byId.get("arithmetic").unlocked).toBe(true);
+    expect(byId.get("multiply").unlocked).toBe(false);
+
+    const lockedResponse = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "multiply",
+          runId: crypto.randomUUID(),
+          index: 0,
+        }),
+      },
+      env,
+    );
+    expect(lockedResponse.status).toBe(409);
+    expect((await lockedResponse.json()).error.code).toBe("TOPIC_LOCKED");
+  });
+
+  it("generates the first run question with a ladder difficulty", async () => {
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "arithmetic",
+          runId: crypto.randomUUID(),
+          index: 0,
+        }),
+      },
+      env,
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data.difficulty).toBe("easy");
+    expect(payload.data.runLength).toBe(10);
+    expect(payload.data.index).toBe(0);
+  });
+
+  it("rejects retired legacy composite topics with a hint", async () => {
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ topicId: "growth", difficulty: "easy" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("TOPIC_RETIRED");
+  });
+
+  it("answers carry run completion metadata when a run ends", async () => {
+    const response = await app.request(
+      "/api/quiz/answers",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          questionId: "q_test",
+          selectedIndex: 1,
+          elapsedMs: 800,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      },
+      env,
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.correct).toBe(true);
+    expect(payload.data).toHaveProperty("run");
+  });
+
+  it("aggregates a personal profile summary", async () => {
+    const response = await app.request(
+      "/api/profile/summary",
+      { headers: auth },
+      env,
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data.activity).toHaveProperty("streak");
+    expect(Array.isArray(payload.data.trend30)).toBe(true);
+    expect(payload.data.trend30).toHaveLength(30);
+    expect(payload.data.cards.summary).toHaveProperty("mastered");
+    expect(payload.data.mistakes).toHaveProperty("open");
+    expect(payload.data.schulte).toHaveProperty("bests");
+  });
 });

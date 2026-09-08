@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WORKSPACE = path.resolve(__dirname, '..')
-const ENTRIES_PATH = path.join(WORKSPACE, 'src/generated/knowledge/entries.json')
+const ENTRIES_PATH = path.join(WORKSPACE, 'public/generated/knowledge/entries.json')
 const PORT = 4174
 
 // 读取 entries.json
@@ -61,98 +61,75 @@ function readBody(req) {
   })
 }
 
-// Quiz generator state
+// ==================== Quiz（模拟闯关双轨；开发占位，与生产同响应形状） ====================
+// 目录数据与 src/generator/catalog.ts 保持一致（开发预览用，字段已精简）
+const CATALOG_RAW = [
+  ['arithmetic', '加减与多项求和'], ['multiply', '乘法与平方'], ['divide', '除法估算'], ['sensitive', '敏感数与百化分'],
+  ['decimal', '小数速算'], ['growth-rate', '增长率'], ['growth-amount', '增长量'], ['base-amount', '基期量'],
+  ['multiples', '倍数与翻番'], ['base-difference', '基期差'], ['interval-growth', '间隔增长率'], ['mixed-growth', '混合增长率'],
+  ['annual-amount', '年均增长量'], ['annual-rate', '年均增长率'], ['ratio-basic', '比重与整体量'], ['part-quantity', '部分量'],
+  ['average-basic', '平均数基础'], ['base-ratio', '基期比重'], ['ratio-change', '两期比重差'], ['average-rate', '平均数增长率'],
+  ['diff-rate', '差值增长率'], ['contribution-rate', '增长贡献率'], ['pull-growth', '拉动增长率'],
+  ['seq-basic', '基础数列'], ['seq-multilevel', '多级数列'], ['seq-multiple', '多重数列'], ['seq-periodic', '周期数列'],
+  ['seq-power', '幂次数列'], ['seq-recursive', '递推数列'], ['seq-fraction', '分数数列'], ['seq-split', '机械划分'],
+  ['seq-factor', '因数分解'],
+]
+const RAW_MAP = new Map(CATALOG_RAW)
+const CATALOG = [
+  ['arithmetic', '加减与多项求和', 1, [], false, 'quick-calculation'],
+  ['multiply', '乘法与平方', 1, ['arithmetic'], false, null],
+  ['divide', '除法估算', 1, ['multiply'], false, 'direct-division'],
+  ['sensitive', '敏感数与百化分', 2, ['multiply'], false, 'growth-basics'],
+  ['decimal', '小数速算', 2, ['arithmetic', 'multiply'], false, 'quick-calculation'],
+  ['growth-rate', '增长率', 1, ['divide'], false, 'growth-basics'],
+  ['growth-amount', '增长量', 1, ['growth-rate'], false, 'growth-amount'],
+  ['base-amount', '基期量', 2, ['growth-rate'], false, 'growth-basics'],
+  ['multiples', '倍数与翻番', 2, ['growth-rate', 'divide'], false, 'multiple'],
+  ['base-difference', '基期差', 3, ['base-amount'], true, 'common-traps'],
+  ['interval-growth', '间隔增长率', 2, ['growth-rate'], false, 'interval-growth'],
+  ['mixed-growth', '混合增长率', 3, ['interval-growth'], true, 'mixed-growth'],
+  ['annual-amount', '年均增长量', 2, ['growth-amount'], false, 'growth-amount-advanced'],
+  ['annual-rate', '年均增长率', 3, ['multiples'], true, 'growth-rate-advanced'],
+  ['ratio-basic', '比重与整体量', 2, ['sensitive', 'divide'], false, 'proportion'],
+  ['part-quantity', '部分量', 2, ['ratio-basic'], false, 'proportion'],
+  ['average-basic', '平均数基础', 1, ['divide'], false, 'average'],
+  ['base-ratio', '基期比重', 3, ['part-quantity', 'base-amount'], true, 'proportion'],
+  ['ratio-change', '两期比重差', 3, ['base-ratio'], true, 'proportion-advanced'],
+  ['average-rate', '平均数增长率', 3, ['average-basic', 'growth-rate'], true, 'average-advanced'],
+  ['diff-rate', '差值增长率', 3, ['base-difference', 'part-quantity'], true, 'proportion-advanced'],
+  ['contribution-rate', '增长贡献率', 3, ['growth-amount', 'part-quantity'], true, 'growth-amount-advanced'],
+  ['pull-growth', '拉动增长率', 3, ['contribution-rate'], true, 'growth-amount-advanced'],
+  ['seq-basic', '基础数列', 1, [], false, 'basic-sequences'],
+  ['seq-multilevel', '多级数列', 1, ['seq-basic'], false, 'multilevel-sequences'],
+  ['seq-multiple', '多重数列', 2, ['seq-basic'], false, 'multiple-sequences'],
+  ['seq-periodic', '周期数列', 2, ['seq-multilevel'], false, 'basic-sequences'],
+  ['seq-power', '幂次数列', 2, ['seq-basic'], false, 'power-sequences'],
+  ['seq-recursive', '递推数列', 3, ['seq-multilevel', 'seq-power'], false, 'recursive-sequences'],
+  ['seq-fraction', '分数数列', 3, ['seq-power'], false, 'fraction-sequences'],
+  ['seq-split', '机械划分', 3, ['seq-periodic', 'seq-power'], false, 'special-sequences'],
+  ['seq-factor', '因数分解', 3, ['seq-split'], false, 'special-sequences'],
+].map(([id, title, rating, unlock, material, docId]) => ({
+  id, title, rating,
+  unlock,
+  unlockTitles: unlock.map((u) => RAW_MAP.get(u) || u),
+  material,
+  docId,
+  description: '',
+  budgetMs: 600000,
+}))
+const RUN_LENGTH = 10
 const quizState = {
-  topics: [
-    { id: 'arithmetic', title: '加减与多项求和', description: '两位/三位加减、多数求和与凑整' },
-    { id: 'multiply', title: '乘法与常见平方', description: '一位乘法、两位乘法和平方数' },
-    { id: 'divide', title: '除法估算', description: '三位除法、五位除三位与商值范围' },
-    { id: 'sensitive', title: '敏感数与拆分法 / 415份数法', description: '分数、百分数与份数关系的快速转换' },
-    { id: 'decimal', title: '小数点加减乘除速算', description: '小数对齐、凑整与移位技巧' },
-    { id: 'growth', title: '增长率 / 增长量', description: 'A·B·R·X 四者互求' },
-    { id: 'ratio', title: '比重 / 盐水 / 平均数', description: '部分与整体、浓度及加权平均' },
-    { id: 'annual', title: '年平均量 / 年均增长率', description: '时间段口径、年份差和复合增长' },
-    { id: 'interval-growth', title: '间隔增长率', description: 'r₁+r₂+r₁×r₂ 累计增长的逻辑估算' },
-    { id: 'mixed-growth', title: '混合增长率', description: '整体增速介于部分之间、偏向体量大的' },
-    { id: 'multiples', title: '倍数与翻番', description: '现期÷基期与 2ⁿ 对应的翻番数估算' },
-    { id: 'ratio-change', title: '两期比重差', description: '方向判断 + 变化幅度上限估算' },
-  ],
-  difficulties: [
-    { id: 'easy', label: '简单', description: '整洁数值，一步计算' },
-    { id: 'medium', label: '中等', description: '数值变化，两步换算' },
-    { id: 'hard', label: '困难', description: '更大范围，干扰项更接近' },
-  ],
-  generatorVersion: 2,
-  recentWindow: 50,
   questions: new Map(),
+  runs: new Map(), // runId -> { topicId, answered: [] }
 }
-let quizLoadAttempted = false
-
-function quizGenerateFn(topicId, difficulty, excludedFingerprints) {
-  if (!quizLoadAttempted) {
-    quizLoadAttempted = true
-    console.log('[dev-api] Quiz endpoints ready (using mock for dev preview)')
+const topicOfId = (id) => CATALOG.find((t) => t.id === id)
+const passedTopics = () => {
+  const passed = new Set()
+  for (const run of quizState.runs.values()) {
+    const correct = run.answered.filter((a) => a.correct).length
+    if (run.answered.length >= RUN_LENGTH && correct >= 8) passed.add(run.topicId)
   }
-  return quizFallbackGenerate(topicId, difficulty)
-}
-
-function quizFallbackGenerate(topicId, difficulty) {
-  // Simplified mock for dev preview — returns a hand-crafted question
-  const templates = {
-    'interval-growth': {
-      body: () => ({
-        templateId: 'interval-growth-v1',
-        params: { r1: 8, r2: 12, answer: 20.96 },
-        stem: '某地区去年增长 8%，今年增长 12%，两年累计增长了多少？',
-        options: ['20.00%', '20.96%', '21.60%', '19.60%'],
-        answerIndex: 1,
-        explanation: '代入公式 R = r₁+r₂+r₁×r₂ = 8%+12%+8%×12% = 20.96%。选项 20% 漏掉了交叉乘积项，21.6% 把乘积项算重了。',
-      }),
-    },
-    'mixed-growth': {
-      body: () => ({
-        templateId: 'mixed-growth-v1',
-        params: { a: 8, b: 20, ratioA: 3, ratioB: 1, answer: 11 },
-        stem: '某企业上半年产值增长 8%，下半年产值增长 20%，上下半年产值之比为 3:1。全年产值增长率约为多少？',
-        options: ['8.00%', '11.00%', '14.00%', '20.00%'],
-        answerIndex: 1,
-        explanation: '整体增速介于 8%~20% 之间。上半年占比 75%，远大于下半年，故整体增速应偏向 8%（14%为直接平均，20%则完全无视了下半年），正确答案为 11%。',
-      }),
-    },
-    'multiples': {
-      body: () => ({
-        templateId: 'multiples-fan-v1',
-        params: { base: 200, num: 1600, n: 3 },
-        stem: '某企业利润从 200 万元增至 1600 万元，相当于翻了多少番？',
-        options: ['2 番', '3 番', '4 番', '3.5 番'],
-        answerIndex: 1,
-        explanation: '1600÷200=8=2³，翻了 3 番。翻 1 番×2，翻 n 番×2ⁿ。±1 和半番是常见干扰。',
-      }),
-    },
-    'ratio-change': {
-      body: () => ({
-        templateId: 'ratio-change-v1',
-        params: { a: 15, b: 8, partRatio: 25, exactChange: 1.52 },
-        stem: '某行业产值同比增长 15%，全国规上工业增加值同比增长 8%，该行业占规上工业增加值的比重比上年：',
-        options: ['上升 1.5 个百分点', '下降 1.5 个百分点', '上升 7.0 个百分点', '下降 7.0 个百分点'],
-        answerIndex: 0,
-        explanation: '部分增速(15%) > 整体增速(8%)，比重上升。|Δ| < |15%−8%| = 7%，故 7 个百分点的选项可以排除，且方向不符的也排除。',
-      }),
-    },
-  }
-  const tpl = templates[topicId]
-  if (tpl) return { fingerprint: 'mock_fp', templateVersion: 1, ...tpl.body() }
-  // fallback for other topics
-  return {
-    templateId: 'mock-v1',
-    params: {},
-    stem: '这是模拟题目，实际使用需启动完整 API 服务。',
-    options: ['A 选项', 'B 选项', 'C 选项', 'D 选项'],
-    answerIndex: 0,
-    explanation: '模拟环境下的占位说明。',
-    fingerprint: 'mock_fp',
-    templateVersion: 1,
-  }
+  return passed
 }
 
 const server = http.createServer(async (req, res) => {
@@ -266,33 +243,87 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // === Quiz API（内存模拟）===
-  const quizTopicMatch = pathname === '/api/quiz/topics' && req.method === 'GET'
-  if (quizTopicMatch) {
-    const { topics, difficulties, generatorVersion, recentWindow } = quizState
+  // GET /api/quiz/catalog
+  if (pathname === '/api/quiz/catalog' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       success: true,
-      data: { topics, difficulties, generatorVersion, recentWindow },
+      data: {
+        runLength: RUN_LENGTH,
+        passAccuracy: 0.8,
+        generatorVersion: 3,
+        tracks: ['speed', 'sequence'].map((trackId) => ({
+          id: trackId,
+          title: trackId === 'speed' ? '资料速算' : '数字推理',
+          description: '',
+          topics: CATALOG.filter((t) => (trackId === 'speed' ? !t.id.startsWith('seq-') : t.id.startsWith('seq-'))),
+        })),
+      },
       error: null,
     }))
     return
   }
-
+  
+  // GET /api/quiz/progress
+  if (pathname === '/api/quiz/progress' && req.method === 'GET') {
+    const passed = passedTopics()
+    const data = CATALOG.map((topic) => ({
+      topicId: topic.id,
+      unlocked: topic.unlock.every((u) => passed.has(u)),
+      stars: 0,
+      total: 0,
+      accuracy: 0,
+      averageMs: 0,
+      lastRunAt: null,
+    }))
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ success: true, data, error: null }))
+    return
+  }
+  
   const quizQuestionsMatch = pathname === '/api/quiz/questions' && req.method === 'POST'
   if (quizQuestionsMatch) {
     const body = await readBody(req)
     try {
-      const { topicId, difficulty } = JSON.parse(body)
-      const generated = quizGenerateFn(topicId, difficulty, [])
+      const { topicId, runId, index = 0, difficulty = 'medium' } = JSON.parse(body)
+      if (runId) {
+        const passed = passedTopics()
+        const topic = topicOfId(topicId)
+        const locked = topic && topic.unlock.filter((u) => !passed.has(u))
+        if (locked && locked.length) {
+          res.writeHead(409, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡：${locked.map((u) => (CATALOG_RAW.find((x) => x[0] === u) || [u, u])[1]).join('、')}` } }))
+          return
+        }
+        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, answered: [] })
+        const run = quizState.runs.get(runId)
+        if (run.answered.length >= RUN_LENGTH) {
+          res.writeHead(409, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_COMPLETE', message: '本关已完成，请重新开始新一局' } }))
+          return
+        }
+        if (run.answered.length !== index) {
+          res.writeHead(409, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '关卡题目序号不连续，请重新开始本关' } }))
+          return
+        }
+      }
       const questionId = `q_${crypto.randomUUID()}`
-      const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString()
-      const generatedAt = new Date().toISOString()
-      quizState.questions.set(questionId, generated)
+      const stem = topicId.startsWith('seq-')
+        ? `模拟数推题（${topicOfId(topicId)?.title ?? topicId}）：3、7、11、15、（ ），求括号中的数。`
+        : `模拟${topicOfId(topicId)?.title ?? topicId}题（难度 ${difficulty}）：请选出正确选项。`
+      const options = topicId.startsWith('seq-') ? ['19', '21', '17', '18'] : ['选项 A', '选项 B', '选项 C', '选项 D']
+      const answerIndex = topicId.startsWith('seq-') ? 0 : index % 4
+      quizState.questions.set(questionId, { topicId, runId: runId ?? null, answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。', options })
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         success: true,
-        data: { questionId, topicId, difficulty, stem: generated.stem, options: generated.options, generatedAt, expiresAt },
+        data: {
+          questionId, topicId, difficulty, runId: runId ?? null, index: runId ? index : null,
+          runLength: RUN_LENGTH, stem, options, material: null,
+          generatedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+        },
         error: null,
       }))
     } catch (e) {
@@ -301,12 +332,12 @@ const server = http.createServer(async (req, res) => {
     }
     return
   }
-
+  
   const quizAnswerMatch = pathname === '/api/quiz/answers' && req.method === 'POST'
   if (quizAnswerMatch) {
     const body = await readBody(req)
     try {
-      const { questionId, selectedIndex } = JSON.parse(body)
+      const { questionId, selectedIndex, elapsedMs } = JSON.parse(body)
       const question = quizState.questions.get(questionId)
       if (!question) {
         res.writeHead(404, { 'Content-Type': 'application/json' })
@@ -314,10 +345,22 @@ const server = http.createServer(async (req, res) => {
         return
       }
       const correct = selectedIndex === question.answerIndex
+      let run = null
+      if (question.runId && quizState.runs.has(question.runId)) {
+        const runData = quizState.runs.get(question.runId)
+        runData.answered.push({ correct, durationMs: elapsedMs })
+        if (runData.answered.length >= RUN_LENGTH) {
+          const ok = runData.answered.filter((a) => a.correct).length
+          const durationMs = runData.answered.reduce((s, a) => s + a.durationMs, 0)
+          const accuracy = ok / runData.answered.length
+          const passed = accuracy >= 0.8 && durationMs <= 600000
+          run = { finished: true, total: runData.answered.length, correct: ok, accuracy, durationMs, passed, stars: passed ? (accuracy >= 1 ? 3 : accuracy >= 0.9 ? 2 : 1) : 0 }
+        }
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         success: true,
-        data: { correct, answerIndex: question.answerIndex, explanation: question.explanation, savedAt: new Date().toISOString() },
+        data: { correct, answerIndex: question.answerIndex, explanation: question.explanation, savedAt: new Date().toISOString(), run },
         error: null,
       }))
     } catch (e) {
@@ -326,13 +369,31 @@ const server = http.createServer(async (req, res) => {
     }
     return
   }
-
+  
   const quizStatsMatch = pathname === '/api/quiz/stats' && req.method === 'GET'
   if (quizStatsMatch) {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       success: true,
       data: { groups: [], overall: { total: 0, correct: 0, accuracy: 0, averageMs: 0 } },
+      error: null,
+    }))
+    return
+  }
+  
+  const profileSummaryMatch = pathname === '/api/profile/summary' && req.method === 'GET'
+  if (profileSummaryMatch) {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      success: true,
+      data: {
+        activity: { studyDays: 0, streak: 0, activeToday: false, today: { quizCount: 0, cardReviews: 0, schulteRuns: 0, retries: 0 } },
+        trend30: Array.from({ length: 30 }, (_, i) => ({ date: '', quizCount: 0, correct: 0, accuracy: 0, durationMs: 0, cardReviews: 0, schulteRuns: 0, retries: 0 })),
+        quiz: { items: [], overall: { total: 0, correct: 0, accuracy: 0, averageMs: 0 } },
+        cards: { summary: { total: 0, new: 0, due: 0, learning: 0, mastered: 0, accuracy: 0 }, today: 0, last7: 0 },
+        mistakes: { open: 0, mastered: 0, retryTotal: 0, retryAccuracy: 0 },
+        schulte: { bests: [], runs30: 0 },
+      },
       error: null,
     }))
     return

@@ -4,12 +4,18 @@ import { EmptyState } from "@shared/core/components/EmptyState";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { api } from "../api/client";
+import { titleOf } from "../generator/catalog";
+import type { MaterialSpec } from "../generator/types";
+import { MaterialView } from "../components/MaterialView";
 import { useAsync } from "../hooks/useAsync";
 
 type Mistake = {
   questionId: string;
+  topicId: string;
+  difficulty: string;
   stem: string;
   options: string[];
+  material: MaterialSpec | null;
   answerIndex: number;
   explanation: string;
   mastered: boolean;
@@ -19,6 +25,12 @@ type RetryResult = {
   correct: boolean;
   answerIndex: number;
   explanation: string;
+};
+
+const difficultyLabel: Record<string, string> = {
+  easy: "简单",
+  medium: "中等",
+  hard: "困难",
 };
 
 function MistakeCard({
@@ -55,8 +67,12 @@ function MistakeCard({
     });
   return (
     <article className="mistake">
+      <small className="mistake-tag">
+        {titleOf(item.topicId)} · {difficultyLabel[item.difficulty] ?? item.difficulty}
+      </small>
       <strong>{item.stem}</strong>
-      <p>错误次数：{item.wrongCount}</p>
+      <p className="muted">错误次数：{item.wrongCount}</p>
+      {item.material && <MaterialView material={item.material} />}
       {retrying ? (
         <>
           <div className="options">
@@ -69,23 +85,30 @@ function MistakeCard({
                 }
                 onClick={() => submit(index)}
               >
-                {String.fromCharCode(65 + index)}. {option}
+                <span className="option-key">
+                  {String.fromCharCode(65 + index)}
+                </span>
+                <span className="option-text">{option}</span>
               </button>
             ))}
           </div>
           {result && (
-            <p>
+            <p className="muted">
               <strong>
                 {result.correct ? "重做正确，已掌握" : "仍需巩固"}
               </strong>
-              　{result.explanation}
+              <br />
+              {result.explanation}
             </p>
           )}
         </>
       ) : (
         <>
-          <p>答案：{item.options[item.answerIndex]}</p>
-          <p>{item.explanation}</p>
+          <p>
+            答案：{item.options[item.answerIndex]}
+            <br />
+            {item.explanation}
+          </p>
         </>
       )}
       <button className="secondary" disabled={busy} onClick={start}>
