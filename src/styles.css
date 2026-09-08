@@ -1279,3 +1279,118 @@ select {
   font-weight: 800;
   color: #516676;
 }
+
+/* ===== 专项训练 · 模块折叠/筛选工具条 ===== */
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.map-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 220px;
+  flex: 1;
+  padding: 0 12px;
+  border: 1px solid #b9c7d2;
+  border-radius: 10px;
+  background: #fff;
+  color: #71818d;
+}
+.map-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  min-height: 38px;
+}
+.map-undone-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #516676;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.map-undone-toggle input {
+  accent-color: #17324d;
+}
+.map-collapse-btn {
+  min-height: 38px;
+  font-size: 0.82rem;
+  padding: 0 14px;
+}
+
+/* 模块头：可点击折叠 + 三档进度摘要 */
+.stage-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.stage-card.is-open {
+  gap: 10px;
+}
+.stage-card.is-open .stage-card-head {
+  border-bottom: 1px solid #eef2f4;
+  padding-bottom: 10px;
+}
+.stage-mini-stars {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: none;
+}
+.mini-run {
+  display: inline-flex;
+  gap: 1px;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #f1f5f7;
+}
+.mini-run .stars {
+  gap: 0;
+}
+.mini-run .stars svg.filled {
+  fill: currentColor;
+}
+.mini-run.deasy { color: #4d8f6e; }
+.mini-run.dmedium { color: #c98a2e; }
+.mini-run.dhard { color: #b3402f; }
+.mini-empty {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #9aa8b2;
+}
+.stage-done {
+  font-style: normal;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #24714e;
+  background: #dcf3e7;
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.stage-card .stage-doc {
+  display: inline-flex;
+}
+@media (max-width: 680px) {
+  .map-search {
+    min-width: 100%;
+  }
+  .stage-mini-stars {
+    display: none;
+  }
+}

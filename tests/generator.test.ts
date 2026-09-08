@@ -81,8 +81,18 @@ describe("question generator", () => {
             question.material?.paragraphs.length,
             `${topic.id} 高难度应附材料`,
           ).toBeGreaterThan(0);
+          const materialText = [
+            ...(question.material?.paragraphs ?? []),
+            ...(question.material?.table?.rows.flat() ?? []),
+          ].join(" ");
+          // 不泄漏原始参数名/占位标签
+          expect(materialText).not.toMatch(/数值一|指标 A|第 \d+ 项数值|denominator|numerator|surplus|params/);
         } else {
           expect(question.material).toBeNull();
+        }
+        if (["arithmetic", "multiply", "divide"].includes(topic.id)) {
+          expect(question.stem).not.toContain("不使用计算器");
+          expect(question.stem.length).toBeGreaterThanOrEqual(20);
         }
       }
     }

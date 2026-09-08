@@ -12,10 +12,12 @@ import {
   ArrowLeft,
   BookOpen,
   Calculator,
+  ChevronDown,
   ChevronRight,
   Clock,
   Lock,
   RotateCcw,
+  Search,
   Sparkles,
   Star,
   Target,
@@ -111,6 +113,7 @@ export function QuizPage() {
   const [progress, setProgress] = useState<Map<string, ProgressItem> | null>(null);
   const [track, setTrack] = useState<TrackId>("speed");
   const [screen, setScreen] = useState<"map" | "run" | "result">("map");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   // 关卡运行状态
   const [topic, setTopic] = useState<TopicMeta | null>(null);
@@ -153,6 +156,25 @@ export function QuizPage() {
   }, [loadProgress]);
 
   const progressKey = (topicId: string, diff: Difficulty) => `${topicId}:${diff}`;
+  const stageTopics = useMemo(
+    () => catalog?.tracks.find((t) => t.id === track)?.topics ?? [],
+    [catalog, track],
+  );
+
+  // 默认折叠：仅在切换轨道/首次进入时，自动展开当前轨道“首个尚未高难通关”的模块
+  const lastTrackRef = useRef<TrackId | null>(null);
+  useEffect(() => {
+    if (screen !== "map") return;
+    const changed = lastTrackRef.current !== track;
+    lastTrackRef.current = track;
+    if (!changed) return;
+    if (!catalog || !progress || stageTopics.length === 0) return;
+    const firstNotCleared = stageTopics.find(
+      (t) => (progress.get(`${t.id}:hard`)?.stars ?? 0) < 1,
+    );
+    setExpandedIds(new Set([firstNotCleared?.id ?? stageTopics[0].id]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, track, catalog, progress, stageTopics]);
 
   const ensureQuestion = useCallback(
     async (index: number): Promise<QuestionData | null> => {
@@ -301,13 +323,33 @@ export function QuizPage() {
             ))}
           </div>
           <StageMap
-            topics={catalog.tracks.find((t) => t.id === track)?.topics ?? []}
+            topics={stageTopics}
             difficultyRuns={catalog.difficultyRuns}
             progressMap={progress}
             progressKey={progressKey}
+            expandedIds={expandedIds}
+            defaultExpandedId={
+              stageTopics.find(
+                (t) => (progress?.get(`${t.id}:hard`)?.stars ?? 0) < 1,
+              )?.id ?? stageTopics[0]?.id
+            }
+            onToggle={(id) =>
+              setExpandedIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              })
+            }
+            onExpandAll={() => setExpandedIds(new Set(stageTopics.map((t) => t.id)))}
+            onCollapseAll={() =>
+              setExpandedIds(new Set([stageTopics[0]?.id].filter(Boolean) as string[]))
+            }
             onStart={(t, d) => void startRun(t, d)}
             onDocs={(docId) => navigate(`/knowledge/${docId}`)}
-            onLocked={(names) => showToast(`需先通过前置模块的高难度局：${names.join("、")}`, "info")}
+            onLocked={(names) =>
+              showToast(`需先通过前置模块的高难度局：${names.join("、")}`, "info")
+            }
           />
         </>
       )}
@@ -354,6 +396,11 @@ function StageMap({
   difficultyRuns,
   progressMap,
   progressKey,
+  expandedIds,
+  defaultExpandedId,
+  onToggle,
+  onExpandAll,
+  onCollapseAll,
   onStart,
   onDocs,
   onLocked,
@@ -362,26 +409,88 @@ function StageMap({
   difficultyRuns: RunDifficultyMeta[];
   progressMap: Map<string, ProgressItem> | null;
   progressKey: (topicId: string, difficulty: Difficulty) => string;
+  expandedIds: Set<string>;
+  defaultExpandedId: string | undefined;
+  onToggle: (id: string) => void;
+  onExpandAll: () => void;
+  onCollapseAll: () => void;
   onStart: (topic: TopicMeta, difficulty: Difficulty) => void;
   onDocs: (docId: string) => void;
   onLocked: (unlockNames: string[]) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [onlyUndone, setOnlyUndone] = useState(false);
+  const visible = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase("zh-CN");
+    return topics.filter((topic) => {
+      if (q && !`${topic.title} ${topic.description} ${topic.unlockTitles.join(" ")}`
+        .toLocaleLowerCase("zh-CN")
+        .includes(q)) return false;
+      if (onlyUndone) {
+        const cleared =
+          (progressMap?.get(progressKey(topic.id, "hard"))?.stars ?? 0) >= 1;
+        if (cleared) return false;
+      }
+      return true;
+    });
+  }, [topics, query, onlyUndone, progressMap, progressKey]);
+
   if (!topics.length)
     return <EmptyState icon={Calculator} title="暂无关卡" description="稍后再来看看" />;
   return (
     <Stack gap="1rem">
+      <div className="map-toolbar">
+        <div className="map-search">
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索模块名称…"
+          />
+        </div>
+        <label className="map-undone-toggle">
+          <input
+            type="checkbox"
+            checked={onlyUndone}
+            onChange={(event) => setOnlyUndone(event.target.checked)}
+          />
+          仅看未通关
+        </label>
+        <button className="secondary map-collapse-btn" onClick={onCollapseAll}>
+          收起全部
+        </button>
+        <button className="secondary map-collapse-btn" onClick={onExpandAll}>
+          展开全部
+        </button>
+      </div>
       <p className="muted">
-        每个模块分「低 / 中 / 高」三个难度局（各 10 题）。难度越高，题干数字越复杂、选项越接近；
-        <strong> 通过“高难度 · 实战”局（≥8 对且限时内）才算模块通关</strong>
-        ，可解锁下一模块；低/中局用于练习与刷星，已通关模块可反复重练。
+        点击模块展开“低 / 中 / 高”三个难度局；难度越高，题干数字越复杂、选项越接近。
+        <strong> 通过“高难度 · 实战”局（≥8 对且限时内）才算模块通关</strong>，可解锁下一模块。
       </p>
-      {topics.map((topic) => {
+      {visible.length === 0 && (
+        <EmptyState
+          icon={Search}
+          title="没有匹配的模块"
+          description="试试清空搜索或切换筛选条件"
+        />
+      )}
+      {visible.map((topic) => {
         const itemByDiff = (difficulty: Difficulty) =>
           progressMap?.get(progressKey(topic.id, difficulty));
         const unlocked = itemByDiff("easy")?.unlocked ?? false;
+        const isExpanded = expandedIds.has(topic.id);
+        const defaultOpen = topic.id === defaultExpandedId && isExpanded;
+        const clearedHard = (itemByDiff("hard")?.stars ?? 0) >= 1;
         return (
-          <div className={`stage-card ${unlocked ? "" : "is-locked"}`} key={topic.id}>
-            <div className="stage-card-head">
+          <div
+            className={`stage-card ${unlocked ? "" : "is-locked"} ${isExpanded || defaultOpen ? "is-open" : ""}`}
+            key={topic.id}
+          >
+            <button
+              className="stage-card-head"
+              aria-expanded={isExpanded || defaultOpen}
+              onClick={() => onToggle(topic.id)}
+            >
               <span className={`stage-badge r${topic.rating}`}>
                 {RATING_LABEL[topic.rating]}
               </span>
@@ -389,59 +498,99 @@ function StageMap({
                 <strong>
                   {topic.title}
                   {topic.material && <em className="stage-material">材料</em>}
+                  {unlocked && clearedHard && (
+                    <em className="stage-done">已通关</em>
+                  )}
                 </strong>
                 <small>{topic.description || "逐题闯关"}</small>
               </span>
+              <span className="stage-mini-stars">
+                {difficultyRuns.map((meta) => {
+                  const stars = itemByDiff(meta.id)?.stars ?? 0;
+                  return (
+                    <span
+                      className={`mini-run d${meta.id}`}
+                      key={meta.id}
+                      title={`${meta.label} ${stars} 星`}
+                    >
+                      {stars > 0 ? (
+                        Array.from({ length: 3 }, (_, i) => (
+                          <Star
+                            key={i}
+                            size={11}
+                            className={i < stars ? "filled" : ""}
+                          />
+                        ))
+                      ) : (
+                        <span className="mini-empty">{meta.short}</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+              <span className="stage-arrow">
+                {isExpanded || defaultOpen ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )}
+              </span>
               {topic.docId && (
-                <button
+                <span
                   className="stage-doc"
+                  role="button"
                   title="查看知识讲解"
-                  onClick={() => onDocs(topic.docId as string)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDocs(topic.docId as string);
+                  }}
                 >
                   <BookOpen size={15} />
-                </button>
+                </span>
               )}
-            </div>
-            <div className="difficulty-runs">
-              {difficultyRuns.map((meta) => {
-                const item = itemByDiff(meta.id);
-                const stars = item?.stars ?? 0;
-                const practice = item && item.total > 0;
-                return (
-                  <button
-                    key={meta.id}
-                    className={`run-chip d${meta.id} ${unlocked ? "" : "locked"} ${meta.id === "hard" ? "combat" : ""}`}
-                    disabled={!unlocked}
-                    title={meta.description}
-                    onClick={() =>
-                      unlocked ? onStart(topic, meta.id) : onLocked(topic.unlockTitles)
-                    }
-                  >
-                    <span className="run-chip-label">
-                      {meta.short === "高" ? "高 · 实战" : `${meta.label}`}
-                    </span>
-                    <span className="stars" aria-label={`${meta.label} ${stars} 星`}>
-                      {Array.from({ length: 3 }, (_, i) => (
-                        <Star key={i} size={13} className={i < stars ? "filled" : ""} />
-                      ))}
-                    </span>
-                    <small>
-                      <Clock size={11} /> {msText(topic.budgetsMs[meta.id])}
-                    </small>
-                    {practice && (
+            </button>
+            {(isExpanded || defaultOpen) && (
+              <div className="difficulty-runs">
+                {difficultyRuns.map((meta) => {
+                  const item = itemByDiff(meta.id);
+                  const stars = item?.stars ?? 0;
+                  const practice = item && item.total > 0;
+                  return (
+                    <button
+                      key={meta.id}
+                      className={`run-chip d${meta.id} ${unlocked ? "" : "locked"} ${meta.id === "hard" ? "combat" : ""}`}
+                      disabled={!unlocked}
+                      title={meta.description}
+                      onClick={() =>
+                        unlocked ? onStart(topic, meta.id) : onLocked(topic.unlockTitles)
+                      }
+                    >
+                      <span className="run-chip-label">
+                        {meta.short === "高" ? "高 · 实战" : meta.label}
+                      </span>
+                      <span className="stars" aria-label={`${meta.label} ${stars} 星`}>
+                        {Array.from({ length: 3 }, (_, i) => (
+                          <Star key={i} size={13} className={i < stars ? "filled" : ""} />
+                        ))}
+                      </span>
                       <small>
-                        {item.total} 题 · {Math.round(item.accuracy * 100)}%
+                        <Clock size={11} /> {msText(topic.budgetsMs[meta.id])}
                       </small>
-                    )}
-                    {!unlocked && meta.id === "easy" && (
-                      <small className="lock-hint">
-                        <Lock size={11} /> 需先通关前置模块
-                      </small>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                      {practice && (
+                        <small>
+                          {item.total} 题 · {Math.round(item.accuracy * 100)}%
+                        </small>
+                      )}
+                      {!unlocked && meta.id === "easy" && (
+                        <small className="lock-hint">
+                          <Lock size={11} /> 需先通关前置模块
+                        </small>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

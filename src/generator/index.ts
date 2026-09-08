@@ -36,6 +36,7 @@ import {
   generatePullGrowth,
 } from "./speed/proportion";
 import { contextMaterial } from "./speed/context";
+import { rephraseDraft } from "./speed/scenario";
 // 数字推理
 import {
   generateSeqBasic,
@@ -112,10 +113,15 @@ export function generateQuestion(input: {
     // 高难度局·实战：资料速算任意模块的题目都包装为文字/表格/图表短材料（数推高局保持纯数列）
     if (
       input.difficulty === "hard" &&
-      !draft.material &&
       topicById.get(input.topicId)?.track === "speed"
     ) {
-      draft = { ...draft, material: contextMaterial(draft) };
+      // 加减/乘除先用真题化问法与材料（避免“计算 X”与“数值一/二/三”），其余走语义化语境
+      const scenario = rephraseDraft(draft, input.topicId);
+      if (scenario) {
+        draft = { ...draft, stem: scenario.stem, material: scenario.material };
+      } else if (!draft.material) {
+        draft = { ...draft, material: contextMaterial(draft) };
+      }
     }
     const materialJson = draft.material ? JSON.stringify(draft.material) : "";
     const fingerprint = bytesToHex(
