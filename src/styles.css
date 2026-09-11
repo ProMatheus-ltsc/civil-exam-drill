@@ -1054,12 +1054,27 @@ select {
   flex-wrap: wrap;
 }
 
-/* 错题标签 */
-.mistake-tag {
-  display: inline-block;
-  margin-bottom: 6px;
-  color: #bb623a;
+/* ===== 错题本 · 按「专项训练」模块归类（不区分难度） ===== */
+.mistake-group > .subtitle {
+  margin-bottom: 10px;
+}
+.mistake-count,
+.mistake-track {
+  flex: none;
+  font-style: normal;
+  font-size: 0.68rem;
   font-weight: 800;
+  line-height: 1.6;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.mistake-count {
+  color: #bb623a;
+  background: #fdeee7;
+}
+.mistake-track {
+  color: #315c77;
+  background: #e8f1f7;
 }
 
 /* ===== 个人统计 ===== */

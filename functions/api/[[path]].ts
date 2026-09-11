@@ -1058,10 +1058,15 @@ app.get("/quiz/stats", async (c) => {
   );
 });
 
+/**
+ * 错题本列表：只返回「未掌握」的错题。
+ * 重做正确会把 quiz_attempts.mastered 置 1，该题即从错题本出清（不再返回），
+ * 错题数量随之减少；原始作答记录保留，所以累计答题/正确率等统计不受影响。
+ */
 app.get("/quiz/mistakes", async (c) => {
   const limit = integerQuery(c.req.query("limit"), 20, 1, 100);
   const rows = await c.env.DB.prepare(
-    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.material_json AS materialJson,q.answer_index AS answerIndex,q.explanation,a.mastered,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 ORDER BY lastWrongAt DESC LIMIT ?`,
+    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.material_json AS materialJson,q.answer_index AS answerIndex,q.explanation,a.mastered,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 AND a.mastered=0 ORDER BY lastWrongAt DESC LIMIT ?`,
   )
     .bind(c.get("userId"), limit)
     .all<Record<string, unknown>>();
