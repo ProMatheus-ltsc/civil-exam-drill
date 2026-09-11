@@ -514,13 +514,11 @@ function StageMap({
                       title={`${meta.label} ${stars} 星`}
                     >
                       {stars > 0 ? (
-                        Array.from({ length: 3 }, (_, i) => (
-                          <Star
-                            key={i}
-                            size={11}
-                            className={i < stars ? "filled" : ""}
-                          />
-                        ))
+                        <span className="stars" aria-label={`${stars} 星`}>
+                          {Array.from({ length: stars }, (_, i) => (
+                            <Star key={i} size={11} className="filled" />
+                          ))}
+                        </span>
                       ) : (
                         <span className="mini-empty">{meta.short}</span>
                       )}

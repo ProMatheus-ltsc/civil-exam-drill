@@ -1363,7 +1363,9 @@ select {
 .mini-run .stars {
   gap: 0;
 }
+/* 折叠态摘要星：个数 = 实际星级，颜色按难度局着色（见下方 .mini-run.dX） */
 .mini-run .stars svg.filled {
+  color: inherit;
   fill: currentColor;
 }
 .mini-run.deasy { color: #4d8f6e; }
