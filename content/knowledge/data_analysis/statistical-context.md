@@ -1,11 +1,11 @@
 ---
 id: statistical-context
 module: data_analysis
-category: foundation
+category: overview
 title: "高频统计术语与材料背景"
 summary: "识别同比环比、名义实际、人口贸易和宏观指标，先读懂口径再列式。"
 order: 2
-updatedAt: 2026-09-02
+updatedAt: 2026-09-14
 ---
 
 # 高频统计术语与材料背景

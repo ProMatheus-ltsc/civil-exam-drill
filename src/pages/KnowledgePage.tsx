@@ -18,6 +18,7 @@ import { Stack } from "@shared/core/components/responsive/Stack";
 import { StatCard } from "@shared/core/components/stats/StatCard";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
+import { knowledgeDocHref } from "../lib/doc-link";
 import { useAsync } from "../hooks/useAsync";
 import { isReviewDue } from "../essay/queue";
 import { initialProgress, scheduleReview } from "../essay/scheduler";
@@ -84,6 +85,7 @@ const modules = [
   ["quantitative", "数量关系"],
 ];
 const categoryLabels: Record<string, string> = {
+  overview: "总纲",
   foundation: "基础认知",
   methods: "解题方法",
   growth: "增长专题",
@@ -148,8 +150,7 @@ function computeSummary(cards: EssayCard[], now = new Date().toISOString()): Car
 export function KnowledgePage({ essay = false }: { essay?: boolean }) {
   const [items, setItems] = useState<KnowledgeItem[]>([]),
     [query, setQuery] = useState(""),
-    [module, setModule] = useState("data_analysis"),
-    [docId, setDocId] = useState<string | null>(null);
+    [module, setModule] = useState("data_analysis");
   const { busy, run } = useAsync();
   useEffect(() => {
     let ignore = false;
@@ -185,14 +186,6 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
     return Object.entries(groups);
   }, [filtered]);
   if (busy && !items.length) return <LoadingSpinner message="知识库加载中…" />;
-  if (docId)
-    return (
-      <ArticleDetail
-        docId={docId}
-        backLabel={essay ? "申论知识库" : "行测知识库"}
-        onBack={() => setDocId(null)}
-      />
-    );
   return (
     <section className="panel">
       <div className="heading">
@@ -237,7 +230,13 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
               </div>
               <ResponsiveGrid minItemWidth="230px" gap="0.875rem">
                 {categoryItems.map((item) => (
-                  <button key={item.id} className="entry" onClick={() => setDocId(item.id)}>
+                  <a
+                    key={item.id}
+                    className="entry"
+                    href={knowledgeDocHref(item.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     <small>
                       {essay
                         ? "申论"
@@ -245,7 +244,7 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
                     </small>
                     <strong>{item.title}</strong>
                     <span className="entry-summary">{item.summary}</span>
-                  </button>
+                  </a>
                 ))}
               </ResponsiveGrid>
             </section>

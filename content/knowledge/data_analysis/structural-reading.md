@@ -1,11 +1,11 @@
 ---
 id: structural-reading
 module: data_analysis
-category: foundation
+category: overview
 title: "结构阅读与数据定位"
 summary: "先读时间、单位和段落主语，再按题干关键词定位数据。"
 order: 5
-updatedAt: 2026-09-02
+updatedAt: 2026-09-14
 ---
 
 # 结构阅读与数据定位

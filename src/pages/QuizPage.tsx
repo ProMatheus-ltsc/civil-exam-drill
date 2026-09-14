@@ -9,7 +9,6 @@
  * 由用户的点击 / 展开全部 / 收起全部决定（口径与错题本一致）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   BookOpen,
@@ -30,6 +29,7 @@ import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
+import { openKnowledgeDoc } from "../lib/doc-link";
 import { perQuestionBudgetSeconds } from "../generator/catalog";
 import type { MaterialSpec } from "../generator/types";
 import { MaterialView } from "../components/MaterialView";
@@ -109,7 +109,6 @@ const DIFF_LABEL: Record<Difficulty, string> = {
 const msText = (ms: number) => `${(ms / 1000).toFixed(0)} 秒`;
 
 export function QuizPage() {
-  const navigate = useNavigate();
   const { showToast } = useToast();
   const [catalog, setCatalog] = useState<CatalogData | null>(null);
   const [progress, setProgress] = useState<Map<string, ProgressItem> | null>(null);
@@ -344,7 +343,7 @@ export function QuizPage() {
             onExpandAll={() => setExpandedIds(new Set(stageTopics.map((t) => t.id)))}
             onCollapseAll={() => setExpandedIds(new Set())}
             onStart={(t, d) => void startRun(t, d)}
-            onDocs={(docId) => navigate(`/knowledge/${docId}`)}
+            onDocs={(docId) => openKnowledgeDoc(docId)}
             onLocked={(names) =>
               showToast(`需先通过前置模块的高难度局：${names.join("、")}`, "info")
             }

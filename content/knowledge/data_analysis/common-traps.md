@@ -1,11 +1,11 @@
 ---
 id: common-traps
 module: data_analysis
-category: pitfalls
+category: overview
 title: 时间、单位与口径陷阱
 summary: 用时间、单位、概念、范围和图表五项检查排除高频失分点。
 order: 80
-updatedAt: 2026-09-01
+updatedAt: 2026-09-14
 ---
 
 # 时间、单位与口径陷阱

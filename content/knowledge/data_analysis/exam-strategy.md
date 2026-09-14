@@ -1,11 +1,11 @@
 ---
 id: exam-strategy
 module: data_analysis
-category: foundation
+category: overview
 title: "资料分析整套解题策略"
 summary: "用材料定陷阱、题干定考点、选项定算法，形成稳定的整套作答顺序。"
 order: 1
-updatedAt: 2026-09-02
+updatedAt: 2026-09-14
 ---
 
 # 资料分析整套解题策略

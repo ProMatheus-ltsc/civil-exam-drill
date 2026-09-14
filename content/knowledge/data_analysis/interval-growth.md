@@ -4,8 +4,8 @@ module: data_analysis
 category: growth
 title: "间隔增长率"
 summary: "两个连续增长率合并时使用 r1+r2+r1×r2。"
-order: 24
-updatedAt: 2026-09-02
+order: 34
+updatedAt: 2026-09-14
 ---
 
 # 间隔增长率

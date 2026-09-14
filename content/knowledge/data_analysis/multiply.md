@@ -1,10 +1,10 @@
 ---
-id: multiplication-squares
+id: multiply
 module: data_analysis
 category: methods
 title: "乘法与平方"
 summary: "两位数乘法靠拆分与凑整，平方用平方差或接近100的补数展开；选项锁死末两位时尾数法失效，必须算完整乘积。"
-order: 10
+order: 20
 updatedAt: 2026-09-14
 ---
 

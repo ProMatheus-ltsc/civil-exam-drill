@@ -4,8 +4,8 @@ module: data_analysis
 category: growth
 title: "混合增长率"
 summary: "总体增长率位于各部分增长率之间，并更靠近基期量较大的部分。"
-order: 25
-updatedAt: 2026-09-02
+order: 35
+updatedAt: 2026-09-14
 ---
 
 # 混合增长率

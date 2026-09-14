@@ -1,11 +1,11 @@
 ---
 id: data-comprehensive-analysis
 module: data_analysis
-category: application
+category: overview
 title: 综合分析题验证顺序
 summary: 先验证直接读取和概念判断，再处理估算与多步精算选项。
 order: 70
-updatedAt: 2026-09-01
+updatedAt: 2026-09-14
 ---
 
 # 综合分析题验证顺序

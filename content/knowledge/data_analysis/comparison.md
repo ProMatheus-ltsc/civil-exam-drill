@@ -1,11 +1,11 @@
 ---
 id: comparison
 module: data_analysis
-category: methods
+category: overview
 title: "分数比较"
 summary: "根据分子分母变化选择直除、差分或交叉相乘。"
 order: 12
-updatedAt: 2026-09-02
+updatedAt: 2026-09-14
 ---
 
 # 分数比较

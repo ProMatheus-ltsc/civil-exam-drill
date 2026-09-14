@@ -61,7 +61,7 @@ updatedAt: 2026-09-02
 
 | 模块 | 现行取值 |
 |---|---|
-| data_analysis | `methods` `foundation` `growth` `proportion` `average` `multiple` `pitfalls` `application` |
+| data_analysis | `overview`（总纲） `methods` `growth` `proportion` `average` `multiple` |
 | verbal | `reading` `cloze` `expression` `foundation` |
 | judgment | `graphics` `definition` `analogy` `logic` `science_reasoning` |
 | common_sense | `methods` `science` `politics` `management` + 中文篇目（`人文篇` `历史篇` `法律篇` `科技篇` `经济篇` 等） |
@@ -88,10 +88,10 @@ updatedAt: 2026-09-02
 | 行测 5 模块（非 essay） | `/#/knowledge` | 顶部模块按钮（前端硬编码 5 个）；组内按 `category` 分组 |
 | `essay` 模块 | `/#/essay` →「申论知识」 | 按 `category` 分组 |
 | `essay` + `category: standard-terms` | `/#/essay` →「规范词卡片」 | 见下方卡片规则 |
-| 专项训练某个关卡的讲解 | `/#/quiz` 关卡右侧 📖 | `src/generator/catalog.ts` 里该关卡的 `docId` |
+| 专项训练某个关卡的讲解 | `/#/quiz` 关卡右侧 📖（**新标签页**打开） | `src/generator/catalog.ts` 里该关卡的 `docId` |
 
 - **搜索**：列表页搜索框对标题 / summary / 正文全文检索（`search-index.json`），无需额外配置。
-- **详情**：点击条目后经 `/api/knowledge/:id` 返回渲染，无独立路由。
+- **详情**：点击列表条目（`<a target="_blank">`）或训练页的 📖，都在**新标签页**打开 `/#/knowledge/:id`，当前页（列表状态、答题进度）不丢；详情页的「返回知识库」在同一个标签页内跳回列表。
 - **规范词卡片**：`standard-terms` 文章正文中的 Markdown 表格会被解析为记忆卡片（正面「材料信号」、背面「规范表达」、提示列可选），表头行含「材料信号」时自动跳过。卡片复习进度存数据库，标题格式建议 `规范词：<主题>`：
 
 ```markdown
@@ -102,15 +102,28 @@ updatedAt: 2026-09-02
 | 多个部门都管，却说不清谁负责 | 权责边界不清 | 若互相推脱可写"推诿扯皮" |
 ```
 
-### 关卡 ↔ 讲解文档的关联口径
+### 资料分析与专项训练的对应关系
 
-`src/generator/catalog.ts` 里每个关卡通过 `docId` 指向一篇知识库文档（前端深链 `/#/knowledge/:docId`）。三条口径：
+`data_analysis` 模块的知识库**按专项训练的模块一一对应**（数字推理轨道仍是一对多，见下）：
+
+| 分组（category） | 内容 |
+|---|---|
+| `overview`（总纲） | 不对应任何关卡的通用文章：解题策略、结构阅读、高频统计术语、速算方法选择、分数比较、估算与秒算策略、常见陷阱、综合分析验证顺序、增长四量关系 |
+| `methods` | 加减与多项求和 / 乘法与平方 / 除法估算 / 敏感数与百化分 / 小数速算 |
+| `growth` | 增长率 / 增长量 / 基期量 / 倍数与翻番 / 基期差 / 间隔增长率 / 混合增长率 / 年均增长量 / 年均增长率 / 增长贡献率 / 拉动增长率 / 差值增长率 |
+| `proportion` | 比重与整体量 / 部分量 / 基期比重 / 两期比重差 |
+| `average` | 平均数基础 / 平均数增长率 |
+| `multiple` | 倍数与翻番 |
+
+（`category` 按知识内容的家族归类、不按模块，所以“倍数与翻番”单独成组；模块顺序与专项训练的关卡顺序一致，靠 `order` 控制。）
+
+**关联口径**（`src/generator/catalog.ts` 里 `docId` 指向文档，前端深链 `/#/knowledge/:docId`）：
 
 1. `docId` 必须是 `content/knowledge/<module>/<id>.md` 里真实存在的 id。文档被删/改名不会引起任何编译错误，只会在页面上变成一个打不开的详情页——`tests/knowledge-links.test.ts` 会强制校验，别绕过；
-2. 指向“讲这个考点”的文档，而不是泛化清单；一个文档可以服务多个关卡（`quick-calculation` 就覆盖了计算功底里的加减/敏感数/小数 3 关），但一个考点有专文时应当指向专文；
-3. 文档 `module` 必须与轨道匹配：`speed`（资料速算）→ `data_analysis`，`sequence`（数字推理）→ `quantitative`。
-
-计算功底 5 关的落点：加减与多项求和 / 敏感数与百化分 / 小数速算 → `quick-calculation`（速算方法选择），乘法与平方 → `multiplication-squares`（乘法与平方），除法估算 → `direct-division`（直除法）。若再补写专文，把对应关卡的 `docId` 换过去即可。
+2. **资料速算轨道：一个模块一篇专文，一一对应**——文档 id 就等于模块 id（`catalog.ts` 里 speed 关卡因此不手写 `docId`，由 `topic()` 自动取 id），文档标题也等于模块标题。新增关卡必须同时补一篇同名文档，否则测试会红；
+3. 数字推理轨道的数列专文允许一对多（`basic-sequences` 同时服务基础数列与周期数列、`special-sequences` 同时服务机械划分与因数分解），仍手写 `docId`；
+4. 文档 `module` 必须与轨道匹配：`speed`（资料速算）→ `data_analysis`，`sequence`（数字推理）→ `quantitative`；
+5. 除 `overview` 分组外，`data_analysis` 里不允许出现“没人引用”的模块专文（测试里有一条孤儿检查）。
 
 ## 五、新增独立页面（真正需要新入口时）
 

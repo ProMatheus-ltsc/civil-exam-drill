@@ -1,11 +1,11 @@
 ---
 id: estimation-strategies
 module: data_analysis
-category: methods
+category: overview
 title: "可验证的估算与秒算策略"
 summary: "将代入、放缩、拆分、补集和累计比较整理为有边界的快捷方法。"
-order: 12
-updatedAt: 2026-09-02
+order: 13
+updatedAt: 2026-09-14
 ---
 
 # 可验证的估算与秒算策略
