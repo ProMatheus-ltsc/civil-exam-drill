@@ -165,18 +165,28 @@ export function topicBudget(t: TrainingTopic) {
   );
 }
 
+/**
+ * 关卡 ↔ 知识库讲解的关联口径（每次改 docId 都要照这三条核一遍）：
+ * 1. docId 必须是 `content/knowledge/<module>/<id>.md` 里真实存在的 id——文档被删/改名后这里不会自动报错，
+ *    前端只会点进一个打不开的详情页，所以 `tests/knowledge-links.test.ts` 会强制校验（别绕过它）；
+ * 2. 指向“讲这个考点”的文档，而不是泛化清单：一个文档可以服务多个关卡（速算方法选择就覆盖了计算功底的全部 5 关），
+ *    但不要为了凑 1:1 而指向只沾边的文章；
+ * 3. 文档所属 module 必须与轨道一致：speed（资料速算）→ data_analysis，sequence（数字推理）→ quantitative。
+ * 计算功底 5 关里，加减/敏感数/小数共用《速算方法选择》（它讲方法选择、百化分与加减拆分），
+ * 乘法与平方、除法估算各有专文（multiplication-squares / direct-division）。
+ */
 export const topics: TrainingTopic[] = [
   // ===== 资料速算轨道（先计算功底，再增长线/比重线，高阶综合带材料） =====
   topic("arithmetic", 1, "speed", false, "tool", [], "加减与多项求和", "多位加减、多数求和与凑整", "quick-calculation"),
-  topic("multiply", 1, "speed", false, "tool", ["arithmetic"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
+  topic("multiply", 1, "speed", false, "tool", ["arithmetic"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）", "multiplication-squares"),
   topic("divide", 1, "speed", false, "tool", ["multiply"], "除法估算", "直除首位、除数倍数与商值范围", "direct-division"),
-  topic("sensitive", 2, "speed", false, "tool", ["multiply"], "敏感数与百化分", "分数、百分数与份数关系的快速转换", "growth-basics"),
+  topic("sensitive", 2, "speed", false, "tool", ["multiply"], "敏感数与百化分", "分数、百分数与份数关系的快速转换", "quick-calculation"),
   topic("decimal", 2, "speed", false, "tool", ["arithmetic", "multiply"], "小数速算", "小数对齐、凑整与移位技巧", "quick-calculation"),
   topic("growth-rate", 1, "speed", false, "concept", ["divide"], "增长率", "由基期与现期（或增长量）求同比增速", "growth-basics"),
   topic("growth-amount", 1, "speed", false, "concept", ["growth-rate"], "增长量", "百化分求增量、现期×r÷(1+r)", "growth-amount"),
   topic("base-amount", 2, "speed", false, "concept", ["growth-rate"], "基期量", "现期÷(1+r)、现期−增量求基期", "growth-basics"),
   topic("multiples", 2, "speed", false, "concept", ["growth-rate", "divide"], "倍数与翻番", "现期÷基期、翻番与“增长多少倍”口径", "multiple"),
-  topic("base-difference", 3, "speed", true, "material", ["base-amount"], "基期差", "两对象基期之差/和与现基期比较（材料实战）", "common-traps"),
+  topic("base-difference", 3, "speed", true, "material", ["base-amount"], "基期差", "两对象基期之差/和与现基期比较（材料实战）", "growth-basics"),
   topic("interval-growth", 2, "speed", false, "concept", ["growth-rate"], "间隔增长率", "R=r₁+r₂+r₁×r₂ 与逆向求次期增速", "interval-growth"),
   topic("mixed-growth", 3, "speed", true, "material", ["interval-growth"], "混合增长率", "整体增速介于部分之间并偏向体量大的一方（材料实战）", "mixed-growth"),
   topic("annual-amount", 2, "speed", false, "concept", ["growth-amount"], "年均增长量", "间隔口径下的年均增量与总量推算", "growth-amount-advanced"),
@@ -186,8 +196,8 @@ export const topics: TrainingTopic[] = [
   topic("average-basic", 1, "speed", false, "concept", ["divide"], "平均数基础", "平均=总量÷份数，三量互求", "average"),
   topic("base-ratio", 3, "speed", true, "material", ["part-quantity", "base-amount"], "基期比重", "现期占比×整体与部分增速比（材料实战）", "proportion"),
   topic("ratio-change", 3, "speed", true, "material", ["base-ratio"], "两期比重差", "方向判断 + 幅度上限/估算（材料实战）", "proportion-advanced"),
-  topic("average-rate", 3, "speed", true, "material", ["average-basic", "growth-rate"], "平均数增长率", "(a−b)÷(1+b) 比值型增速（材料实战）", "average-advanced"),
-  topic("diff-rate", 3, "speed", true, "material", ["base-difference", "part-quantity"], "差值增长率", "总量与部分增速已知，求差值（如顺差/逆差）的同比增速（材料实战）", "proportion-advanced"),
+  topic("average-rate", 3, "speed", true, "material", ["average-basic", "growth-rate"], "平均数增长率", "(a−b)÷(1+b) 比值型增速（材料实战）", "growth-rate-advanced"),
+  topic("diff-rate", 3, "speed", true, "material", ["base-difference", "part-quantity"], "差值增长率", "总量与部分增速已知，求差值（如顺差/逆差）的同比增速（材料实战）", "estimation-strategies"),
   topic("contribution-rate", 3, "speed", true, "material", ["growth-amount", "part-quantity"], "增长贡献率", "部分增量÷整体增量（材料实战）", "growth-amount-advanced"),
   topic("pull-growth", 3, "speed", true, "material", ["contribution-rate"], "拉动增长率", "部分增量÷整体基期量，与贡献率区分（材料实战）", "growth-amount-advanced"),
   // ===== 数字推理轨道 =====

@@ -62,61 +62,14 @@ function readBody(req) {
 }
 
 // ==================== Quiz（模拟闯关双轨；开发占位，与生产同响应形状） ====================
-// 目录数据与 src/generator/catalog.ts 保持一致（开发预览用，字段已精简）
-const CATALOG_RAW = [
-  ['arithmetic', '加减与多项求和'], ['multiply', '乘法与平方'], ['divide', '除法估算'], ['sensitive', '敏感数与百化分'],
-  ['decimal', '小数速算'], ['growth-rate', '增长率'], ['growth-amount', '增长量'], ['base-amount', '基期量'],
-  ['multiples', '倍数与翻番'], ['base-difference', '基期差'], ['interval-growth', '间隔增长率'], ['mixed-growth', '混合增长率'],
-  ['annual-amount', '年均增长量'], ['annual-rate', '年均增长率'], ['ratio-basic', '比重与整体量'], ['part-quantity', '部分量'],
-  ['average-basic', '平均数基础'], ['base-ratio', '基期比重'], ['ratio-change', '两期比重差'], ['average-rate', '平均数增长率'],
-  ['diff-rate', '差值增长率'], ['contribution-rate', '增长贡献率'], ['pull-growth', '拉动增长率'],
-  ['seq-basic', '基础数列'], ['seq-multilevel', '多级数列'], ['seq-multiple', '多重数列'], ['seq-periodic', '周期数列'],
-  ['seq-power', '幂次数列'], ['seq-recursive', '递推数列'], ['seq-fraction', '分数数列'], ['seq-split', '机械划分'],
-  ['seq-factor', '因数分解'],
-]
-const RAW_MAP = new Map(CATALOG_RAW)
-const CATALOG = [
-  ['arithmetic', '加减与多项求和', 1, [], false, 'quick-calculation'],
-  ['multiply', '乘法与平方', 1, ['arithmetic'], false, null],
-  ['divide', '除法估算', 1, ['multiply'], false, 'direct-division'],
-  ['sensitive', '敏感数与百化分', 2, ['multiply'], false, 'growth-basics'],
-  ['decimal', '小数速算', 2, ['arithmetic', 'multiply'], false, 'quick-calculation'],
-  ['growth-rate', '增长率', 1, ['divide'], false, 'growth-basics'],
-  ['growth-amount', '增长量', 1, ['growth-rate'], false, 'growth-amount'],
-  ['base-amount', '基期量', 2, ['growth-rate'], false, 'growth-basics'],
-  ['multiples', '倍数与翻番', 2, ['growth-rate', 'divide'], false, 'multiple'],
-  ['base-difference', '基期差', 3, ['base-amount'], true, 'common-traps'],
-  ['interval-growth', '间隔增长率', 2, ['growth-rate'], false, 'interval-growth'],
-  ['mixed-growth', '混合增长率', 3, ['interval-growth'], true, 'mixed-growth'],
-  ['annual-amount', '年均增长量', 2, ['growth-amount'], false, 'growth-amount-advanced'],
-  ['annual-rate', '年均增长率', 3, ['multiples'], true, 'growth-rate-advanced'],
-  ['ratio-basic', '比重与整体量', 2, ['sensitive', 'divide'], false, 'proportion'],
-  ['part-quantity', '部分量', 2, ['ratio-basic'], false, 'proportion'],
-  ['average-basic', '平均数基础', 1, ['divide'], false, 'average'],
-  ['base-ratio', '基期比重', 3, ['part-quantity', 'base-amount'], true, 'proportion'],
-  ['ratio-change', '两期比重差', 3, ['base-ratio'], true, 'proportion-advanced'],
-  ['average-rate', '平均数增长率', 3, ['average-basic', 'growth-rate'], true, 'average-advanced'],
-  ['diff-rate', '差值增长率', 3, ['base-difference', 'part-quantity'], true, 'proportion-advanced'],
-  ['contribution-rate', '增长贡献率', 3, ['growth-amount', 'part-quantity'], true, 'growth-amount-advanced'],
-  ['pull-growth', '拉动增长率', 3, ['contribution-rate'], true, 'growth-amount-advanced'],
-  ['seq-basic', '基础数列', 1, [], false, 'basic-sequences'],
-  ['seq-multilevel', '多级数列', 1, ['seq-basic'], false, 'multilevel-sequences'],
-  ['seq-multiple', '多重数列', 2, ['seq-basic'], false, 'multiple-sequences'],
-  ['seq-periodic', '周期数列', 2, ['seq-multilevel'], false, 'basic-sequences'],
-  ['seq-power', '幂次数列', 2, ['seq-basic'], false, 'power-sequences'],
-  ['seq-recursive', '递推数列', 3, ['seq-multilevel', 'seq-power'], false, 'recursive-sequences'],
-  ['seq-fraction', '分数数列', 3, ['seq-power'], false, 'fraction-sequences'],
-  ['seq-split', '机械划分', 3, ['seq-periodic', 'seq-power'], false, 'special-sequences'],
-  ['seq-factor', '因数分解', 3, ['seq-split'], false, 'special-sequences'],
-].map(([id, title, rating, unlock, material, docId]) => ({
-  id, title, rating,
-  unlock,
-  unlockTitles: unlock.map((u) => RAW_MAP.get(u) || u),
-  material,
-  docId,
-  description: '',
-  budgetMs: 600000,
-}))
+// 关卡目录直接取自 src/generator/catalog.ts（单一事实源），不再手抄一份：
+// 手抄副本会和目录脱钩——比如 data_analysis/direct-division.md 被删掉后，副本里的 docId 依然指着一个不存在的文档，
+// 本地点「查看知识讲解」就打不开详情页，而线上（functions/api 读 catalog.ts）和本地还不一致。
+// 依赖 Node 的类型剥离（≥22.18 默认开启，`node -v` 应 ≥ v22.18）；本文件下方只做“补字段”，不再重复数据。
+const catalogUrl = new URL('../src/generator/catalog.ts', import.meta.url).href
+const { topics: CATALOG, difficultyRuns: RUN_META, tracks: TRACKS, titleOf, topicBudget, difficultyBudgetMs } =
+  await import(catalogUrl)
+
 const RUN_LENGTH = 10
 const DIFFS = ['easy', 'medium', 'hard']
 const quizState = {
@@ -255,7 +208,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // GET /api/quiz/catalog
+  // GET /api/quiz/catalog（字段与 functions/api/[[path]].ts 的 /quiz/catalog 完全对齐）
   if (pathname === '/api/quiz/catalog' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
@@ -264,17 +217,20 @@ const server = http.createServer(async (req, res) => {
         runLength: RUN_LENGTH,
         passAccuracy: 0.8,
         generatorVersion: 3,
-        difficultyRuns: [
-          { id: 'easy', label: '低难度', short: '低', description: '选项差异大、数字简洁' },
-          { id: 'medium', label: '中难度', short: '中', description: '选项更接近、数字更复杂' },
-          { id: 'hard', label: '高难度 · 实战', short: '高', description: '资料速算附文字/表格/图表材料' },
-        ],
-        tracks: ['speed', 'sequence'].map((trackId) => ({
-          id: trackId,
-          title: trackId === 'speed' ? '资料速算' : '数字推理',
-          description: '',
-          topics: CATALOG.filter((t) => (trackId === 'speed' ? !t.id.startsWith('seq-') : t.id.startsWith('seq-')))
-            .map((t) => ({ ...t, budgetsMs: { easy: 200000, medium: 380000, hard: 600000 } })),
+        difficultyRuns: RUN_META,
+        tracks: TRACKS.map((track) => ({
+          ...track,
+          topics: CATALOG.filter((t) => t.track === track.id).map((t) => ({
+            ...t,
+            budgetMs: topicBudget(t),
+            budgetsMs: {
+              easy: difficultyBudgetMs(t, 'easy'),
+              medium: difficultyBudgetMs(t, 'medium'),
+              hard: difficultyBudgetMs(t, 'hard'),
+            },
+            unlockTitles: t.unlock.map(titleOf),
+            docId: t.docId ?? null,
+          })),
         })),
       },
       error: null,
@@ -314,7 +270,7 @@ const server = http.createServer(async (req, res) => {
         const locked = topic && (topic.unlock || []).filter((u) => (starsByKey.get(`${u}|hard`) ?? 0) < 1)
         if (locked && locked.length) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map((u) => (CATALOG_RAW.find((x) => x[0] === u) || [u, u])[1]).join('、')}` } }))
+          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join('、')}` } }))
           return
         }
         if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [] })

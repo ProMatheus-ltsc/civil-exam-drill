@@ -78,6 +78,7 @@ updatedAt: 2026-09-02
 4. 本地预览：
    - 终端 A 启动 API mock：`node scripts/dev-api-server.mjs`（监听 4174，每次请求实时读 entries.json，无需重启）
    - 终端 B 启动页面：`npm run dev`（http://localhost:5173 ，`/api` 代理到 4174）
+   - 前置条件：先跑过一次 `npm run content:build`（mock 读 `public/generated/knowledge/entries.json`）；mock 用 `import` 直接读 `src/generator/catalog.ts`，因此需要 Node ≥ 22.18（类型剥离默认开启；`node -v` 自查）
 5. 验证展示位置（见下节），确认后即可提交源码。
 
 ## 四、文档如何出现在页面
@@ -87,6 +88,7 @@ updatedAt: 2026-09-02
 | 行测 5 模块（非 essay） | `/#/knowledge` | 顶部模块按钮（前端硬编码 5 个）；组内按 `category` 分组 |
 | `essay` 模块 | `/#/essay` →「申论知识」 | 按 `category` 分组 |
 | `essay` + `category: standard-terms` | `/#/essay` →「规范词卡片」 | 见下方卡片规则 |
+| 专项训练某个关卡的讲解 | `/#/quiz` 关卡右侧 📖 | `src/generator/catalog.ts` 里该关卡的 `docId` |
 
 - **搜索**：列表页搜索框对标题 / summary / 正文全文检索（`search-index.json`），无需额外配置。
 - **详情**：点击条目后经 `/api/knowledge/:id` 返回渲染，无独立路由。
@@ -99,6 +101,16 @@ updatedAt: 2026-09-02
 |---|---|---|
 | 多个部门都管，却说不清谁负责 | 权责边界不清 | 若互相推脱可写"推诿扯皮" |
 ```
+
+### 关卡 ↔ 讲解文档的关联口径
+
+`src/generator/catalog.ts` 里每个关卡通过 `docId` 指向一篇知识库文档（前端深链 `/#/knowledge/:docId`）。三条口径：
+
+1. `docId` 必须是 `content/knowledge/<module>/<id>.md` 里真实存在的 id。文档被删/改名不会引起任何编译错误，只会在页面上变成一个打不开的详情页——`tests/knowledge-links.test.ts` 会强制校验，别绕过；
+2. 指向“讲这个考点”的文档，而不是泛化清单；一个文档可以服务多个关卡（`quick-calculation` 就覆盖了计算功底里的加减/敏感数/小数 3 关），但一个考点有专文时应当指向专文；
+3. 文档 `module` 必须与轨道匹配：`speed`（资料速算）→ `data_analysis`，`sequence`（数字推理）→ `quantitative`。
+
+计算功底 5 关的落点：加减与多项求和 / 敏感数与百化分 / 小数速算 → `quick-calculation`（速算方法选择），乘法与平方 → `multiplication-squares`（乘法与平方），除法估算 → `direct-division`（直除法）。若再补写专文，把对应关卡的 `docId` 换过去即可。
 
 ## 五、新增独立页面（真正需要新入口时）
 
@@ -115,11 +127,11 @@ updatedAt: 2026-09-02
 | `npm run content:validate` | 校验 frontmatter / 命名 / 结构（CI 与 prebuild 都会执行） |
 | `npm run content:build` | 重建索引 JSON |
 | `npm run build` | 先 `content:validate` + `content:build`，再类型检查 + 打包（`prebuild` 钩子自动完成前两步） |
-| `npm test` | 单元测试 |
+| `npm test` | 单元测试（含 `knowledge-links`：关卡 docId 必须命中真实文档、模块要与轨道一致） |
 | `npm run dev` | 本地开发（需先起 mock API，见第三节） |
 | `npx wrangler pages deploy dist --project-name civil-exam-drill` | 部署到 Cloudflare Pages |
 
-推送 `main` 后不会自动触发部署：`workspace/.github/workflows/deploy.yml` 只是示例（GitHub Actions 只识别仓库根的 `.github/workflows/`，当前位于项目 workspace 内）。如需 CI 自动部署，将其移至仓库根并修正相对路径。
+推送 `main` 会触发 `.github/workflows/deploy.yml`（仓库根，已入库）：clone shared-core（pin 971b3e6）→ `npm ci` → `content:validate` / `content:build` → `npm test` → `npm run build` → `wrangler d1 migrations apply --remote` → 部署到 Cloudflare Pages。
 
 ## 七、已知限制与注意事项
 
