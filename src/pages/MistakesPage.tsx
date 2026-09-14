@@ -4,9 +4,11 @@
  * 因为难度只影响题目生成，对“哪块知识薄弱”的判断没有区分价值。
  * 分组顺序：沿用接口返回的“最近答错时间倒序”，即最近出错的模块排在最前。
  * 出清口径：重做正确 → 后端把该题标记为已掌握，列表不再返回，错题数量随之减少。
+ * 折叠口径：每个模块可单独折叠/展开，默认只展开最近出错的模块（错题多时先看清单再逐块展开），
+ * 展开状态按模块 id 记录，重做刷新数据后保持用户的选择。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks } from "lucide-react";
+import { ChevronDown, ChevronRight, ListChecks } from "lucide-react";
 import { EmptyState } from "@shared/core/components/EmptyState";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
@@ -129,6 +131,8 @@ function MistakeCard({
 
 export function MistakesPage() {
   const [items, setItems] = useState<Mistake[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const inited = useRef(false);
   const { busy, run } = useAsync();
   const load = () =>
     run(async () =>
@@ -151,6 +155,22 @@ export function MistakesPage() {
     return [...map.entries()];
   }, [items]);
 
+  const groupIds = useMemo(() => groups.map(([topicId]) => topicId), [groups]);
+  // 首次拿到数据时只展开最近出错的模块；此后不再自动改动，避免重做后把用户手动收起的模块又弹开
+  useEffect(() => {
+    if (inited.current || !groupIds.length) return;
+    inited.current = true;
+    setExpandedIds(new Set([groupIds[0]]));
+  }, [groupIds]);
+
+  const toggle = (topicId: string) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+
   if (busy && !items.length) return <LoadingSpinner message="错题加载中…" />;
   return (
     <section className="panel">
@@ -158,31 +178,62 @@ export function MistakesPage() {
       <h2>错题本</h2>
       {groups.length ? (
         <>
-          <p className="muted hint-line">
-            <ListChecks size={14} /> 共 {items.length} 道错题，按「专项训练」的模块归类，
-            同一模块内不再区分难度；重做正确的题目会自动移出本页。
-          </p>
+          <div className="mistake-toolbar">
+            <p className="muted hint-line">
+              <ListChecks size={14} /> 共 {items.length} 道错题，按「专项训练」的模块归类，
+              同一模块内不再区分难度；点击模块标题可折叠，重做正确的题目会自动移出本页。
+            </p>
+            <div className="mistake-actions">
+              <button
+                className="secondary map-collapse-btn"
+                onClick={() => setExpandedIds(new Set(groupIds))}
+              >
+                展开全部
+              </button>
+              <button
+                className="secondary map-collapse-btn"
+                onClick={() => setExpandedIds(new Set())}
+              >
+                收起全部
+              </button>
+            </div>
+          </div>
           <Stack gap="1.5rem">
             {groups.map(([topicId, list]) => {
               const trackTitle = trackTitleOf(topicId);
+              const open = expandedIds.has(topicId);
               return (
-                <section className="mistake-group" key={topicId}>
-                  <p className="subtitle">
-                    {titleOf(topicId)}
+                <section
+                  className={`mistake-group ${open ? "is-open" : ""}`}
+                  key={topicId}
+                >
+                  <button
+                    className="mistake-group-head"
+                    aria-expanded={open}
+                    onClick={() => toggle(topicId)}
+                  >
+                    <span className="mistake-group-title">
+                      {titleOf(topicId)}
+                    </span>
                     <span className="mistake-count">{list.length} 题</span>
                     {trackTitle && (
                       <span className="mistake-track">{trackTitle}</span>
                     )}
-                  </p>
-                  <Stack gap="1rem">
-                    {list.map((item) => (
-                      <MistakeCard
-                        item={item}
-                        key={item.questionId}
-                        onUpdated={load}
-                      />
-                    ))}
-                  </Stack>
+                    <span className="mistake-chevron">
+                      {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </span>
+                  </button>
+                  {open && (
+                    <Stack gap="1rem">
+                      {list.map((item) => (
+                        <MistakeCard
+                          item={item}
+                          key={item.questionId}
+                          onUpdated={load}
+                        />
+                      ))}
+                    </Stack>
+                  )}
                 </section>
               );
             })}

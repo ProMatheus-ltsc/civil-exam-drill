@@ -5,6 +5,8 @@
  * - 通过本模块「高难度 · 实战」局（≥8 对且限时内）才算模块通关，解锁下一模块；
  * - 低/中局用于练习与刷星，通关关卡可反复重练。
  * 交互：答题乐观过渡、答案期间预取下一题、骨架屏与失败重试。
+ * 折叠：每个轨道首次进入时默认展开“首个尚未高难通关”的模块，其余收起；此后不再自动改动，
+ * 由用户的点击 / 展开全部 / 收起全部决定（口径与错题本一致）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -161,20 +163,23 @@ export function QuizPage() {
     [catalog, track],
   );
 
-  // 默认折叠：仅在切换轨道/首次进入时，自动展开当前轨道“首个尚未高难通关”的模块
-  const lastTrackRef = useRef<TrackId | null>(null);
+  // 默认折叠：每个轨道只在「数据就绪后的首次进入」自动展开“首个尚未高难通关”的模块，
+  // 之后完全尊重用户的手动折叠（口径与错题本一致：初始化只做一次，不被后续数据刷新重置）。
+  // 注意 guard 必须在写 ref 之前——否则首帧 catalog/progress 还是 null 时就把轨道记为已初始化，
+  // 等数据回来再也不会展开（原实现的 bug）。
+  // 合并而非覆盖：切轨道时保留另一条轨道已展开的模块，切回来时状态不丢。
+  const initedTracks = useRef<Set<TrackId>>(new Set());
   useEffect(() => {
-    if (screen !== "map") return;
-    const changed = lastTrackRef.current !== track;
-    lastTrackRef.current = track;
-    if (!changed) return;
+    if (initedTracks.current.has(track)) return;
     if (!catalog || !progress || stageTopics.length === 0) return;
+    initedTracks.current.add(track);
     const firstNotCleared = stageTopics.find(
       (t) => (progress.get(`${t.id}:hard`)?.stars ?? 0) < 1,
     );
-    setExpandedIds(new Set([firstNotCleared?.id ?? stageTopics[0].id]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, track, catalog, progress, stageTopics]);
+    setExpandedIds(
+      (prev) => new Set([...prev, firstNotCleared?.id ?? stageTopics[0].id]),
+    );
+  }, [track, catalog, progress, stageTopics]);
 
   const ensureQuestion = useCallback(
     async (index: number): Promise<QuestionData | null> => {
@@ -328,11 +333,6 @@ export function QuizPage() {
             progressMap={progress}
             progressKey={progressKey}
             expandedIds={expandedIds}
-            defaultExpandedId={
-              stageTopics.find(
-                (t) => (progress?.get(`${t.id}:hard`)?.stars ?? 0) < 1,
-              )?.id ?? stageTopics[0]?.id
-            }
             onToggle={(id) =>
               setExpandedIds((prev) => {
                 const next = new Set(prev);
@@ -342,9 +342,7 @@ export function QuizPage() {
               })
             }
             onExpandAll={() => setExpandedIds(new Set(stageTopics.map((t) => t.id)))}
-            onCollapseAll={() =>
-              setExpandedIds(new Set([stageTopics[0]?.id].filter(Boolean) as string[]))
-            }
+            onCollapseAll={() => setExpandedIds(new Set())}
             onStart={(t, d) => void startRun(t, d)}
             onDocs={(docId) => navigate(`/knowledge/${docId}`)}
             onLocked={(names) =>
@@ -397,7 +395,6 @@ function StageMap({
   progressMap,
   progressKey,
   expandedIds,
-  defaultExpandedId,
   onToggle,
   onExpandAll,
   onCollapseAll,
@@ -410,7 +407,6 @@ function StageMap({
   progressMap: Map<string, ProgressItem> | null;
   progressKey: (topicId: string, difficulty: Difficulty) => string;
   expandedIds: Set<string>;
-  defaultExpandedId: string | undefined;
   onToggle: (id: string) => void;
   onExpandAll: () => void;
   onCollapseAll: () => void;
@@ -464,7 +460,7 @@ function StageMap({
         </button>
       </div>
       <p className="muted">
-        点击模块展开“低 / 中 / 高”三个难度局；难度越高，题干数字越复杂、选项越接近。
+        点击模块展开“低 / 中 / 高”三个难度局（默认只展开首个未通关的模块）；难度越高，题干数字越复杂、选项越接近。
         <strong> 通过“高难度 · 实战”局（≥8 对且限时内）才算模块通关</strong>，可解锁下一模块。
       </p>
       {visible.length === 0 && (
@@ -479,16 +475,15 @@ function StageMap({
           progressMap?.get(progressKey(topic.id, difficulty));
         const unlocked = itemByDiff("easy")?.unlocked ?? false;
         const isExpanded = expandedIds.has(topic.id);
-        const defaultOpen = topic.id === defaultExpandedId && isExpanded;
         const clearedHard = (itemByDiff("hard")?.stars ?? 0) >= 1;
         return (
           <div
-            className={`stage-card ${unlocked ? "" : "is-locked"} ${isExpanded || defaultOpen ? "is-open" : ""}`}
+            className={`stage-card ${unlocked ? "" : "is-locked"} ${isExpanded ? "is-open" : ""}`}
             key={topic.id}
           >
             <button
               className="stage-card-head"
-              aria-expanded={isExpanded || defaultOpen}
+              aria-expanded={isExpanded}
               onClick={() => onToggle(topic.id)}
             >
               <span className={`stage-badge r${topic.rating}`}>
@@ -527,11 +522,7 @@ function StageMap({
                 })}
               </span>
               <span className="stage-arrow">
-                {isExpanded || defaultOpen ? (
-                  <ChevronDown size={18} />
-                ) : (
-                  <ChevronRight size={18} />
-                )}
+                {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
               </span>
               {topic.docId && (
                 <span
@@ -547,7 +538,7 @@ function StageMap({
                 </span>
               )}
             </button>
-            {(isExpanded || defaultOpen) && (
+            {isExpanded && (
               <div className="difficulty-runs">
                 {difficultyRuns.map((meta) => {
                   const item = itemByDiff(meta.id);

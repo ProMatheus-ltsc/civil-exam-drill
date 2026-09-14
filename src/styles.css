@@ -1054,9 +1054,65 @@ select {
   flex-wrap: wrap;
 }
 
-/* ===== 错题本 · 按「专项训练」模块归类（不区分难度） ===== */
-.mistake-group > .subtitle {
-  margin-bottom: 10px;
+/* ===== 错题本 · 按「专项训练」模块归类（不区分难度）+ 模块折叠 ===== */
+.mistake-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0 4px;
+}
+.mistake-toolbar .hint-line {
+  flex: 1;
+  min-width: 240px;
+  margin: 0;
+}
+/* 展开/收起按钮复用专项训练的小按钮尺寸（.map-collapse-btn） */
+.mistake-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.mistake-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border: 1px solid #d8e1e5;
+  border-radius: 12px;
+  background: #fbfcfd;
+  color: #17324d;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.mistake-group-head:hover {
+  border-color: #bb623a;
+  box-shadow: 0 4px 12px #17324d12;
+}
+.mistake-group-head:focus-visible {
+  outline: 2px solid #bb623a;
+  outline-offset: 2px;
+}
+.mistake-group.is-open .mistake-group-head {
+  background: #fff;
+}
+.mistake-group-title {
+  flex: 1;
+  min-width: 0;
+}
+.mistake-chevron {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: #71818d;
 }
 .mistake-count,
 .mistake-track {
