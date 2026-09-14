@@ -101,35 +101,53 @@ export async function loadEntries() {
           : meta.updatedAt,
       source: relative,
       markdown: parsed.content.trim(),
-      html: sanitizeHtml(marked.parse(parsed.content, { async: false }), {
-        allowedTags: [
-          "h1",
-          "h2",
-          "h3",
-          "p",
-          "ul",
-          "ol",
-          "li",
-          "strong",
-          "em",
-          "code",
-          "pre",
-          "blockquote",
-          "table",
-          "thead",
-          "tbody",
-          "tr",
-          "th",
-          "td",
-          "a",
-          "hr",
-          "br",
-        ],
-        allowedAttributes: { a: ["href", "title"] },
-        allowedSchemes: ["http", "https", "mailto"],
-        allowProtocolRelative: false,
-      }),
+      html: stripLeadingTitle(
+        sanitizeHtml(marked.parse(parsed.content, { async: false }), {
+          allowedTags: [
+            "h1",
+            "h2",
+            "h3",
+            "p",
+            "ul",
+            "ol",
+            "li",
+            "strong",
+            "em",
+            "code",
+            "pre",
+            "blockquote",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "a",
+            "hr",
+            "br",
+          ],
+          allowedAttributes: { a: ["href", "title"] },
+          allowedSchemes: ["http", "https", "mailto"],
+          allowProtocolRelative: false,
+        }),
+        meta.title,
+      ),
     });
   }
   return { entries, errors };
+}
+
+/**
+ * 去掉正文开头的标题行。
+ * 文档约定「首行放 `# 标题`（与 title 一致）」，而详情页自己会渲染一枚带样式的标题，
+ * 两处叠加就会出现同一个标题重复两次，所以渲染 HTML 时把这个开头的 h1 拿掉：
+ * Markdown 源文件保持约定不变（便于直接阅读/检索），只有对外输出的 html 不带它。
+ * 只在这一行确实与 title 一致时才去掉，避免误删正文里的小标题。
+ */
+function stripLeadingTitle(html, title) {
+  const match = html.match(/^\s*<h1[^>]*>([\s\S]*?)<\/h1>\s*/i);
+  if (!match) return html;
+  const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const expected = String(title ?? "").replace(/\s+/g, " ").trim();
+  return text === expected ? html.slice(match[0].length) : html;
 }

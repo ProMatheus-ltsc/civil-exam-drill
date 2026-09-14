@@ -38,6 +38,26 @@ function toListItem(entry) {
   }
 }
 
+// 与 functions/api/[[path]].ts 的 splitSections 保持一致：按一级/二级标题切段
+function splitSections(markdown) {
+  const sections = []
+  let heading = '正文'
+  let lines = []
+  for (const line of markdown.split('\n')) {
+    if (/^#{1,2}\s+/.test(line)) {
+      if (lines.join('\n').trim()) sections.push({ heading, content: lines.join('\n').trim() })
+      heading = line.replace(/^#{1,2}\s+/, '')
+      lines = []
+    } else lines.push(line)
+  }
+  if (lines.join('\n').trim()) sections.push({ heading, content: lines.join('\n').trim() })
+  return sections
+}
+
+function takeSection(markdown, name) {
+  return splitSections(markdown).find((section) => section.heading === name)?.content ?? ''
+}
+
 function parseQuery(url) {
   const idx = url.indexOf('?')
   if (idx === -1) return {}
@@ -171,7 +191,23 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         success: true,
-        data: { html: entry.html || entry.markdown || '' },
+        // 与 functions/api/[[path]].ts 的 /knowledge/:id 同形：title 必须给，
+        // 详情页用它渲染自己的标题（正文开头的 h1 已在构建时剥掉），少给就会没标题
+        data: {
+          id: entry.id,
+          module: entry.module,
+          category: entry.category,
+          title: entry.title,
+          html: entry.html,
+          sections: splitSections(entry.markdown || ''),
+          example: entry.module === 'quantitative'
+            ? {
+                stem: takeSection(entry.markdown || '', '例题'),
+                answer: takeSection(entry.markdown || '', '答案'),
+                explanation: takeSection(entry.markdown || '', '讲解'),
+              }
+            : null,
+        },
         error: null,
       }))
     } else {
