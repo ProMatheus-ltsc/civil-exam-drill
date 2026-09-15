@@ -50,6 +50,7 @@ updatedAt: 2026-09-02
 
 ### 正文规范
 
+- **方法一律以「能口算完」为标准**（资料分析 `data_analysis` 与数字推理 `quantitative/sequences` 这两个知识库）。需要动笔的算法（竖式、长除、开方、硬乘、逐个代入试算）只能作为**参考与对照**出现，且必须显式标注——写法：`✏️常规法（参考·考场不用）` 或 `**验算对照**：…`。不允许把「按计算器 / 动笔精算」当成推荐做法（守卫在 `tests/knowledge-conventions.test.ts`）。两条总纲：`data_analysis/quick-calculation`（速算方法选择）、`quantitative/number-sequences`（数字推理识别顺序）。
 - 首行放 `# 标题`（与 `title` 一致）；内容支持标准 Markdown（标题、列表、表格、代码块、引用、加粗等）。源文件保留这一行，但**生成的 HTML 会把它剥掉**——详情页用 `title` 自己渲染带样式的标题，不剥就会出现同一个标题显示两次（见 `scripts/content/lib.mjs` 的 `stripLeadingTitle`、守卫在 `tests/knowledge-render.test.ts`）。
 - **禁止书写 raw HTML**（校验拒绝含 `<script>` 等标签的内容）。
 - 图片：`![说明](assets/…/x.png)` 引用允许写在源文件，但渲染白名单不含 `<img>`，**图片不会在页面显示**（属既有系统限制）。
