@@ -117,7 +117,8 @@ updatedAt: 2026-09-02
 
 （`category` 按知识内容的家族归类、不按模块，所以“倍数与翻番”单独成组；模块顺序与专项训练的关卡顺序一致，靠 `order` 控制。）
 
-> 2026-09-15：「加减与多项求和」按运算拆成 **加法 / 减法 / 多项求和 / 多项求差** 四关（公考里这四种都单独考，见各篇专文）。旧 id `arithmetic` 只留在 `legacyTopics` 里供历史错题展示与「已拆分为独立关卡」的提示；`migrations/0005_split_arithmetic_modules.sql` 按 `template_id` 把历史题目归位到对应新关卡，避免练习统计与通关状态丢失。
+> 2026-09-15：「加减与多项求和」按运算拆成 **加法 / 减法 / 多项求和 / 多项求差** 四关（公考里这四种都单独考，见各篇专文），解锁链为
+> **加法（入口）→ 减法 / 多项求和 →（过了减法）多项求差、（过了多项求和）乘法与平方**。旧 id `arithmetic` 只留在 `legacyTopics` 里供历史错题展示与「已拆分为独立关卡」的提示；`migrations/0005_split_arithmetic_modules.sql` 按 `template_id` 把历史题目归位到对应新关卡，避免练习统计与通关状态丢失。
 
 **关联口径**（`src/generator/catalog.ts` 里 `docId` 指向文档，前端深链 `/#/knowledge/:docId`）：
 

@@ -48,6 +48,9 @@ class FakeStatement {
   async all<T>() {
     if (this.sql.includes("FROM generated_questions WHERE user_id=? AND run_id=?"))
       return { results: this.db.runQuestionRows as T[] };
+    // 通关判定用的「按局聚合」查询：喂 passRuns 即可模拟「某模块某难度局已通关」
+    if (this.sql.includes("GROUP BY q.topic_id,q.difficulty,a.run_id"))
+      return { results: this.db.passRuns as T[] };
     return { results: [] as T[] };
   }
   async run() {
@@ -59,6 +62,8 @@ class FakeDb {
   batches: FakeStatement[][] = [];
   /** 本局已生成的题（questions 接口按序号回查用），默认空表示「这一序号还没生成」 */
   runQuestionRows: unknown[] = [];
+  /** 已通关的局（用于解锁链断言）：{ topicId, difficulty, runId, total, correct, durationMs } */
+  passRuns: unknown[] = [];
   /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
   writes: string[] = [];
   prepare(sql: string) {
@@ -290,6 +295,10 @@ describe("API contract guards", () => {
     expect(progress).toHaveLength(35 * 3);
     expect(byId.get("addition:easy").unlocked).toBe(true);
     expect(byId.get("addition:hard").unlocked).toBe(true);
+    // 计算功底是一条链：什么都没过时，只有入口「加法」可练
+    expect(byId.get("subtraction:easy").unlocked).toBe(false);
+    expect(byId.get("sum-many:easy").unlocked).toBe(false);
+    expect(byId.get("diff-many:easy").unlocked).toBe(false);
     expect(byId.get("multiply:easy").unlocked).toBe(false);
 
     const lockedResponse = await app.request(
@@ -308,6 +317,57 @@ describe("API contract guards", () => {
     );
     expect(lockedResponse.status).toBe(409);
     expect((await lockedResponse.json()).error.code).toBe("TOPIC_LOCKED");
+  });
+
+  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/乘法与平方", async () => {
+    const unlockedMap = async (db: FakeDb) => {
+      const response = await app.request("/api/quiz/progress", { headers: auth }, { ...env, DB: db });
+      expect(response.status).toBe(200);
+      const rows = (await response.json()).data as Array<{
+        topicId: string;
+        difficulty: string;
+        unlocked: boolean;
+      }>;
+      return new Map(
+        rows.filter((row) => row.difficulty === "easy").map((row) => [row.topicId, row.unlocked]),
+      );
+    };
+    // 一局 10 题全对且在预算内 → 该难度局通关（高难度局通关才解锁下一关）
+    const passedRun = (topicId: string) => ({
+      topicId,
+      difficulty: "hard",
+      runId: `run-${topicId}`,
+      total: 10,
+      correct: 10,
+      durationMs: 1000,
+    });
+    const afterPassing = async (...topicIds: string[]) => {
+      const db = new FakeDb();
+      db.passRuns = topicIds.map(passedRun);
+      return unlockedMap(db);
+    };
+
+    const none = await afterPassing();
+    expect(none.get("addition")).toBe(true);
+    expect(none.get("subtraction")).toBe(false);
+
+    // 过了加法：减法与多项求和一并解锁，但多项求差、乘法还锁着
+    const afterAdd = await afterPassing("addition");
+    expect(afterAdd.get("subtraction")).toBe(true);
+    expect(afterAdd.get("sum-many")).toBe(true);
+    expect(afterAdd.get("diff-many")).toBe(false);
+    expect(afterAdd.get("multiply")).toBe(false);
+
+    // 过了减法：多项求差解锁
+    const afterSub = await afterPassing("addition", "subtraction");
+    expect(afterSub.get("diff-many")).toBe(true);
+    expect(afterSub.get("multiply")).toBe(false);
+
+    // 过了多项求和：乘法与平方解锁（除法仍挂在下游）
+    const afterSum = await afterPassing("addition", "sum-many");
+    expect(afterSum.get("multiply")).toBe(true);
+    expect(afterSum.get("divide")).toBe(false);
+    expect(afterSum.get("diff-many")).toBe(false);
   });
 
   it("generates the first run question of the requested difficulty run", async () => {

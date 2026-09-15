@@ -183,13 +183,14 @@ export function topicBudget(t: TrainingTopic) {
  */
 export const topics: TrainingTopic[] = [
   // ===== 资料速算轨道（先计算功底，再增长线/比重线，高阶综合带材料） =====
-  // 计算功底四关是并列的基础技能（都不设前置，想先练哪项就练哪项）；
-  // 四项都需要出现在资料分析的算式里，所以「乘法与平方」只前置最基础的加法。
+  // 计算功底是一条解锁链，不是并列四项：
+  //   加法（入口）→ 减法 / 多项求和 →（减法之后）多项求差、（多项求和之后）乘法与平方
+  // 会加才会减、才会连加；会减了再练连减，连加稳了才进乘法。
   topic("addition", 1, "speed", false, "tool", [], "加法", "多位数加法：拆分凑整与高位叠加"),
-  topic("subtraction", 1, "speed", false, "tool", [], "减法", "多位数减法：退位、减数凑整与整十整百被减数"),
-  topic("sum-many", 1, "speed", false, "tool", [], "多项求和", "3~5 项连加：配对凑整、分组与基准数法"),
-  topic("diff-many", 1, "speed", false, "tool", [], "多项求差", "连减、两组和相减与“总量减去各部分”"),
-  topic("multiply", 1, "speed", false, "tool", ["addition"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
+  topic("subtraction", 1, "speed", false, "tool", ["addition"], "减法", "多位数减法：退位、减数凑整与整十整百被减数"),
+  topic("sum-many", 1, "speed", false, "tool", ["addition"], "多项求和", "3~5 项连加：配对凑整、分组与基准数法"),
+  topic("diff-many", 1, "speed", false, "tool", ["subtraction"], "多项求差", "连减、两组和相减与“总量减去各部分”"),
+  topic("multiply", 1, "speed", false, "tool", ["sum-many"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
   topic("divide", 1, "speed", false, "tool", ["multiply"], "除法估算", "直除首位、除数倍数与商值范围"),
   topic("sensitive", 2, "speed", false, "tool", ["multiply"], "敏感数与百化分", "分数、百分数与份数关系的快速转换"),
   topic("decimal", 2, "speed", false, "tool", ["addition", "multiply"], "小数速算", "小数对齐、凑整与移位技巧"),

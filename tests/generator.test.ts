@@ -2,11 +2,63 @@ import { describe, expect, it } from "vitest";
 import {
   difficulties,
   generateQuestion,
+  topicById,
   topics,
   titleOf,
 } from "../src/generator";
+import type { TopicId } from "../src/generator";
 
 describe("question generator", () => {
+  /**
+   * 计算功底的解锁链（设计意图，改链条时这里要一起改）：
+   *   加法（入口）→ 减法 | 多项求和 →（减法之后）多项求差、（多项求和之后）乘法与平方
+   */
+  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/乘法与平方", () => {
+    const unlockOf = (id: TopicId) => topicById.get(id)?.unlock ?? [];
+    expect(unlockOf("addition")).toEqual([]);
+    expect(unlockOf("subtraction")).toEqual(["addition"]);
+    expect(unlockOf("sum-many")).toEqual(["addition"]);
+    expect(unlockOf("diff-many")).toEqual(["subtraction"]);
+    expect(unlockOf("multiply")).toEqual(["sum-many"]);
+    // 下游不受影响：除法与敏感数仍挂在乘法上
+    expect(unlockOf("divide")).toEqual(["multiply"]);
+    expect(unlockOf("sensitive")).toEqual(["multiply"]);
+  });
+
+  it("解锁前置都真实存在、同轨道，且不构成环", () => {
+    const known = new Map(topics.map((topic) => [topic.id, topic]));
+    // 前置 id 写错（改名/删关卡后的残留）会让这一关永远锁死，页面上只显示灰按钮
+    const dangling = topics
+      .flatMap((topic) =>
+        topic.unlock.filter((prereq) => !known.has(prereq)).map((prereq) => `${topic.id} → ${prereq}`),
+      )
+      .filter(Boolean);
+    expect(dangling).toEqual([]);
+    const crossTrack = topics
+      .filter((topic) =>
+        topic.unlock.some((prereq) => known.get(prereq)?.track !== topic.track),
+      )
+      .map((topic) => topic.id);
+    expect(crossTrack).toEqual([]);
+    // 有环 = 互等对方通关，两边都解不开
+    const cyclic: string[] = [];
+    for (const topic of topics) {
+      const stack = [...topic.unlock];
+      const seen = new Set<string>();
+      while (stack.length > 0) {
+        const current = stack.pop() as TopicId;
+        if (current === topic.id) {
+          cyclic.push(topic.id);
+          break;
+        }
+        if (seen.has(current)) continue;
+        seen.add(current);
+        stack.push(...(known.get(current)?.unlock ?? []));
+      }
+    }
+    expect(cyclic).toEqual([]);
+  });
+
   for (const topic of topics) {
     for (const difficulty of difficulties) {
       it(`${topic.id}/${difficulty.id} is deterministic and valid`, () => {
