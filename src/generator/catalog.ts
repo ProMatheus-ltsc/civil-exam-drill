@@ -2,8 +2,11 @@
 import type { Difficulty } from "./types";
 
 export type TopicId =
-  // 资料速算轨道
-  | "arithmetic"
+  // 资料速算轨道（计算功底四项：加法 / 减法 / 多项求和 / 多项求差，各自独立成关）
+  | "addition"
+  | "subtraction"
+  | "sum-many"
+  | "diff-many"
   | "multiply"
   | "divide"
   | "sensitive"
@@ -180,11 +183,16 @@ export function topicBudget(t: TrainingTopic) {
  */
 export const topics: TrainingTopic[] = [
   // ===== 资料速算轨道（先计算功底，再增长线/比重线，高阶综合带材料） =====
-  topic("arithmetic", 1, "speed", false, "tool", [], "加减与多项求和", "多位加减、多数求和与凑整"),
-  topic("multiply", 1, "speed", false, "tool", ["arithmetic"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
+  // 计算功底四关是并列的基础技能（都不设前置，想先练哪项就练哪项）；
+  // 四项都需要出现在资料分析的算式里，所以「乘法与平方」只前置最基础的加法。
+  topic("addition", 1, "speed", false, "tool", [], "加法", "多位数加法：拆分凑整与高位叠加"),
+  topic("subtraction", 1, "speed", false, "tool", [], "减法", "多位数减法：退位、减数凑整与整十整百被减数"),
+  topic("sum-many", 1, "speed", false, "tool", [], "多项求和", "3~5 项连加：配对凑整、分组与基准数法"),
+  topic("diff-many", 1, "speed", false, "tool", [], "多项求差", "连减、两组和相减与“总量减去各部分”"),
+  topic("multiply", 1, "speed", false, "tool", ["addition"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
   topic("divide", 1, "speed", false, "tool", ["multiply"], "除法估算", "直除首位、除数倍数与商值范围"),
   topic("sensitive", 2, "speed", false, "tool", ["multiply"], "敏感数与百化分", "分数、百分数与份数关系的快速转换"),
-  topic("decimal", 2, "speed", false, "tool", ["arithmetic", "multiply"], "小数速算", "小数对齐、凑整与移位技巧"),
+  topic("decimal", 2, "speed", false, "tool", ["addition", "multiply"], "小数速算", "小数对齐、凑整与移位技巧"),
   topic("growth-rate", 1, "speed", false, "concept", ["divide"], "增长率", "由基期与现期（或增长量）求同比增速"),
   topic("growth-amount", 1, "speed", false, "concept", ["growth-rate"], "增长量", "百化分求增量、现期×r÷(1+r)"),
   topic("base-amount", 2, "speed", false, "concept", ["growth-rate"], "基期量", "现期÷(1+r)、现期−增量求基期"),
@@ -225,6 +233,7 @@ export const difficulties: Array<{ id: Difficulty; label: string; description: s
 
 /** 历史遗留 topicId（旧版综合模块被拆分前产生的错题/统计数据展示用） */
 export const legacyTopics: Array<{ id: string; title: string }> = [
+  { id: "arithmetic", title: "加减与多项求和" },
   { id: "growth", title: "增长率/增长量（旧版综合）" },
   { id: "ratio", title: "比重/盐水/平均数（旧版综合）" },
   { id: "annual", title: "年平均量/年均增长率（旧版综合）" },

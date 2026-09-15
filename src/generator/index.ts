@@ -7,7 +7,10 @@ import { makeRng, canonical } from "./random";
 import type { TopicId } from "./catalog";
 // 资料速算
 import {
-  generateArithmetic,
+  generateAddition,
+  generateSubtraction,
+  generateSumMany,
+  generateDiffMany,
   generateMultiply,
   generateDivide,
   generateSensitive,
@@ -59,7 +62,10 @@ export { topics, difficulties, legacyTopics, tracks, topicBudget, titleOf, topic
 type Generator = (r: Rng) => QuestionDraft | null;
 
 const generators: Record<TopicId, Generator> = {
-  arithmetic: generateArithmetic,
+  addition: generateAddition,
+  subtraction: generateSubtraction,
+  "sum-many": generateSumMany,
+  "diff-many": generateDiffMany,
   multiply: generateMultiply,
   divide: generateDivide,
   sensitive: generateSensitive,

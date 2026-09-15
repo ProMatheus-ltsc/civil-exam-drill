@@ -308,6 +308,13 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req)
     try {
       const { topicId, runId, index = 0, difficulty = 'medium' } = JSON.parse(body)
+      // 未知/已拆分的模块：与线上一致地拒绝（线上还会提示「已拆分为独立关卡」，
+      // 本地没有 legacyTopics 文案，这里只保证不会给已下线的 id 出题）
+      if (!topicOfId(topicId)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_RETIRED', message: `${topicId} 不是有效模块，请从「专项训练」关卡地图进入` } }))
+        return
+      }
       if (runId) {
         if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [], questions: [] })
         const run = quizState.runs.get(runId)

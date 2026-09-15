@@ -4,8 +4,8 @@ module: data_analysis
 category: methods
 title: "除法估算"
 summary: "用最少商位排除选项：截位直除按选项差距定精度，整除或近整除式用除数倍数法估商看余数。"
-order: 21
-updatedAt: 2026-09-14
+order: 25
+updatedAt: 2026-09-15
 ---
 
 # 除法估算

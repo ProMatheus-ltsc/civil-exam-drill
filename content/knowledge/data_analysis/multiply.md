@@ -4,8 +4,8 @@ module: data_analysis
 category: methods
 title: "乘法与平方"
 summary: "不用计算器的口算体系：倍数换算、十几乘十几、十字相乘、头同尾合十、基准数法与平方三法，只用九九表内的乘法和加减。"
-order: 20
-updatedAt: 2026-09-14
+order: 24
+updatedAt: 2026-09-15
 ---
 
 # 乘法与平方

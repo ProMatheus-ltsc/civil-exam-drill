@@ -1,29 +1,227 @@
-/** 资料速算 · 计算功底模块（加减/乘法平方/除法估算/敏感数/小数） */
+/** 资料速算 · 计算功底模块（加法/减法/多项求和/多项求差/乘法平方/除法估算/敏感数/小数） */
 import { fmt, round } from "../random";
 import { options, tailLockedOptions, tailLockInfo } from "../options";
 import type { QuestionDraft, Rng } from "../types";
 
-export function generateArithmetic(r: Rng): QuestionDraft {
-  const { level, integer, pick, random } = r;
-  const count = level === 1 ? 2 : pick([2, 3]);
-  const many = level === 3 && random() > 0.5;
-  const values = Array.from({ length: many ? 4 : count }, () => integer(12 * level, 99 * level));
-  const subtract = !many && count === 2 && random() > 0.5;
-  const left = subtract ? Math.max(...values) : values[0];
-  const right = subtract ? Math.min(...values) : values[1];
-  const answer = subtract ? left - right : values.reduce((sum, value) => sum + value, 0);
-  const expression = subtract ? `${left}-${right}` : values.join("+");
-  const set = options(answer, [answer - 10, answer + 10, answer + (subtract ? 1 : values[0] ?? 10)], "", random, 0);
+/** 一个数「十位以上的部分」，用于拆分说明：137 → 130 */
+const tensOf = (value: number) => Math.floor(value / 10) * 10;
+
+/**
+ * 造一对个位凑十的数（两数个位相加为 10）。
+ * 文档讲的「先配成整十再相加」得在题里真用得上，否则只是纸上的方法。
+ */
+function friendlyPair(
+  integer: Rng["integer"],
+  min: number,
+  max: number,
+): [number, number] {
+  const a = integer(min, max);
+  const unit = (10 - (a % 10)) % 10;
+  const base = Math.floor(integer(min, max) / 10) * 10 + unit;
+  return [a, Math.min(max, Math.max(min, base))];
+}
+
+/**
+ * 通用整数选项，一半题按真题习惯让四个选项末位互异（尾数法可用），
+ * 另一半把干扰项做成 ±10（漏进位/多退位的典型错法，末位相同 → 尾数法失效，必须算准进借位）。
+ * 同时返回解析里该给哪条判断建议——方法讲在文中，也得在选项上体现出来。
+ * 调用方保证答案 ≥ 15，不会出现负数选项。
+ */
+function numericOptions(answer: number, random: () => number) {
+  const tailDecisive = random() > 0.5;
+  const set = tailDecisive
+    ? options(answer, [answer + 1, answer - 1, answer + 2], "", random, 0)
+    : options(answer, [answer - 10, answer + 10, answer + 1], "", random, 0);
   return {
-    templateId: many ? "arithmetic-sum-many-v2" : subtract ? "arithmetic-subtract-v2" : `arithmetic-sum-${count}-v2`,
-    params: { expression, answer },
-    stem: `不使用计算器，计算 ${expression}。`,
+    set,
+    tip: tailDecisive
+      ? `四个选项末位互异，只算个位 ${answer % 10} 就能定位（尾数法）。`
+      : `干扰项做成 ±10（多退位/漏进位的典型错法），末位与答案相同或相邻，尾数法难以定位，必须把进借位算准。`,
+  };
+}
+
+/**
+ * 加法：只出纯加法，不掺减法。
+ * easy 两项两位数；medium 两项或三项（含三位数）；hard 三项三位数（会被真题化改写为分阶段合计）。
+ */
+export function generateAddition(r: Rng): QuestionDraft {
+  const { level, integer, pick, random } = r;
+  const count = level === 1 ? 2 : level === 2 ? pick([2, 3]) : 3;
+  const min = level === 1 ? 12 : level === 2 ? 106 : 118;
+  const max = level === 1 ? 98 : level === 2 ? 896 : 986;
+  const [first, second] = friendlyPair(integer, min, max);
+  const values = [first, second];
+  while (values.length < count) values.push(integer(min, max));
+  const answer = values.reduce((sum, value) => sum + value, 0);
+  const tensPart = values.reduce((sum, value) => sum + tensOf(value), 0);
+  const onesPart = values.reduce((sum, value) => sum + (value % 10), 0);
+  const carry = Math.floor(onesPart / 10);
+  const paired = first % 10 !== 0 && (first + second) % 10 === 0;
+  const { set, tip } = numericOptions(answer, random);
+  return {
+    templateId: count === 2 ? "addition-pair-v2" : "addition-triple-v2",
+    params: { expression: values.join("+"), answer },
+    stem: `不使用计算器，计算 ${values.join("+")}。`,
     ...set,
-    explanation: many
-      ? `先把个位能凑成 10 的数配对（如 ${values[0] ?? ""}+${values[1] ?? ""}=${(values[0] ?? 0) + (values[1] ?? 0)}），再逐对相加，结果为 ${answer}。`
-      : subtract
-        ? `按位退位计算，并用“差+减数=被减数”验算：${answer}+${right}=${left}。`
-        : `优先把个位凑整成 10 的数配对，再合并其余项：${values.join("、")} 相加为 ${answer}。`,
+    explanation:
+      `拆分相加：${values.map((value) => `${tensOf(value)}+${value % 10}`).join("、")}；整十部分合计 ${tensPart}、零头合计 ${onesPart}${carry > 0 ? `（向十位进 ${carry}）` : ""}，得 ${answer}。` +
+      (paired
+        ? `${first} 与 ${second} 的个位刚好凑成 10，先配成整十（${first + second}）再合并更快。`
+        : "") +
+      tip,
+  };
+}
+
+/**
+ * 减法：只出减法，不掺加法。三种考法——
+ * borrow 退位减法（个位不够减）；round-sub 减数凑整（看成整十/整百再补回）；
+ * round-minuend 整十/整百/整千被减数（连续借位，如 5000−1346）。
+ */
+export function generateSubtraction(r: Rng): QuestionDraft {
+  const { level, integer, pick, random } = r;
+  const variant =
+    level === 1
+      ? pick(["borrow", "round-sub"] as const)
+      : pick(["borrow", "round-sub", "round-minuend"] as const);
+  let minuend = 0;
+  let subtrahend = 0;
+  let roundBase = 0;
+  if (variant === "borrow") {
+    const [lo, hi, subLo] =
+      level === 1 ? [42, 98, 11] : level === 2 ? [420, 986, 106] : [1650, 4980, 1005];
+    minuend = Math.floor(integer(lo, hi) / 10) * 10 + integer(1, 8);
+    // 减数个位比被减数大 → 一定借位；高位留余量，保证差 ≥ 16（选项不出负数）
+    const high = Math.floor(integer(subLo, minuend - 25) / 10) * 10;
+    subtrahend = high + integer((minuend % 10) + 1, 9);
+  } else if (variant === "round-sub") {
+    const [unitBase, offLo, offHi, baseHi] =
+      level === 1 ? [10, 1, 9, 8] : level === 2 ? [100, 11, 39, 9] : [1000, 11, 59, 9];
+    roundBase = integer(level === 1 ? 3 : 2, baseHi) * unitBase;
+    subtrahend = roundBase - integer(offLo, offHi);
+    minuend = integer(
+      subtrahend + 16,
+      level === 1 ? 99 : level === 2 ? 999 : Math.min(9999, roundBase + 899),
+    );
+  } else {
+    const unitBase = level === 1 ? 10 : level === 2 ? 100 : 1000;
+    minuend = integer(level === 1 ? 4 : 2, 9) * unitBase;
+    roundBase = minuend;
+    subtrahend = integer(unitBase + 5, minuend - 16);
+  }
+  const answer = minuend - subtrahend;
+  const ones = minuend % 10;
+  const borrowOnes = subtrahend % 10;
+  const method =
+    variant === "borrow"
+      ? `按位退位：个位 ${ones} 不够减 ${borrowOnes}，从十位借 1 后 ${ones + 10}−${borrowOnes}=${ones + 10 - borrowOnes}，再算高位得 ${answer}。`
+      : variant === "round-sub"
+        ? `把减数凑整：${minuend}−${subtrahend}=(${minuend}−${roundBase})+${roundBase - subtrahend}=${minuend - roundBase}+${roundBase - subtrahend}。`
+        : `被减数是整${level === 1 ? "十" : level === 2 ? "百" : "千"}数：先向它借 1——(${minuend - 1})−${subtrahend}+1=${minuend - 1 - subtrahend}+1，避免个位连续借位。`;
+  const { set, tip } = numericOptions(answer, random);
+  return {
+    templateId: `subtraction-${variant}-v2`,
+    params: { expression: `${minuend}-${subtrahend}`, answer },
+    stem: `不使用计算器，计算 ${minuend}−${subtrahend}。`,
+    ...set,
+    explanation: `${method}结果为 ${answer}。验算习惯：差＋减数＝被减数，即 ${answer}+${subtrahend}=${minuend}。${tip}`,
+  };
+}
+
+/**
+ * 多项求和：3~5 项连加。造数时故意留出「个位凑十」的对子，
+ * 让「先配对」与基准数法都是真能省事的做法。
+ */
+export function generateSumMany(r: Rng): QuestionDraft {
+  const { level, integer, pick, random } = r;
+  const count = level === 1 ? 3 : level === 2 ? pick([4, 5]) : 5;
+  const min = level === 1 ? 12 : level === 2 ? 106 : 118;
+  const max = level === 1 ? 98 : level === 2 ? 896 : 976;
+  const values: number[] = [];
+  while (values.length + 2 <= count) {
+    const [a, b] = friendlyPair(integer, min, max);
+    values.push(a, b);
+  }
+  while (values.length < count) values.push(integer(min, max));
+  const answer = values.reduce((sum, value) => sum + value, 0);
+  const spread = Math.max(...values) - Math.min(...values);
+  const base = Math.round(answer / count / 10) * 10;
+  let method: string;
+  if (count >= 4 && spread <= 45 && base > 0) {
+    // 基准数法：各项都挤在同一个整十附近时，比逐项相加稳
+    const diffs = values.map((value) => value - base);
+    method = `基准数法：以 ${base} 为基准，${values
+      .map(
+        (value, index) =>
+          `${value}=${base}${diffs[index] >= 0 ? "+" : "−"}${Math.abs(diffs[index])}`,
+      )
+      .join("、")}；基准部分 ${base}×${count}=${base * count}，差值合计 ${diffs.reduce((s, d) => s + d, 0)}`;
+  } else {
+    const pairs: string[] = [];
+    const rest: number[] = [];
+    for (let index = 0; index + 1 < values.length; index += 2) {
+      if ((values[index] + values[index + 1]) % 10 === 0)
+        pairs.push(`${values[index]}+${values[index + 1]}=${values[index] + values[index + 1]}`);
+      else rest.push(values[index], values[index + 1]);
+    }
+    if (values.length % 2 === 1) rest.push(values[values.length - 1]);
+    const onesPart = values.reduce((sum, value) => sum + (value % 10), 0);
+    const carry = Math.floor(onesPart / 10);
+    method =
+      pairs.length > 0
+        ? `先配对凑整：${pairs.join("、")}${rest.length > 0 ? `；再加其余项 ${rest.join("+")}=${rest.reduce((s, v) => s + v, 0)}` : ""}`
+        : `分位相加：整十部分合计 ${values.reduce((sum, value) => sum + tensOf(value), 0)}、零头合计 ${onesPart}${carry > 0 ? `（向十位进 ${carry}）` : ""}`;
+  }
+  const { set, tip } = numericOptions(answer, random);
+  return {
+    templateId: `sum-many-${["three", "four", "five"][count - 3]}-v2`,
+    params: { expression: values.join("+"), answer },
+    stem: `不使用计算器，计算 ${values.join("+")}。`,
+    ...set,
+    explanation: `${method}，合计 ${answer}。${tip}`,
+  };
+}
+
+/**
+ * 多项求差：公考里以「精确计算」出现（连减求剩余、两组和相减求增量），选项精度一致时可用尾数法。
+ * chain：总量 − 各部分 = 剩余（「其余支出」类）；pairs：两组分别求和再相减（同比增加量类）。
+ */
+export function generateDiffMany(r: Rng): QuestionDraft {
+  const { level, integer, pick, random } = r;
+  const variant = pick(["chain", "pairs"] as const);
+  const lo = level === 1 ? 12 : level === 2 ? 106 : 118;
+  const hi = level === 1 ? 58 : level === 2 ? 486 : 886;
+  if (variant === "chain") {
+    const partCount = level === 1 ? 2 : 3;
+    const parts = Array.from({ length: partCount }, () => integer(lo, hi));
+    const partSum = parts.reduce((sum, value) => sum + value, 0);
+    const remainder = integer(level === 1 ? 20 : 118, level === 1 ? 98 : hi);
+    const total = partSum + remainder;
+    const { set, tip } = numericOptions(remainder, random);
+    return {
+      templateId: "diff-chain-v2",
+      params: { expression: [total, ...parts].join("-"), answer: remainder },
+      stem: `不使用计算器，计算 ${[total, ...parts].join("−")}。`,
+      ...set,
+      explanation: `两种算法都行：① 依次连减 ${total}${parts.map((value) => `−${value}`).join("")}=${remainder}；② 先把各部分加起来（${parts.join("+")}=${partSum}），再用总量减：${total}−${partSum}=${remainder}。后者少做几次借位，更稳。${tip}`,
+    };
+  }
+  // pairs：两组数各自求和，保证第一组更大、差值 ≥ 16
+  const group = () => [integer(lo, hi), integer(lo, hi)] as [number, number];
+  let first = group();
+  let second = group();
+  if (first[0] + first[1] < second[0] + second[1]) [first, second] = [second, first];
+  const gap = first[0] + first[1] - (second[0] + second[1]);
+  if (gap < 16) first = [first[0] + (16 - gap), first[1]];
+  const firstSum = first[0] + first[1];
+  const secondSum = second[0] + second[1];
+  const answer = firstSum - secondSum;
+  const { set, tip } = numericOptions(answer, random);
+  return {
+    templateId: "diff-pairs-v2",
+    params: { expression: `${first[0]}+${first[1]}-${second[0]}-${second[1]}`, answer },
+    stem: `不使用计算器，计算 ${first[0]}+${first[1]}−${second[0]}−${second[1]}。`,
+    ...set,
+    explanation: `两组各自求和再相减：(${first[0]}+${first[1]})−(${second[0]}+${second[1]})=${firstSum}−${secondSum}=${answer}。逐项对比更快：${first[0]}−${second[0]}=${first[0] - second[0]}、${first[1]}−${second[1]}=${first[1] - second[1]}，两个差值相加仍得 ${answer}（单项差值可能为负，只作中间量）。${tip}`,
   };
 }
 

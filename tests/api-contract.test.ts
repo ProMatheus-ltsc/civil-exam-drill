@@ -287,9 +287,9 @@ describe("API contract guards", () => {
     const byId = new Map(
       progress.map((p) => [`${p.topicId}:${p.difficulty}`, p]),
     );
-    expect(progress).toHaveLength(32 * 3);
-    expect(byId.get("arithmetic:easy").unlocked).toBe(true);
-    expect(byId.get("arithmetic:hard").unlocked).toBe(true);
+    expect(progress).toHaveLength(35 * 3);
+    expect(byId.get("addition:easy").unlocked).toBe(true);
+    expect(byId.get("addition:hard").unlocked).toBe(true);
     expect(byId.get("multiply:easy").unlocked).toBe(false);
 
     const lockedResponse = await app.request(
@@ -317,7 +317,7 @@ describe("API contract guards", () => {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
-          topicId: "arithmetic",
+          topicId: "addition",
           difficulty: "hard",
           runId: crypto.randomUUID(),
           index: 0,
@@ -346,6 +346,23 @@ describe("API contract guards", () => {
     expect((await response.json()).error.code).toBe("TOPIC_RETIRED");
   });
 
+  it("「加减与多项求和」拆成四关后，旧 id 会被挡下并提示走关卡地图", async () => {
+    // 进行中的旧局（客户端还拿着 arithmetic 的 runId）不该静默出题，也不该报「未知专题」
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ topicId: "arithmetic", difficulty: "easy" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error.code).toBe("TOPIC_RETIRED");
+    expect(payload.error.message).toContain("已拆分为独立关卡");
+  });
+
   it("同一序号的重复请求返回同一道题，而不是 RUN_STATE", async () => {
     // 回归：客户端的「预取下一题」与用户点「下一题」会同时发出请求，
     // 老实现只比 COUNT 与 index，撞车就 409「题目序号不连续」。
@@ -353,7 +370,7 @@ describe("API contract guards", () => {
     db.runQuestionRows = [
       {
         id: "q_existing",
-        topicId: "arithmetic",
+        topicId: "addition",
         difficulty: "hard",
         stem: "已经生成过的题面",
         optionsJson: JSON.stringify(["A", "B", "C", "D"]),
@@ -368,7 +385,7 @@ describe("API contract guards", () => {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
-          topicId: "arithmetic",
+          topicId: "addition",
           difficulty: "hard",
           runId: crypto.randomUUID(),
           index: 0,
@@ -399,7 +416,7 @@ describe("API contract guards", () => {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
-          topicId: "arithmetic",
+          topicId: "addition",
           difficulty: "hard",
           runId: crypto.randomUUID(),
           index: 1,
