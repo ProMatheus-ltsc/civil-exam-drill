@@ -200,7 +200,9 @@ export const topics: TrainingTopic[] = [
   topic("multiples", 2, "speed", false, "concept", ["growth-rate", "divide"], "倍数与翻番", "现期÷基期、翻番与“增长多少倍”口径"),
   topic("base-difference", 3, "speed", true, "material", ["base-amount"], "基期差", "两对象基期之差/和与现基期比较（材料实战）"),
   topic("interval-growth", 2, "speed", false, "concept", ["growth-rate"], "间隔增长率", "R=r₁+r₂+r₁×r₂ 与逆向求次期增速"),
-  topic("mixed-growth", 3, "speed", true, "material", ["interval-growth"], "混合增长率", "整体增速介于部分之间并偏向体量大的一方（材料实战）"),
+  // 混合增长率的思路是「盐水加权」：整体增速介于部分之间、偏向基期量大的一方，
+  // 靠的是增长率与基期量，与间隔增长率的两年复合公式无关，所以前置是增长率而不是间隔增长率。
+  topic("mixed-growth", 3, "speed", true, "material", ["growth-rate"], "混合增长率", "整体增速介于部分之间并偏向体量大的一方（材料实战）"),
   topic("annual-amount", 2, "speed", false, "concept", ["growth-amount"], "年均增长量", "间隔口径下的年均增量与总量推算"),
   topic("annual-rate", 3, "speed", true, "material", ["multiples"], "年均增长率", "(1+r)ⁿ 复合增长与区间反推（材料实战）"),
   topic("ratio-basic", 2, "speed", false, "concept", ["sensitive", "divide"], "比重与整体量", "占比求整体/整体求占比与百分点表述"),
@@ -213,15 +215,20 @@ export const topics: TrainingTopic[] = [
   topic("contribution-rate", 3, "speed", true, "material", ["growth-amount", "part-quantity"], "增长贡献率", "部分增量÷整体增量（材料实战）"),
   topic("pull-growth", 3, "speed", true, "material", ["contribution-rate"], "拉动增长率", "部分增量÷整体基期量，与贡献率区分（材料实战）"),
   // ===== 数字推理轨道 =====
+  // 数列类型大多是并列的题型，真正的依赖只有两条腿：
+  //   基础数列（识别等差/等比/质数等基本规律）→ 多级数列（作差作和）、幂次数列（乘方与修正）
+  // 所以「分数数列」前置多级数列（分子分母分列后看的就是这类规律），
+  // 「机械划分」「因数分解」前置幂次数列（拆位后配合幂次/质数、乘积拆分），
+  // 而不是把它们串成一条线（周期数列与机械划分、机械划分与因数分解之间并无依赖）。
   topic("seq-basic", 1, "sequence", false, "sequence", [], "基础数列", "等差/等比/质数合数", "basic-sequences"),
   topic("seq-multilevel", 1, "sequence", false, "sequence", ["seq-basic"], "多级数列", "一阶/多阶作差，差列再成规律", "multilevel-sequences"),
   topic("seq-multiple", 2, "sequence", false, "sequence", ["seq-basic"], "多重数列", "项数较多：奇偶交叉、两两分组", "multiple-sequences"),
   topic("seq-periodic", 2, "sequence", false, "sequence", ["seq-multilevel"], "周期数列", "显式循环、作差周期、隔项周期", "basic-sequences"),
   topic("seq-power", 2, "sequence", false, "sequence", ["seq-basic"], "幂次数列", "平方立方直接幂次与幂次修正", "power-sequences"),
   topic("seq-recursive", 3, "sequence", false, "sequence", ["seq-multilevel", "seq-power"], "递推数列", "和差倍积递推与递推修正", "recursive-sequences"),
-  topic("seq-fraction", 3, "sequence", false, "sequence", ["seq-power"], "分数数列", "分子分母分列、通分约分与化整", "fraction-sequences"),
-  topic("seq-split", 3, "sequence", false, "sequence", ["seq-periodic", "seq-power"], "机械划分", "数位拆分后各位独立成列、拼接型", "special-sequences"),
-  topic("seq-factor", 3, "sequence", false, "sequence", ["seq-split"], "因数分解", "常数×质数列、相邻质数积的乘积拆分", "special-sequences"),
+  topic("seq-fraction", 3, "sequence", false, "sequence", ["seq-multilevel"], "分数数列", "分子分母分列、通分约分与化整", "fraction-sequences"),
+  topic("seq-split", 3, "sequence", false, "sequence", ["seq-power"], "机械划分", "数位拆分后各位独立成列、拼接型", "special-sequences"),
+  topic("seq-factor", 3, "sequence", false, "sequence", ["seq-power"], "因数分解", "常数×质数列、相邻质数积的乘积拆分", "special-sequences"),
 ];
 
 export const topicById = new Map(topics.map((t) => [t.id, t]));

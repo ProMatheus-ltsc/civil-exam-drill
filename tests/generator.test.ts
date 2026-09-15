@@ -25,6 +25,25 @@ describe("question generator", () => {
     expect(unlockOf("sensitive")).toEqual(["multiply"]);
   });
 
+  /**
+   * 审计过的前置（原则：前置必须是「不会 A 就做不了 B」的真依赖，而不是把同族题型串成一条线）。
+   * 这几条都是查过专文后定的，改链条时这里要一起改：
+   *   - 混合增长率靠的是「盐水加权」，与间隔增长率的两年复合公式无关 → 前置增长率；
+   *   - 分数数列核心是分子分母分列成规律 → 前置多级数列；
+   *   - 机械划分（拆位后配合幂次/质数）、因数分解（乘积拆分）→ 前置幂次数列。
+   */
+  it("审计过的前置：数字推理的两条腿与混合增长率", () => {
+    const unlockOf = (id: TopicId) => topicById.get(id)?.unlock ?? [];
+    expect(unlockOf("mixed-growth")).toEqual(["growth-rate"]);
+    expect(unlockOf("seq-basic")).toEqual([]);
+    expect(unlockOf("seq-multilevel")).toEqual(["seq-basic"]);
+    expect(unlockOf("seq-power")).toEqual(["seq-basic"]);
+    expect(unlockOf("seq-fraction")).toEqual(["seq-multilevel"]);
+    expect(unlockOf("seq-split")).toEqual(["seq-power"]);
+    expect(unlockOf("seq-factor")).toEqual(["seq-power"]);
+    expect(unlockOf("seq-recursive")).toEqual(["seq-multilevel", "seq-power"]);
+  });
+
   it("解锁前置都真实存在、同轨道，且不构成环", () => {
     const known = new Map(topics.map((topic) => [topic.id, topic]));
     // 前置 id 写错（改名/删关卡后的残留）会让这一关永远锁死，页面上只显示灰按钮
@@ -40,6 +59,16 @@ describe("question generator", () => {
       )
       .map((topic) => topic.id);
     expect(crossTrack).toEqual([]);
+    // 列表顺序要在前置之后：否则地图上会看到「锁着的关卡排在它自己的前置上方」，读起来是反的
+    const orderOf = new Map(topics.map((topic, index) => [topic.id, index]));
+    const outOfOrder = topics
+      .filter((topic) =>
+        topic.unlock.some(
+          (prereq) => (orderOf.get(prereq) ?? -1) > (orderOf.get(topic.id) ?? -1),
+        ),
+      )
+      .map((topic) => topic.id);
+    expect(outOfOrder).toEqual([]);
     // 有环 = 互等对方通关，两边都解不开
     const cyclic: string[] = [];
     for (const topic of topics) {
