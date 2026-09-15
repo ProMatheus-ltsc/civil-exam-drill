@@ -119,7 +119,6 @@ export function QuizPage() {
   // 关卡运行状态
   const [topic, setTopic] = useState<TopicMeta | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
-  const [runId, setRunId] = useState<string | null>(null);
   const [items, setItems] = useState<RunItem[]>([]);
   const [current, setCurrent] = useState<QuestionData | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -129,6 +128,8 @@ export function QuizPage() {
   const [summary, setSummary] = useState<Grade["run"] | null>(null);
   /** 下一题是否已就绪（只用于按钮文案；真正的去重靠 questionCache） */
   const [prefetchReady, setPrefetchReady] = useState(false);
+  /** 刚点下的选项：服务端判定回来之前先把选中态画出来，点下去不能「没反应」 */
+  const [pendingIndex, setPendingIndex] = useState<number | null>(null);
 
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -198,15 +199,32 @@ export function QuizPage() {
     );
   }, [track, catalog, progress, stageTopics]);
 
+  /**
+   * 本局身份放在 ref 里而不是只靠 state：开局的第一次取题/预取发生在 setState 提交之前，
+   * 回调闭包里读到的 runId 还是 null（实测过：第 1 题的预取就是这样被静默跳过的，
+   * 于是第一题之后那一次「下一题」仍要等一个完整往返）。
+   */
+  const runRef = useRef<{
+    runId: string;
+    topicId: string;
+    difficulty: Difficulty;
+  } | null>(null);
+
   /** 取第 index 题：同序号共享在途请求，失败不缓存（允许重试） */
   const fetchQuestion = useCallback(
     (index: number): Promise<QuestionData> => {
-      if (!topic || !runId) return Promise.reject(new Error("本局尚未开始"));
+      const run = runRef.current;
+      if (!run) return Promise.reject(new Error("本局尚未开始"));
       const cached = questionCache.current.get(index);
       if (cached) return cached;
       const request = api<QuestionData>("/quiz/questions", {
         method: "POST",
-        body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
+        body: JSON.stringify({
+          topicId: run.topicId,
+          difficulty: run.difficulty,
+          runId: run.runId,
+          index,
+        }),
       }).catch((error) => {
         questionCache.current.delete(index);
         throw error;
@@ -214,14 +232,43 @@ export function QuizPage() {
       questionCache.current.set(index, request);
       return request;
     },
-    [difficulty, runId, topic],
+    [],
   );
 
+  /**
+   * 预取第 index 题（静默失败）。结果按序号留在 questionCache 里，用户随后点「下一题」
+   * 会复用它；若用户抢在预取返回前就点了「下一题」，两次调用共享同一个在途 Promise，
+   * 服务端只会收到一次序号请求。
+   *
+   * 触发时机是**打开当前题时**（见 openQuestion）而不是答完之后：服务端只要求
+   * 「已生成题数 === 请求序号」，当前题打开时它必然已生成，所以下一题此刻就能合法预取。
+   * 这样用户在读题/算题的那几秒里就把下一题拿回来了，答完直接点「下一题」不用再等一轮往返。
+   */
+  const prefetch = useCallback(
+    (index: number) => {
+      if (index >= 10 || !runRef.current) return;
+      if (questionCache.current.has(index)) {
+        setPrefetchReady(true);
+        return;
+      }
+      void fetchQuestion(index)
+        .then((q) => {
+          if (q.index === itemsRef.current.length) setPrefetchReady(true);
+        })
+        .catch(() => undefined);
+    },
+    [fetchQuestion],
+  );
+
+  /** 取第 index 题并显示加载态（用于冷启动/失败重试/兜底） */
   const ensureQuestion = useCallback(
     async (index: number): Promise<QuestionData | null> => {
-      if (!topic || !runId) return null;
-      setFetching(true);
-      setLoadError(null);
+      if (!runRef.current) return null;
+      // 已预取好的题不再闪一下「加载中…」
+      if (!questionCache.current.has(index)) {
+        setFetching(true);
+        setLoadError(null);
+      }
       try {
         return await fetchQuestion(index);
       } catch (error) {
@@ -231,29 +278,40 @@ export function QuizPage() {
         setFetching(false);
       }
     },
-    [fetchQuestion, runId, topic],
+    [fetchQuestion],
   );
 
-  const openQuestion = useCallback((q: QuestionData | null) => {
-    setCurrent(q);
-    setQuestionStartedAt(Date.now());
-    setPrefetchReady(false);
-  }, []);
+  const openQuestion = useCallback(
+    (q: QuestionData | null) => {
+      setCurrent(q);
+      setQuestionStartedAt(Date.now());
+      setPrefetchReady(false);
+      setPendingIndex(null);
+      if (q) prefetch(q.index + 1);
+    },
+    [prefetch],
+  );
 
   const startRun = useCallback(
     async (nextTopic: TopicMeta, nextDifficulty: Difficulty) => {
       const nextRunId = crypto.randomUUID();
       setTopic(nextTopic);
       setDifficulty(nextDifficulty);
-      setRunId(nextRunId);
       setItems([]);
       setSummary(null);
       setSubmitting(false);
       setLoadError(null);
       setCurrent(null);
+      setPendingIndex(null);
       questionCache.current.clear();
       idempotencyKeys.current.clear();
       submittingRef.current = false;
+      // 先登记本局身份：后面的取题与预取都读 runRef，避免踩 setState 还没提交的空档
+      runRef.current = {
+        runId: nextRunId,
+        topicId: nextTopic.id,
+        difficulty: nextDifficulty,
+      };
       setScreen("run");
       const q = await api<QuestionData>("/quiz/questions", {
         method: "POST",
@@ -270,30 +328,10 @@ export function QuizPage() {
     [openQuestion],
   );
 
-  /**
-   * 展示答案期间预取下一题（静默失败）。
-   * 结果按序号留在 questionCache 里，用户随后点「下一题」会复用它；
-   * 若用户抢在预取返回前就点了「下一题」，两次调用共享同一个在途 Promise，
-   * 服务端只会收到一个序号请求。预取结果不再因为「序号已变化」被丢弃——
-   * 那会让服务端已生成、客户端不认识，序号从此错位。
-   */
-  const prefetchNext = useCallback(() => {
-    const index = itemsRef.current.length;
-    if (index >= 10 || !topic || !runId) return;
-    if (questionCache.current.has(index)) {
-      setPrefetchReady(true);
-      return;
-    }
-    void fetchQuestion(index)
-      .then((q) => {
-        if (q.index === itemsRef.current.length) setPrefetchReady(true);
-      })
-      .catch(() => undefined);
-  }, [fetchQuestion, runId, topic]);
-
+  /** 答完一题后再补一次预取：正常情况是缓存命中（不做请求），只在之前的预取失败时重试 */
   useEffect(() => {
-    if (screen === "run" && items.length > 0 && !summary) prefetchNext();
-  }, [screen, items.length, summary, prefetchNext]);
+    if (screen === "run" && items.length > 0 && !summary) prefetch(items.length);
+  }, [screen, items.length, summary, prefetch]);
 
   const answer = async (selectedIndex: number) => {
     // 用 ref 兜同步连点：submitting 是 state，同一 tick 里的两次点击都会看到 false，
@@ -305,6 +343,7 @@ export function QuizPage() {
       idempotencyKeys.current.get(questionId) ?? crypto.randomUUID();
     idempotencyKeys.current.set(questionId, idempotencyKey);
     submittingRef.current = true;
+    setPendingIndex(selectedIndex);
     setSubmitting(true);
     try {
       const grade = await api<Grade>("/quiz/answers", {
@@ -319,6 +358,7 @@ export function QuizPage() {
       idempotencyKeys.current.delete(questionId);
       const nextItems = [...itemsRef.current, { q: current, selectedIndex, grade }];
       setItems(nextItems);
+      setPendingIndex(null);
       if (grade.run?.finished) {
         setSummary(grade.run);
         setScreen("result");
@@ -326,6 +366,7 @@ export function QuizPage() {
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : "提交失败，请重试", "error");
+      setPendingIndex(null);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -342,6 +383,10 @@ export function QuizPage() {
   const goBackToMap = () => {
     setScreen("map");
     setTopic(null);
+    // 本局作废：清掉身份与已预取的题，避免退出后还有零星请求打进来
+    runRef.current = null;
+    questionCache.current.clear();
+    idempotencyKeys.current.clear();
     void loadProgress();
   };
 
@@ -403,6 +448,7 @@ export function QuizPage() {
           answered={answered}
           showingAnswer={showingAnswer}
           lastItem={lastItem ?? null}
+          pickedIndex={lastItem?.selectedIndex ?? pendingIndex}
           submitting={submitting}
           fetching={fetching}
           loadError={loadError}
@@ -637,6 +683,7 @@ function RunView({
   answered,
   showingAnswer,
   lastItem,
+  pickedIndex,
   submitting,
   fetching,
   loadError,
@@ -653,6 +700,8 @@ function RunView({
   answered: number;
   showingAnswer: boolean;
   lastItem: RunItem | null;
+  /** 当前选中的选项：判定回来前就是刚点下的那个（即时反馈），回来后以服务端结果为准 */
+  pickedIndex: number | null;
   submitting: boolean;
   fetching: boolean;
   loadError: string | null;
@@ -732,7 +781,7 @@ function RunView({
         <h3 className="stem">{current.stem}</h3>
         <div className="options">
           {current.options.map((option, index) => {
-            const isPicked = lastItem?.selectedIndex === index;
+            const isPicked = pickedIndex === index;
             const isCorrect = showingAnswer && lastItem?.grade.answerIndex === index;
             const cls = showingAnswer
               ? isCorrect

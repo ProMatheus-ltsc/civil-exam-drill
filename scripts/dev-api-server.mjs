@@ -14,6 +14,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WORKSPACE = path.resolve(__dirname, '..')
 const ENTRIES_PATH = path.join(WORKSPACE, 'public/generated/knowledge/entries.json')
 const PORT = 4174
+/**
+ * 人为延迟（毫秒），用来在本地模拟线上/弱网的服务端耗时，验证预取等体验优化：
+ *   DEV_API_DELAY_MS=400 node scripts/dev-api-server.mjs
+ * 只作用于 /api/quiz/* 的写读接口。
+ */
+const API_DELAY_MS = Number(process.env.DEV_API_DELAY_MS ?? 0)
+const delay = API_DELAY_MS > 0 ? () => new Promise((r) => setTimeout(r, API_DELAY_MS)) : null
 
 // 读取 entries.json
 function loadEntries() {
@@ -297,21 +304,32 @@ const server = http.createServer(async (req, res) => {
   
   const quizQuestionsMatch = pathname === '/api/quiz/questions' && req.method === 'POST'
   if (quizQuestionsMatch) {
+    if (delay) await delay()
     const body = await readBody(req)
     try {
       const { topicId, runId, index = 0, difficulty = 'medium' } = JSON.parse(body)
       if (runId) {
-        const starsByKey = passedRuns()
-        const topic = topicOfId(topicId)
-        const locked = topic && (topic.unlock || []).filter((u) => (starsByKey.get(`${u}|hard`) ?? 0) < 1)
-        if (locked && locked.length) {
-          res.writeHead(409, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join('、')}` } }))
-          return
-        }
         if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [], questions: [] })
         const run = quizState.runs.get(runId)
         run.questions ??= []
+        if (run.questions.length === 0) {
+          // 开新局才判解锁（与线上一致：局内不再重复做用户级校验）
+          const starsByKey = passedRuns()
+          const topic = topicOfId(topicId)
+          const locked = topic && (topic.unlock || []).filter((u) => (starsByKey.get(`${u}|hard`) ?? 0) < 1)
+          if (locked && locked.length) {
+            res.writeHead(409, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join('、')}` } }))
+            return
+          }
+        } else {
+          const firstQ = quizState.questions.get(run.questions[0])
+          if (firstQ && (firstQ.topicId !== topicId || firstQ.difficulty !== difficulty)) {
+            res.writeHead(409, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '本局已切换到其它模块，请重新开始本局' } }))
+            return
+          }
+        }
         // 与 functions/api/[[path]].ts 一致：本局已生成的题按顺序记在 run.questions，
         // 第 index 题已存在就**原样返回**（预取与「下一题」撞车、客户端重试都不该报错），
         // 只有真的越界时才回 RUN_COMPLETE / RUN_STATE。
@@ -371,6 +389,7 @@ const server = http.createServer(async (req, res) => {
   
   const quizAnswerMatch = pathname === '/api/quiz/answers' && req.method === 'POST'
   if (quizAnswerMatch) {
+    if (delay) await delay()
     const body = await readBody(req)
     try {
       const { questionId, selectedIndex, elapsedMs } = JSON.parse(body)

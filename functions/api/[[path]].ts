@@ -830,15 +830,6 @@ app.post("/quiz/questions", async (c) => {
   if (body.runId !== undefined) {
     if (body.index === undefined)
       return c.json(fail("INVALID_PARAM", "闯关模式需要题目序号 index"), 400);
-    const status = await loadQuizStatus(c);
-    const locked = topic.unlock.filter(
-      (prereq) => (status.passStars.get(diffKey(prereq, "hard")) ?? 0) < 1,
-    );
-    if (locked.length > 0)
-      return c.json(
-        fail("TOPIC_LOCKED", `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`),
-        409,
-      );
     const runRows = await c.env.DB.prepare(
       "SELECT id,topic_id AS topicId,difficulty,stem,options_json AS optionsJson,material_json AS materialJson,created_at AS generatedAt,expires_at AS expiresAt FROM generated_questions WHERE user_id=? AND run_id=? ORDER BY created_at ASC",
     )
@@ -886,6 +877,29 @@ app.post("/quiz/questions", async (c) => {
         fail("RUN_STATE", "题目序号不连续，请重新开始本局"),
         409,
       );
+    const firstQuestion = runRows.results[0];
+    if (firstQuestion) {
+      // 本局已经在跑：只确认模块/难度没被换掉。解锁校验在开新局（index 0）时做过一次即可，
+      // 这里不再重复跑用户级聚合查询——那是每道题一次的重查询，是答题卡顿的主要来源之一。
+      if (
+        firstQuestion.topicId !== body.topicId ||
+        firstQuestion.difficulty !== difficulty
+      )
+        return c.json(
+          fail("RUN_STATE", "本局已切换到其它模块，请重新开始本局"),
+          409,
+        );
+    } else {
+      const status = await loadQuizStatus(c);
+      const locked = topic.unlock.filter(
+        (prereq) => (status.passStars.get(diffKey(prereq, "hard")) ?? 0) < 1,
+      );
+      if (locked.length > 0)
+        return c.json(
+          fail("TOPIC_LOCKED", `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`),
+          409,
+        );
+    }
   }
   if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}:${difficulty}`))
     return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);

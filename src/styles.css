@@ -689,6 +689,11 @@ a.entry {
   font-weight: 800;
   color: #516676;
 }
+.options button.pending {
+  /* 点下去的瞬间就画出选中态，不等服务端判定回来 */
+  border-color: #2563eb;
+  background: #f2f7ff;
+}
 .options button.pending .option-key {
   background: #e3edf7;
   color: #2563eb;
@@ -1388,13 +1393,30 @@ a.entry {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 与「收起全部 / 展开全部」统一成同款小按钮：不参与压缩、文案不换行。
+     否则搜索框（flex:1）会把这块挤成一条竖排文字的方块，看着很大又不协调。 */
+  flex: none;
+  white-space: nowrap;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #b9c7d2;
+  border-radius: 12px;
+  background: #fff;
   font-weight: 700;
   color: #516676;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   cursor: pointer;
+}
+.map-undone-toggle:has(input:checked) {
+  border-color: #17324d;
+  background: #eaf0f3;
+  color: #17324d;
 }
 .map-undone-toggle input {
   accent-color: #17324d;
+  width: 15px;
+  height: 15px;
+  margin: 0;
 }
 .map-collapse-btn {
   min-height: 38px;
