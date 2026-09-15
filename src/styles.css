@@ -532,7 +532,8 @@ a.entry {
 .stage-text strong {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap; /* 窄屏时徽标换到第二行，不要挤压成省略号 */
+  gap: 4px 8px;
   font-size: 1rem;
 }
 .stage-text small {
@@ -1485,6 +1486,25 @@ a.entry {
 }
 .stage-card .stage-doc {
   display: inline-flex;
+}
+/* 折叠的锁定模块：直接写出还差哪几个前置，不用展开去找 */
+.stage-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #8b6b55;
+  background: #f2ece7;
+  border-radius: 999px;
+  padding: 2px 7px;
 }
 @media (max-width: 680px) {
   .map-search {

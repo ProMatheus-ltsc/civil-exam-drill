@@ -49,10 +49,11 @@ type TopicMeta = {
   title: string;
   description: string;
   rating: 1 | 2 | 3;
-  material: boolean;
   docId: string | null;
   budgetClass: BudgetClass;
   budgetsMs: Record<Difficulty, number>;
+  /** 前置模块 id（与 unlockTitles 同序），用于算出「还差哪几个没过」 */
+  unlock: string[];
   unlockTitles: string[];
 };
 type CatalogData = {
@@ -434,7 +435,12 @@ export function QuizPage() {
             onStart={(t, d) => void startRun(t, d)}
             onDocs={(docId) => openKnowledgeDoc(docId)}
             onLocked={(names) =>
-              showToast(`需先通过前置模块的高难度局：${names.join("、")}`, "info")
+              showToast(
+                names.length
+                  ? `需先通过前置模块的高难度局（实战）：${names.join("、")}`
+                  : "需先通过前置模块的高难度局（实战）",
+                "info",
+              )
             }
           />
         </>
@@ -505,6 +511,22 @@ function StageMap({
 }) {
   const [query, setQuery] = useState("");
   const [onlyUndone, setOnlyUndone] = useState(false);
+  /**
+   * 还差哪些前置模块没过：前置里「高难度 · 实战」局尚未通关的那些，按 unlock 顺序给出标题。
+   * 已通过的不再列出——锁着的时候真正要补的就是这几关。progress 还没拿到时退回全部前置，
+   * 不能凭「拿不到进度」就把要求说成「无」。
+   */
+  const lockedPrereqTitles = (topic: TopicMeta): string[] => {
+    if (!progressMap) return topic.unlockTitles;
+    return topic.unlock
+      .map((prereqId, index) => ({ prereqId, title: topic.unlockTitles[index] }))
+      .filter(
+        ({ prereqId }) =>
+          (progressMap.get(progressKey(prereqId, "hard"))?.stars ?? 0) < 1,
+      )
+      .map(({ title }) => title)
+      .filter((title): title is string => Boolean(title));
+  };
   const visible = useMemo(() => {
     const q = query.trim().toLocaleLowerCase("zh-CN");
     return topics.filter((topic) => {
@@ -563,6 +585,7 @@ function StageMap({
         const itemByDiff = (difficulty: Difficulty) =>
           progressMap?.get(progressKey(topic.id, difficulty));
         const unlocked = itemByDiff("easy")?.unlocked ?? false;
+        const needTitles = unlocked ? [] : lockedPrereqTitles(topic);
         const isExpanded = expandedIds.has(topic.id);
         const clearedHard = (itemByDiff("hard")?.stars ?? 0) >= 1;
         return (
@@ -581,9 +604,14 @@ function StageMap({
               <span className="stage-text">
                 <strong>
                   {topic.title}
-                  {topic.material && <em className="stage-material">材料</em>}
                   {unlocked && clearedHard && (
                     <em className="stage-done">已通关</em>
+                  )}
+                  {/* 折叠时不展开也能看到卡在哪：展开后由难度局上的提示承担，不重复 */}
+                  {!unlocked && !isExpanded && needTitles.length > 0 && (
+                    <em className="stage-lock" title={`需先通关：${needTitles.join("、")}`}>
+                      <Lock size={10} /> 需先通关：{needTitles.join("、")}
+                    </em>
                   )}
                 </strong>
                 <small>{topic.description || "逐题闯关"}</small>
@@ -637,10 +665,12 @@ function StageMap({
                     <button
                       key={meta.id}
                       className={`run-chip d${meta.id} ${unlocked ? "" : "locked"} ${meta.id === "hard" ? "combat" : ""}`}
-                      disabled={!unlocked}
-                      title={meta.description}
+                      // 锁定时不禁用：点一下会提示要先通关哪几个模块（禁用的按钮不派发 click，
+                      // 提示就永远看不到）。外观仍由 .locked 的透明度与 not-allowed 光标体现。
+                      aria-disabled={!unlocked}
+                      title={unlocked ? meta.description : `需先通关：${needTitles.join("、")}`}
                       onClick={() =>
-                        unlocked ? onStart(topic, meta.id) : onLocked(topic.unlockTitles)
+                        unlocked ? onStart(topic, meta.id) : onLocked(needTitles)
                       }
                     >
                       <span className="run-chip-label">
@@ -659,9 +689,9 @@ function StageMap({
                           {item.total} 题 · {Math.round(item.accuracy * 100)}%
                         </small>
                       )}
-                      {!unlocked && meta.id === "easy" && (
-                        <small className="lock-hint">
-                          <Lock size={11} /> 需先通关前置模块
+                      {!unlocked && meta.id === "easy" && needTitles.length > 0 && (
+                        <small className="lock-hint" title={`需先通关：${needTitles.join("、")}`}>
+                          <Lock size={11} /> 需先通关：{needTitles.join("、")}
                         </small>
                       )}
                     </button>

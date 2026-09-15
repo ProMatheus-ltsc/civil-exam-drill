@@ -261,6 +261,19 @@ describe("API contract guards", () => {
     expect(speedTrack.topics.length).toBeGreaterThanOrEqual(20);
     expect(seqTrack.topics.length).toBeGreaterThanOrEqual(9);
     expect(seqTrack.topics.every((t) => t.budgetMs > 0)).toBe(true);
+
+    // 前端要靠 unlock / unlockTitles 的下标对应关系，把「还差哪几个前置模块没过」点名出来
+    // （QuizPage 的 lockedPrereqTitles：用 unlock[i] 查进度、用 unlockTitles[i] 拿名字）。
+    // 两者一旦错位，卡片上会显示成别人的模块名——不报错、只是错，所以在这里钉死。
+    const allTopics = payload.data.tracks.flatMap((t) => t.topics);
+    const titleById = new Map(allTopics.map((t) => [t.id, t.title]));
+    const misaligned = allTopics.filter(
+      (topic) =>
+        topic.unlock.length !== topic.unlockTitles.length ||
+        topic.unlock.some((id, index) => topic.unlockTitles[index] !== titleById.get(id)),
+    );
+    expect(misaligned.map((t) => t.id)).toEqual([]);
+    expect(allTopics.every((t) => t.unlock.every((id) => titleById.has(id)))).toBe(true);
   });
 
   it("locks stages until the hard (combat) run of prerequisites is cleared", async () => {
