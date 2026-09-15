@@ -122,16 +122,34 @@ export function QuizPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [items, setItems] = useState<RunItem[]>([]);
   const [current, setCurrent] = useState<QuestionData | null>(null);
-  const [prefetched, setPrefetched] = useState<QuestionData | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [questionStartedAt, setQuestionStartedAt] = useState(0);
   const [summary, setSummary] = useState<Grade["run"] | null>(null);
+  /** 下一题是否已就绪（只用于按钮文案；真正的去重靠 questionCache） */
+  const [prefetchReady, setPrefetchReady] = useState(false);
 
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const prefetching = useRef(false);
+
+  /**
+   * 同一序号的题目只请求一次（按序号缓存在途 Promise）。
+   *
+   * 原来用 `prefetched` 单个槽位 + `prefetching` 布尔量去重，只能防住「两次预取」，
+   * 防不住「预取还没回来、用户就点下一题」：那一刻槽位还是空的，`ensureQuestion` 会为
+   * 同一序号再发一个请求。服务端按「已生成题数 === 请求序号」校验，两个请求必然有一个
+   * 撞成 409 RUN_STATE（题目序号不连续，请重新开始本局）。更糟的是预取结果在
+   * `q.index !== itemsRef.current.length` 时被丢弃，而服务端已经插入，客户端与服务端的
+   * 序号从此错位，之后每一步都 409。
+   * 现在改为按序号共享同一个 Promise：撞车时拿到的是同一份题目，不会再重复生成。
+   */
+  const questionCache = useRef(new Map<number, Promise<QuestionData>>());
+  /** 同步防连点：交卷时的 in-flight 标记（submitting 是 state，同一 tick 内挡不住第二次点击） */
+  const submittingRef = useRef(false);
+  /** 每题一个提交幂等键：网络重试沿用同一个 key，服务端才认得出是同一次提交 */
+  const idempotencyKeys = useRef(new Map<string, string>());
+
 
   const loadProgress = useCallback(async () => {
     const list = await api<ProgressItem[]>("/quiz/progress");
@@ -180,21 +198,32 @@ export function QuizPage() {
     );
   }, [track, catalog, progress, stageTopics]);
 
+  /** 取第 index 题：同序号共享在途请求，失败不缓存（允许重试） */
+  const fetchQuestion = useCallback(
+    (index: number): Promise<QuestionData> => {
+      if (!topic || !runId) return Promise.reject(new Error("本局尚未开始"));
+      const cached = questionCache.current.get(index);
+      if (cached) return cached;
+      const request = api<QuestionData>("/quiz/questions", {
+        method: "POST",
+        body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
+      }).catch((error) => {
+        questionCache.current.delete(index);
+        throw error;
+      });
+      questionCache.current.set(index, request);
+      return request;
+    },
+    [difficulty, runId, topic],
+  );
+
   const ensureQuestion = useCallback(
     async (index: number): Promise<QuestionData | null> => {
       if (!topic || !runId) return null;
       setFetching(true);
       setLoadError(null);
       try {
-        if (prefetched && prefetched.index === index) {
-          const ready = prefetched;
-          setPrefetched(null);
-          return ready;
-        }
-        return await api<QuestionData>("/quiz/questions", {
-          method: "POST",
-          body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
-        });
+        return await fetchQuestion(index);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "题目加载失败");
         return null;
@@ -202,12 +231,13 @@ export function QuizPage() {
         setFetching(false);
       }
     },
-    [difficulty, prefetched, runId, topic],
+    [fetchQuestion, runId, topic],
   );
 
   const openQuestion = useCallback((q: QuestionData | null) => {
     setCurrent(q);
     setQuestionStartedAt(Date.now());
+    setPrefetchReady(false);
   }, []);
 
   const startRun = useCallback(
@@ -221,7 +251,9 @@ export function QuizPage() {
       setSubmitting(false);
       setLoadError(null);
       setCurrent(null);
-      setPrefetched(null);
+      questionCache.current.clear();
+      idempotencyKeys.current.clear();
+      submittingRef.current = false;
       setScreen("run");
       const q = await api<QuestionData>("/quiz/questions", {
         method: "POST",
@@ -238,53 +270,65 @@ export function QuizPage() {
     [openQuestion],
   );
 
-  /** 展示答案期间预取下一题（静默失败） */
+  /**
+   * 展示答案期间预取下一题（静默失败）。
+   * 结果按序号留在 questionCache 里，用户随后点「下一题」会复用它；
+   * 若用户抢在预取返回前就点了「下一题」，两次调用共享同一个在途 Promise，
+   * 服务端只会收到一个序号请求。预取结果不再因为「序号已变化」被丢弃——
+   * 那会让服务端已生成、客户端不认识，序号从此错位。
+   */
   const prefetchNext = useCallback(() => {
     const index = itemsRef.current.length;
-    if (index >= 10 || prefetching.current || !topic || !runId) return;
-    prefetching.current = true;
-    void api<QuestionData>("/quiz/questions", {
-      method: "POST",
-      body: JSON.stringify({ topicId: topic.id, difficulty, runId, index }),
-    })
+    if (index >= 10 || !topic || !runId) return;
+    if (questionCache.current.has(index)) {
+      setPrefetchReady(true);
+      return;
+    }
+    void fetchQuestion(index)
       .then((q) => {
-        if (q.index === itemsRef.current.length) setPrefetched(q);
+        if (q.index === itemsRef.current.length) setPrefetchReady(true);
       })
-      .catch(() => undefined)
-      .finally(() => {
-        prefetching.current = false;
-      });
-  }, [difficulty, runId, topic]);
+      .catch(() => undefined);
+  }, [fetchQuestion, runId, topic]);
 
   useEffect(() => {
     if (screen === "run" && items.length > 0 && !summary) prefetchNext();
   }, [screen, items.length, summary, prefetchNext]);
 
   const answer = async (selectedIndex: number) => {
-    if (!current || submitting || items.length !== current.index) return;
+    // 用 ref 兜同步连点：submitting 是 state，同一 tick 里的两次点击都会看到 false，
+    // 会发出两个不同 idempotencyKey 的提交，后一个被服务端判为该题已提交。
+    if (!current || submittingRef.current || items.length !== current.index) return;
     const elapsedMs = Math.max(0, Date.now() - questionStartedAt);
+    const questionId = current.questionId;
+    const idempotencyKey =
+      idempotencyKeys.current.get(questionId) ?? crypto.randomUUID();
+    idempotencyKeys.current.set(questionId, idempotencyKey);
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const grade = await api<Grade>("/quiz/answers", {
         method: "POST",
         body: JSON.stringify({
-          questionId: current.questionId,
+          questionId,
           selectedIndex,
           elapsedMs,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey,
         }),
       });
+      idempotencyKeys.current.delete(questionId);
       const nextItems = [...itemsRef.current, { q: current, selectedIndex, grade }];
       setItems(nextItems);
-      setSubmitting(false);
       if (grade.run?.finished) {
         setSummary(grade.run);
         setScreen("result");
         void loadProgress();
       }
     } catch (error) {
-      setSubmitting(false);
       showToast(error instanceof Error ? error.message : "提交失败，请重试", "error");
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -362,7 +406,7 @@ export function QuizPage() {
           submitting={submitting}
           fetching={fetching}
           loadError={loadError}
-          prefetchReady={!!prefetched}
+          prefetchReady={prefetchReady}
           startedAt={questionStartedAt}
           onBack={goBackToMap}
           onAnswer={(i) => void answer(i)}

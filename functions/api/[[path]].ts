@@ -839,15 +839,49 @@ app.post("/quiz/questions", async (c) => {
         fail("TOPIC_LOCKED", `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`),
         409,
       );
-    const countRow = await c.env.DB.prepare(
-      "SELECT COUNT(*) AS total FROM generated_questions WHERE user_id=? AND run_id=?",
+    const runRows = await c.env.DB.prepare(
+      "SELECT id,topic_id AS topicId,difficulty,stem,options_json AS optionsJson,material_json AS materialJson,created_at AS generatedAt,expires_at AS expiresAt FROM generated_questions WHERE user_id=? AND run_id=? ORDER BY created_at ASC",
     )
       .bind(c.get("userId"), body.runId)
-      .first<{ total: number }>();
-    const generated = Number(countRow?.total ?? 0);
-    if (generated >= RUN_LENGTH)
+      .all<{
+        id: string;
+        topicId: string;
+        difficulty: RunDifficulty;
+        stem: string;
+        optionsJson: string;
+        materialJson: string | null;
+        generatedAt: string;
+        expiresAt: string;
+      }>();
+    // 本局已生成的题按生成顺序排列，第 index 题就是 runRows[index]。
+    // 同一序号重复请求要**返回同一道题**而不是报错：客户端的「预取下一题」与用户点
+    // 「下一题」可能同时发出（网络一慢必然撞车），重试也会重复同一序号。
+    // 以前这里只比较 COUNT 与 index，撞车就 409 RUN_STATE「题目序号不连续」；
+    // 更麻烦的是客户端会把已生成的预取结果丢掉，序号从此永久错位，只能重开一局。
+    const existingQuestion = runRows.results[body.index];
+    if (existingQuestion) {
+      return c.json(
+        ok({
+          questionId: existingQuestion.id,
+          topicId: existingQuestion.topicId,
+          difficulty: existingQuestion.difficulty,
+          runId: body.runId,
+          index: body.index,
+          runLength: RUN_LENGTH,
+          stem: existingQuestion.stem,
+          options: JSON.parse(existingQuestion.optionsJson) as string[],
+          material: existingQuestion.materialJson
+            ? (JSON.parse(existingQuestion.materialJson) as MaterialSpec)
+            : null,
+          generatedAt: existingQuestion.generatedAt,
+          expiresAt: existingQuestion.expiresAt,
+          reused: true,
+        }),
+      );
+    }
+    if (runRows.results.length >= RUN_LENGTH)
       return c.json(fail("RUN_COMPLETE", "本局已完成，请重新开始"), 409);
-    if (generated !== body.index)
+    if (runRows.results.length !== body.index)
       return c.json(
         fail("RUN_STATE", "题目序号不连续，请重新开始本局"),
         409,

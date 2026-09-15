@@ -309,14 +309,33 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join('、')}` } }))
           return
         }
-        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [] })
+        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [], questions: [] })
         const run = quizState.runs.get(runId)
-        if (run.answered.length >= RUN_LENGTH) {
+        run.questions ??= []
+        // 与 functions/api/[[path]].ts 一致：本局已生成的题按顺序记在 run.questions，
+        // 第 index 题已存在就**原样返回**（预取与「下一题」撞车、客户端重试都不该报错），
+        // 只有真的越界时才回 RUN_COMPLETE / RUN_STATE。
+        const existingId = run.questions[index]
+        if (existingId && quizState.questions.has(existingId)) {
+          const q = quizState.questions.get(existingId)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: true,
+            data: {
+              questionId: existingId, topicId: q.topicId, difficulty: q.difficulty, runId,
+              index, runLength: RUN_LENGTH, stem: q.stem, options: q.options, material: null,
+              generatedAt: q.generatedAt, expiresAt: q.expiresAt, reused: true,
+            },
+            error: null,
+          }))
+          return
+        }
+        if (run.questions.length >= RUN_LENGTH) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_COMPLETE', message: '本局已完成，请重新开始' } }))
           return
         }
-        if (run.answered.length !== index) {
+        if (run.questions.length !== index) {
           res.writeHead(409, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '题目序号不连续，请重新开始本局' } }))
           return
@@ -328,15 +347,18 @@ const server = http.createServer(async (req, res) => {
         : `模拟${topicOfId(topicId)?.title ?? topicId}题（${difficulty}局）：请选出正确选项。`
       const options = topicId.startsWith('seq-') ? ['19', '21', '17', '18'] : ['选项 A', '选项 B', '选项 C', '选项 D']
       const answerIndex = topicId.startsWith('seq-') ? 0 : index % 4
-      quizState.questions.set(questionId, { topicId, difficulty, runId: runId ?? null, answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。', options })
+      const generatedAt = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString()
+      quizState.questions.set(questionId, { topicId, difficulty, runId: runId ?? null, answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。', options, stem, generatedAt, expiresAt })
+      if (runId) quizState.runs.get(runId).questions[index] = questionId
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         success: true,
         data: {
           questionId, topicId, difficulty, runId: runId ?? null, index: runId ? index : null,
           runLength: RUN_LENGTH, stem, options, material: null,
-          generatedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+          generatedAt,
+          expiresAt,
         },
         error: null,
       }))

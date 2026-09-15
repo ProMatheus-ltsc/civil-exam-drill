@@ -46,14 +46,21 @@ class FakeStatement {
     return null;
   }
   async all<T>() {
+    if (this.sql.includes("FROM generated_questions WHERE user_id=? AND run_id=?"))
+      return { results: this.db.runQuestionRows as T[] };
     return { results: [] as T[] };
   }
   async run() {
+    this.db.writes.push(this.sql);
     return { success: true };
   }
 }
 class FakeDb {
   batches: FakeStatement[][] = [];
+  /** 本局已生成的题（questions 接口按序号回查用），默认空表示「这一序号还没生成」 */
+  runQuestionRows: unknown[] = [];
+  /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
+  writes: string[] = [];
   prepare(sql: string) {
     return new FakeStatement(this, sql);
   }
@@ -324,6 +331,71 @@ describe("API contract guards", () => {
     );
     expect(response.status).toBe(400);
     expect((await response.json()).error.code).toBe("TOPIC_RETIRED");
+  });
+
+  it("同一序号的重复请求返回同一道题，而不是 RUN_STATE", async () => {
+    // 回归：客户端的「预取下一题」与用户点「下一题」会同时发出请求，
+    // 老实现只比 COUNT 与 index，撞车就 409「题目序号不连续」。
+    const db = new FakeDb();
+    db.runQuestionRows = [
+      {
+        id: "q_existing",
+        topicId: "arithmetic",
+        difficulty: "hard",
+        stem: "已经生成过的题面",
+        optionsJson: JSON.stringify(["A", "B", "C", "D"]),
+        materialJson: null,
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    ];
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "arithmetic",
+          difficulty: "hard",
+          runId: crypto.randomUUID(),
+          index: 0,
+        }),
+      },
+      { ...env, DB: db },
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data).toMatchObject({
+      questionId: "q_existing",
+      stem: "已经生成过的题面",
+      options: ["A", "B", "C", "D"],
+      index: 0,
+      reused: true,
+    });
+    expect(
+      db.writes.some((sql) => sql.includes("INSERT INTO generated_questions")),
+    ).toBe(false);
+  });
+
+  it("序号跳跃（超过已生成题数）仍报 RUN_STATE，防客户端错算", async () => {
+    const db = new FakeDb();
+    db.runQuestionRows = [];
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "arithmetic",
+          difficulty: "hard",
+          runId: crypto.randomUUID(),
+          index: 1,
+        }),
+      },
+      { ...env, DB: db },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("RUN_STATE");
   });
 
   it("answers carry run completion metadata when a run ends", async () => {
