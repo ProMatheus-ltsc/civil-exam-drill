@@ -131,7 +131,7 @@ export function generateSubtraction(r: Rng): QuestionDraft {
         ? [1, 7, 10, 90]
         : level === 2
           ? [12, 87, 100, 980]
-          : [101, 397, 1000, 4980];
+          : [30, 87, 100, 980];
     let u = 0;
     let v = 0;
     let ones = 0;
@@ -147,15 +147,15 @@ export function generateSubtraction(r: Rng): QuestionDraft {
     subtrahend = sPrime + v;
   } else if (variant === "round-sub") {
     const [unitBase, offLo, offHi, baseHi] =
-      level === 1 ? [10, 1, 9, 8] : level === 2 ? [100, 11, 39, 9] : [1000, 11, 59, 9];
+      level === 1 ? [10, 1, 9, 8] : level === 2 ? [100, 11, 39, 9] : [100, 11, 59, 9];
     roundBase = integer(level === 1 ? 3 : 2, baseHi) * unitBase;
     subtrahend = roundBase - integer(offLo, offHi);
     minuend = integer(
       subtrahend + 16,
-      level === 1 ? 99 : level === 2 ? 999 : Math.min(9999, roundBase + 899),
+      level === 1 ? 99 : Math.min(999, roundBase + 89),
     );
   } else {
-    const unitBase = level === 1 ? 10 : level === 2 ? 100 : 1000;
+    const unitBase = level === 1 ? 10 : 100;
     minuend = integer(level === 1 ? 4 : 2, 9) * unitBase;
     roundBase = minuend;
     subtrahend = integer(unitBase + 5, minuend - 16);
@@ -163,9 +163,23 @@ export function generateSubtraction(r: Rng): QuestionDraft {
   const answer = minuend - subtrahend;
   const ones = minuend % 10;
   const borrowOnes = subtrahend % 10;
+  // 三位数退位题用“21/12”分段讲：后两位够减先算后两位再算百位，不够减则百位先借 1
+  const splitMethod =
+    level === 2 && variant === "borrow"
+      ? (() => {
+          const mh = Math.floor(minuend / 100);
+          const mm = minuend % 100;
+          const sh = Math.floor(subtrahend / 100);
+          const ss = subtrahend % 100;
+          return mm >= ss
+            ? `三位数分段“21”：后两位 ${mm}−${ss}=${mm - ss}，百位 ${mh}−${sh}=${mh - sh}，合起来 ${answer}。`
+            : `三位数分段“12”：百位借 1，${mh}−1−${sh}=${mh - 1 - sh}；后两位 ${mm + 100}−${ss}=${mm + 100 - ss}，合起来 ${answer}。`;
+        })()
+      : "";
   const method =
     variant === "borrow"
-      ? `按位退位：个位 ${ones} 不够减 ${borrowOnes}，从十位借 1 后 ${ones + 10}−${borrowOnes}=${ones + 10 - borrowOnes}，再算高位得 ${answer}。`
+      ? splitMethod ||
+        `按位退位：个位 ${ones} 不够减 ${borrowOnes}，从十位借 1 后 ${ones + 10}−${borrowOnes}=${ones + 10 - borrowOnes}，再算高位得 ${answer}。`
       : variant === "round-sub"
         ? `把减数凑整：${minuend}−${subtrahend}=(${minuend}−${roundBase})+${roundBase - subtrahend}=${minuend - roundBase}+${roundBase - subtrahend}。`
         : `被减数是整${level === 1 ? "十" : level === 2 ? "百" : "千"}数：先向它借 1——(${minuend - 1})−${subtrahend}+1=${minuend - 1 - subtrahend}+1，避免个位连续借位。`;
