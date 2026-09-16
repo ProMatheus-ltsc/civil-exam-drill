@@ -77,6 +77,12 @@ export const BUDGET_SECONDS: Record<BudgetClass, Record<Difficulty, number>> = {
   sequence: { easy: 45, medium: 65, hard: 85 },
 };
 
+/** 单点覆盖：个别关卡按实测压紧每题预算（秒/题，含材料读题，不再叠加） */
+export const TOPIC_BUDGET_OVERRIDES: Partial<Record<TopicId, Record<Difficulty, number>>> = {
+  // 加法只出两项、数字小，10 题一局控制在最多 100 秒
+  addition: { easy: 8, medium: 10, hard: 10 },
+};
+
 /**
  * 难度局语义：模块内区分 低/中/高 三个难度局，每题同难度、共 10 题。
  * - 难度高低取决于：题干数字复杂度（档位越高数值越非整、多步换算）+ 选项接近程度；
@@ -117,9 +123,11 @@ const MATERIAL_READ_SECONDS: Partial<Record<BudgetClass, number>> = {
 
 /** 指定难度局的单题预算（秒）；资料速算高局自动叠加材料读题时间 */
 export function perQuestionBudgetSeconds(
-  topic: Pick<TrainingTopic, "budgetClass" | "track">,
+  topic: Pick<TrainingTopic, "budgetClass" | "track"> & { id: string },
   difficulty: Difficulty,
 ) {
+  const override = TOPIC_BUDGET_OVERRIDES[topic.id as TopicId]?.[difficulty];
+  if (override !== undefined) return override;
   const base = BUDGET_SECONDS[topic.budgetClass][difficulty];
   if (topic.track === "speed" && difficulty === "hard") {
     return base + (MATERIAL_READ_SECONDS[topic.budgetClass] ?? 0);
@@ -129,7 +137,7 @@ export function perQuestionBudgetSeconds(
 
 /** 难度局总时间预算（毫秒）：10 题 × 单题预算 */
 export function difficultyBudgetMs(
-  topic: Pick<TrainingTopic, "budgetClass" | "track">,
+  topic: Pick<TrainingTopic, "budgetClass" | "track" | "id">,
   difficulty: Difficulty,
 ) {
   return perQuestionBudgetSeconds(topic, difficulty) * 10 * 1000;
