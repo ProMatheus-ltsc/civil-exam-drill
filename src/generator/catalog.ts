@@ -79,8 +79,9 @@ export const BUDGET_SECONDS: Record<BudgetClass, Record<Difficulty, number>> = {
 
 /** 单点覆盖：个别关卡按实测压紧每题预算（秒/题，含材料读题，不再叠加） */
 export const TOPIC_BUDGET_OVERRIDES: Partial<Record<TopicId, Record<Difficulty, number>>> = {
-  // 加法只出两项、数字小，10 题一局控制在最多 100 秒
+  // 加法/减法只出两项、数字小，10 题一局控制在最多 100 秒
   addition: { easy: 8, medium: 10, hard: 10 },
+  subtraction: { easy: 8, medium: 10, hard: 10 },
 };
 
 /**

@@ -124,12 +124,27 @@ export function generateSubtraction(r: Rng): QuestionDraft {
   let subtrahend = 0;
   let roundBase = 0;
   if (variant === "borrow") {
-    const [lo, hi, subLo] =
-      level === 1 ? [42, 98, 11] : level === 2 ? [420, 986, 106] : [1650, 4980, 1005];
-    minuend = Math.floor(integer(lo, hi) / 10) * 10 + integer(1, 8);
-    // 减数个位比被减数大 → 一定借位；高位留余量，保证差 ≥ 16（选项不出负数）
-    const high = Math.floor(integer(subLo, minuend - 25) / 10) * 10;
-    subtrahend = high + integer((minuend % 10) + 1, 9);
+    // 先均匀定答案与借位结构（减数个位 v 比被减数个位 u 大），再反推被减数/减数；
+    // 修复旧实现里减数高位总取最小值、答案扎堆（大量 22~29 如 24）的问题
+    const [tLo, tHi, sUnit, mHi] =
+      level === 1
+        ? [1, 7, 10, 90]
+        : level === 2
+          ? [12, 87, 100, 980]
+          : [101, 397, 1000, 4980];
+    let u = 0;
+    let v = 0;
+    let ones = 0;
+    let t = 0;
+    do {
+      u = integer(0, 8);
+      v = integer(u + 1, 9);
+      ones = 10 + u - v;
+      t = integer(tLo, tHi);
+    } while (10 * t + ones < 16);
+    const sPrime = 10 * integer(sUnit / 10, (mHi - 10 * (t + 1)) / 10);
+    minuend = sPrime + 10 * (t + 1) + u;
+    subtrahend = sPrime + v;
   } else if (variant === "round-sub") {
     const [unitBase, offLo, offHi, baseHi] =
       level === 1 ? [10, 1, 9, 8] : level === 2 ? [100, 11, 39, 9] : [1000, 11, 59, 9];
