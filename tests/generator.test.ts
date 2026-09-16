@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { round } from "../src/generator/random";
 import {
   difficulties,
   generateQuestion,
@@ -221,9 +222,10 @@ describe("question generator", () => {
           const expression = String(question.params.expression);
           const answer = evaluate(expression);
           const where = `${topicId}/${difficulty.id} seed=${seed}：「${expression}」`;
-          expect(Number(question.params.answer), where).toBe(answer);
-          expect(Number(question.options[question.answerIndex]), where).toBe(answer);
-          expect(question.options.every((option) => /^\d+$/.test(option)), where).toBe(true);
+          // 加法允许一位/两位小数，浮点累加后按两位小数对齐再比较
+          expect(Number(question.params.answer), where).toBe(round(answer, 2));
+          expect(Number(question.options[question.answerIndex]), where).toBe(round(answer, 2));
+          expect(question.options.every((option) => /^\d+(?:\.\d+)?$/.test(option)), where).toBe(true);
         }
       }
     }

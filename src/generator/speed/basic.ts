@@ -40,35 +40,68 @@ function numericOptions(answer: number, random: () => number) {
   };
 }
 
-/**
- * 加法：只出纯加法，不掺减法。
- * easy 两项两位数；medium 两项或三项（含三位数）；hard 三项三位数（会被真题化改写为分阶段合计）。
- */
-export function generateAddition(r: Rng): QuestionDraft {
-  const { level, integer, pick, random } = r;
-  const count = level === 1 ? 2 : level === 2 ? pick([2, 3]) : 3;
+/** 生成两个加数：decimals 0=整数（至多 1/10 凑整对） 1=一位小数 2=两位小数；均不超过三位有效数字 */
+function additionOperands(
+  integer: Rng["integer"],
+  random: () => number,
+  level: number,
+  decimals: number,
+): [number, number] {
+  if (decimals === 1) {
+    const [lo, hi] = level === 1 ? [12, 98] : [123, 987];
+    return [integer(lo, hi) / 10, integer(lo, hi) / 10];
+  }
+  if (decimals === 2) return [integer(123, 987) / 100, integer(123, 987) / 100];
   const min = level === 1 ? 12 : level === 2 ? 106 : 118;
   const max = level === 1 ? 98 : level === 2 ? 896 : 986;
-  // 至多 1/10 的题保留「个位凑十」的对子（练先配整十），其余是普通加法（练分位相加）
-  const [first, second] =
-    random() > 0.9
-      ? friendlyPair(integer, min, max)
-      : [integer(min, max), integer(min, max)];
-  const values = [first, second];
-  while (values.length < count) values.push(integer(min, max));
-  const answer = values.reduce((sum, value) => sum + value, 0);
-  const tensPart = values.reduce((sum, value) => sum + tensOf(value), 0);
-  const onesPart = values.reduce((sum, value) => sum + (value % 10), 0);
+  return random() > 0.9
+    ? friendlyPair(integer, min, max)
+    : [integer(min, max), integer(min, max)];
+}
+
+/**
+ * 加法：只出两项纯加法，不掺减法，每个加数不超过三位有效数字、可带一位/两位小数（小数点在中间）。
+ * easy 两位数或一位小数；medium/hard 三位数或带小数（两位小数从 medium 起）。
+ */
+export function generateAddition(r: Rng): QuestionDraft {
+  const { level, integer, random } = r;
+  const decimals =
+    random() < (level === 1 ? 0.25 : level === 2 ? 0.4 : 0.5)
+      ? level >= 2 && random() < 0.5
+        ? 2
+        : 1
+      : 0;
+  const [first, second] = additionOperands(integer, random, level, decimals);
+  const answer = round(first + second, decimals);
+  if (decimals > 0) {
+    const step = decimals === 1 ? 0.1 : 0.01;
+    const set = options(
+      answer,
+      [round(answer + step, decimals), round(answer - step, decimals), round(answer + 1, decimals)],
+      "",
+      random,
+      decimals,
+    );
+    return {
+      templateId: decimals === 1 ? "addition-decimal1-v2" : "addition-decimal2-v2",
+      params: { expression: `${fmt(first, decimals)}+${fmt(second, decimals)}`, answer },
+      stem: `不使用计算器，计算 ${fmt(first, decimals)}+${fmt(second, decimals)}。`,
+      ...set,
+      explanation: `对齐小数点逐位相加：${fmt(first, decimals)}+${fmt(second, decimals)}=${fmt(answer, decimals)}。干扰项与答案只差 ${step === 0.1 ? "0.1" : "0.01"} 或 1，须保留 ${decimals} 位小数核对。`,
+    };
+  }
+  const tensPart = tensOf(first) + tensOf(second);
+  const onesPart = (first % 10) + (second % 10);
   const carry = Math.floor(onesPart / 10);
   const paired = first % 10 !== 0 && (first + second) % 10 === 0;
   const { set, tip } = numericOptions(answer, random);
   return {
-    templateId: count === 2 ? "addition-pair-v2" : "addition-triple-v2",
-    params: { expression: values.join("+"), answer },
-    stem: `不使用计算器，计算 ${values.join("+")}。`,
+    templateId: "addition-pair-v2",
+    params: { expression: `${first}+${second}`, answer },
+    stem: `不使用计算器，计算 ${first}+${second}。`,
     ...set,
     explanation:
-      `拆分相加：${values.map((value) => `${tensOf(value)}+${value % 10}`).join("、")}；整十部分合计 ${tensPart}、零头合计 ${onesPart}${carry > 0 ? `（向十位进 ${carry}）` : ""}，得 ${answer}。` +
+      `拆分相加：${tensOf(first)}+${first % 10}、${tensOf(second)}+${second % 10}；整十部分合计 ${tensPart}、零头合计 ${onesPart}${carry > 0 ? `（向十位进 ${carry}）` : ""}，得 ${answer}。` +
       (paired
         ? `${first} 与 ${second} 的个位刚好凑成 10，先配成整十（${first + second}）再合并更快。`
         : "") +
