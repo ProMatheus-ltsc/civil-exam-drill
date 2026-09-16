@@ -49,7 +49,11 @@ export function generateAddition(r: Rng): QuestionDraft {
   const count = level === 1 ? 2 : level === 2 ? pick([2, 3]) : 3;
   const min = level === 1 ? 12 : level === 2 ? 106 : 118;
   const max = level === 1 ? 98 : level === 2 ? 896 : 986;
-  const [first, second] = friendlyPair(integer, min, max);
+  // 至多 1/10 的题保留「个位凑十」的对子（练先配整十），其余是普通加法（练分位相加）
+  const [first, second] =
+    random() > 0.9
+      ? friendlyPair(integer, min, max)
+      : [integer(min, max), integer(min, max)];
   const values = [first, second];
   while (values.length < count) values.push(integer(min, max));
   const answer = values.reduce((sum, value) => sum + value, 0);
@@ -128,8 +132,8 @@ export function generateSubtraction(r: Rng): QuestionDraft {
 }
 
 /**
- * 多项求和：3~5 项连加。造数时故意留出「个位凑十」的对子，
- * 让「先配对」与基准数法都是真能省事的做法。
+ * 多项求和：3~5 项连加。至多 1/10 的题造出「个位凑十」的对子，
+ * 让「先配对」与基准数法都是真能省事的做法；其余为普通随机数，练分位相加。
  */
 export function generateSumMany(r: Rng): QuestionDraft {
   const { level, integer, pick, random } = r;
@@ -137,8 +141,11 @@ export function generateSumMany(r: Rng): QuestionDraft {
   const min = level === 1 ? 12 : level === 2 ? 106 : 118;
   const max = level === 1 ? 98 : level === 2 ? 896 : 976;
   const values: number[] = [];
+  const friendly = random() > 0.9;
   while (values.length + 2 <= count) {
-    const [a, b] = friendlyPair(integer, min, max);
+    const [a, b] = friendly
+      ? friendlyPair(integer, min, max)
+      : [integer(min, max), integer(min, max)];
     values.push(a, b);
   }
   while (values.length < count) values.push(integer(min, max));
