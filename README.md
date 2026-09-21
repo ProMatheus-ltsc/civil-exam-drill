@@ -67,7 +67,7 @@ updatedAt: 2026-09-02
 | judgment | `graphics` `definition` `analogy` `logic` `science_reasoning` |
 | common_sense | `methods` `science` `politics` `management` + 中文篇目（`人文篇` `历史篇` `法律篇` `科技篇` `经济篇` 等） |
 | quantitative | `methods` `sequences` `geometry` `counting` `mixture` `engineering` `travel` `profit` `sets` |
-| essay | `training-cognition` `training-reading` `training-core` `training-article` `training-document` `training-sprint`（21 天精讲，按六阶段分组）`materials`（素材库）`standard-terms`（规范词卡片） |
+| essay | `training-cognition` `training-reading` `training-core` `training-article` `training-document` `training-sprint`（39 关精讲，按六阶段分组）`materials`（素材库）`standard-terms`（规范词卡片） |
 
 英文 key 的中文展示名映射在 `src/pages/KnowledgePage.tsx` 的 `categoryLabels`；新增分类可加一行映射，未映射的 key 会原样显示（中文 key 直接显示中文）。
 
@@ -89,15 +89,15 @@ updatedAt: 2026-09-02
 | 行测 5 模块（非 essay） | `/#/knowledge` | 顶部模块按钮（前端硬编码 5 个）；组内按 `category` 分组 |
 | `essay` 模块 | `/#/essay` →「申论知识」 | 按 `category` 分组 |
 | `essay` + `category: standard-terms` | `/#/essay` →「规范词卡片」 | 见下方卡片规则 |
-| 申论 21 天闯关 | `/#/essay` →「21 天闯关」 | 见下方「申论闯关」规则 |
-| `essay` + `category: training-*` | `/#/essay` →「申论知识」→「21 天精讲 · 阶段名」 | 21 篇逐日讲解，一关一篇，按六阶段分组 |
+| 申论闯关 | `/#/essay` →「闯关」 | 见下方「申论闯关」规则 |
+| `essay` + `category: training-*` | `/#/essay` →「申论知识」→「精讲 · 阶段名」 | 39 篇逐日讲解，一关一篇，按六阶段分组 |
 | `essay` + `category: materials` | `/#/essay` →「申论知识」→「素材库」 | 名言积累、人物素材、作文写作模板三篇 |
 | 专项训练某个关卡的讲解 | `/#/quiz` 关卡右侧 📖（**新标签页**打开） | `src/generator/catalog.ts` 里该关卡的 `docId` |
-| 申论闯关某关的延伸讲解 | `/#/essay` →「21 天闯关」关卡右侧 📖（**新标签页**打开） | `src/essay/training.ts` 的 `docId`（**= 关卡 id**，即 `essay-dayNN`） |
+| 申论闯关某关的延伸讲解 | `/#/essay` →「闯关」关卡右侧 📖（**新标签页**打开） | `src/essay/training.ts` 的 `docId`（**= 关卡 id**，即 `essay-dayNN`） |
 
-### 申论闯关（21 天）
+### 申论闯关（39 关）
 
-`/#/essay` 的首个 tab 是**申论 21 天闯关**：六阶段、21 关、逐关解锁，观感与专项训练的关卡图一致
+`/#/essay` 的首个 tab 是**申论闯关**：六阶段、39 关、逐关解锁，观感与专项训练的关卡图一致
 （阶段徽标 + 基础/进阶/高阶难度档 + 星级 + 「需先通关」提示 + 折叠展开 + 查看延伸讲解）。
 
 - **单一事实源**：关卡文案在 `src/essay/training.ts`（目标、核心要点、实操任务、自评清单、docId），
@@ -121,16 +121,16 @@ updatedAt: 2026-09-02
   阈值才有干净分界）；再为该关在 `BANK` 里补 6 道题（题干、四选项、正确项下标、解析），
   考点标签与解析要能对应本关要点。`tests/essay-training.test.ts` 核关卡结构与解锁链，
   `tests/essay-bank.test.ts` 核题库结构、下发口径（不泄答案）与判星规则。
-- **延伸讲解（21 篇逐日讲解）**：每关卡片右侧 📖 在**新标签页**打开自己的讲解（`essay-dayNN`），
+- **延伸讲解（39 篇逐日讲解）**：每关卡片右侧 📖 在**新标签页**打开自己的讲解（`essay-dayNN`），
   与专项训练的 📖 同口径——讲解是「查资料」的旁支动作，同页跳转会把闯关进度（展开态、未提交的作答）丢掉。
   内容**以《申论 21 天深度操作指南》为主、知识库既有专文为辅**：正文主干是指南当天的「学习目标 /
   核心知识点 / 实操任务 / 课后作业」，老专文里**真有差异**的部分（真题例题、方法库、格式骨架、范文）
   已逐篇精读后重新组织、融进对应行文位置。
-- **这 21 篇是手写正文，不是生成物**：整合是「读懂后重写」，不是脚本搬家（脚本会把两本书拼在一起、
+- **这 39 篇是手写正文，不是生成物**：整合是「读懂后重写」，不是脚本搬家（脚本会把两本书拼在一起、
   同一主题讲两遍），所以早期那个 `scripts/import-essay-guide.mjs` 已删除——它一旦重跑就会覆盖这些手写内容。
   指南更新时按同样的方式逐天精读改写，**改内容直接改文档本身**。
 - **老专文已删除**：`overview`、`material-reading`、`summarization`、`proposals`、`comprehensive-analysis`、
-  `article-writing`、`official-writing` 七篇的差异化内容全部并入 21 篇讲解（对应关系：overview→Day 1/3、
+  `article-writing`、`official-writing` 七篇的差异化内容全部并入 39 篇讲解（对应关系：overview→Day 1/3、
   material-reading→Day 5/6、summarization→Day 7/8、comprehensive-analysis→Day 10、proposals→Day 11、
   article-writing→Day 13—16、official-writing→Day 12/18/19），内容零丢失，原文件在 git 历史里可查。
   保留的三篇素材库（名言积累 / 人物素材 / 作文写作模板）装的是指南里没有的可用素材，不属重复。

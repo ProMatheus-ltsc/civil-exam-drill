@@ -23,7 +23,7 @@ import { essayQuizPassLine, essayStars } from "../src/essay/rules";
 const LEVEL = "essay-day01";
 
 describe("申论客观题库：内容结构", () => {
-  it("21 关每关都有题，且不存在孤儿题目", () => {
+  it("39 关每关都有题，且不存在孤儿题目", () => {
     const missing = ESSAY_LEVELS.filter((level) => essayPoolOf(level.id).length === 0).map(
       (level) => level.id,
     );

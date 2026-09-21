@@ -45,10 +45,10 @@ describe("本地 mock 能直接加载这些源码模块", () => {
 });
 
 describe("申论 21 天闯关：关卡定义", () => {
-  it("恰好 21 关，Day 1~21 各一关且顺序一致", () => {
-    expect(ESSAY_LEVELS).toHaveLength(21);
+  it("恰好 39 关，Day 1~39 各一关且顺序一致", () => {
+    expect(ESSAY_LEVELS).toHaveLength(39);
     expect(ESSAY_LEVELS.map((level) => level.day)).toEqual(
-      Array.from({ length: 21 }, (_, index) => index + 1),
+      Array.from({ length: 39 }, (_, index) => index + 1),
     );
   });
 
@@ -61,7 +61,7 @@ describe("申论 21 天闯关：关卡定义", () => {
     expect(wrong).toEqual([]);
   });
 
-  it("六个阶段连续覆盖 Day 1~21", () => {
+  it("六个阶段连续覆盖 Day 1~39", () => {
     expect(ESSAY_STAGES.map((stage) => stage.id)).toEqual([
       "cognition",
       "reading",
@@ -75,7 +75,7 @@ describe("申论 21 天闯关：关卡定义", () => {
       expect(stage.from, `${stage.title} 起点应接上一阶段`).toBe(cursor);
       cursor = stage.to + 1;
     }
-    expect(cursor - 1).toBe(21);
+    expect(cursor - 1).toBe(39);
     // 每关都落在某个阶段的天数区间里
     const orphan = ESSAY_LEVELS.filter(
       (level) =>

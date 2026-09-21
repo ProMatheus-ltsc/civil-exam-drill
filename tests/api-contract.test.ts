@@ -600,7 +600,7 @@ describe("API contract guards", () => {
     const list = await app.request("/api/essay/training", { headers: auth }, { ...env, DB: db });
     expect(list.status).toBe(200);
     const payload = (await list.json()).data;
-    expect(payload.levels).toHaveLength(21);
+    expect(payload.levels).toHaveLength(39);
     expect(payload.stages).toHaveLength(6);
     expect(payload.levels[0]).toMatchObject({ unlocked: true, stars: 0, day: 1 });
     expect(payload.levels[1]).toMatchObject({
@@ -608,7 +608,7 @@ describe("API contract guards", () => {
       previousTitle: payload.levels[0].title,
     });
     expect(payload.summary).toMatchObject({
-      total: 21,
+      total: 39,
       cleared: 0,
       stars: 0,
       quizAnswered: 0,
@@ -731,7 +731,7 @@ describe("API contract guards", () => {
     expect(after.levels.slice(0, 4).every((level: { unlocked: boolean }) => level.unlocked)).toBe(true);
     expect(after.levels[4]).toMatchObject({ unlocked: false });
     expect(after.levels[0].notes).toBe("复盘结论");
-    expect(after.summary).toMatchObject({ cleared: 3, stars: 7, total: 21 });
+    expect(after.summary).toMatchObject({ cleared: 3, stars: 7, total: 39 });
     // 交卷后 GET 带回每题的对错与解析（页面刷新后还能看到上次的错题解析）；
     // 星取历史最好、作答留最近一次：Day1 最后一次只答对 0 题，星仍是 1
     expect(after.levels[0].quizResult).toMatchObject({ correct: 0, total: 5 });

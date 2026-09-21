@@ -1,5 +1,5 @@
 /**
- * 申论 21 天闯关：六阶段 21 关，逐关解锁（通关上一关才开下一关）。
+ * 申论闯关：六阶段 39 关，逐关解锁（通关上一关才开下一关）。
  *
  * 与专项训练（资料速算/数字推理）保持同一套观感与口径：
  *   - 关卡卡片（阶段徽标 + 难度档 + 星级 + 「需先通关」提示 + 折叠展开 + 查看讲解）；
@@ -177,8 +177,8 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
 
   return (
     <section className="panel">
-      <p className="eyebrow">六阶段 · 21 关 · 逐关解锁</p>
-      <h2>申论 21 天闯关</h2>
+      <p className="eyebrow">六阶段 · {payload.summary.total} 关 · 逐关解锁</p>
+      <h2>申论闯关</h2>
       <p className="muted">
         每关先看训练目标与核心要点，再按实操任务练，然后做 5 道客观题核对要点是否记住，
         最后对照自评清单检查任务是否落地。
