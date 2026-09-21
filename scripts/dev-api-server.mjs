@@ -104,10 +104,14 @@ const {
   ESSAY_LEVELS,
   essayMinutes,
   essayPreviousLevel,
-  essayStars,
   essayUnlocked,
 } = await import(essayTrainingUrl)
-/** levelId -> { checked: number[], notes: string, stars: number } */
+// 客观题：题库与判分同样取自 src/essay/bank.ts
+const essayBankUrl = new URL('../src/essay/bank.ts', import.meta.url).href
+const essayRulesUrl = new URL('../src/essay/rules.ts', import.meta.url).href
+const { essayStars } = await import(essayRulesUrl)
+const { essayQuizIssue, essayQuizOf, gradeEssayQuiz } = await import(essayBankUrl)
+/** levelId -> { checked: number[], quiz: [{id,key}], notes: string, stars: number } */
 const essayTrainingState = new Map()
 
 const RUN_LENGTH = 10
@@ -261,6 +265,8 @@ const server = http.createServer(async (req, res) => {
         checked,
         notes: record?.notes ?? '',
         updatedAt: record?.updatedAt ?? null,
+        quiz: essayQuizOf(level.id),
+        quizResult: record?.quiz ? gradeEssayQuiz(level.id, record.quiz) : null,
       }
     })
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -273,6 +279,8 @@ const server = http.createServer(async (req, res) => {
           total: levels.length,
           cleared: levels.filter((level) => level.stars >= 1).length,
           stars: levels.reduce((sum, level) => sum + level.stars, 0),
+          quizAnswered: levels.reduce((sum, level) => sum + (level.quizResult?.total ?? 0), 0),
+          quizCorrect: levels.reduce((sum, level) => sum + (level.quizResult?.correct ?? 0), 0),
         },
       },
       error: null,
@@ -300,11 +308,28 @@ const server = http.createServer(async (req, res) => {
         }))
         return
       }
+      const quiz = Array.isArray(body.quiz) ? body.quiz : []
+      const quizIssue = essayQuizIssue(levelId, quiz)
+      if (quizIssue) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          data: null,
+          error: { code: 'QUIZ_INCOMPLETE', message: quizIssue },
+        }))
+        return
+      }
+      const marked = gradeEssayQuiz(levelId, quiz)
       const existing = essayTrainingState.get(levelId)
       const checked = [...new Set((body.checked ?? []).filter((index) => Number.isInteger(index) && index >= 0 && index < level.checklist.length))].sort((a, b) => a - b)
-      const stars = Math.max(existing?.stars ?? 0, essayStars(checked.length, level.checklist.length))
+      const stars = Math.max(existing?.stars ?? 0, essayStars({
+        correct: marked.correct,
+        quizTotal: marked.total,
+        checked: checked.length,
+        checklistTotal: level.checklist.length,
+      }))
       const notes = body.notes ?? existing?.notes ?? ''
-      essayTrainingState.set(levelId, { checked, notes, stars, updatedAt: new Date().toISOString() })
+      essayTrainingState.set(levelId, { checked, quiz, notes, stars, updatedAt: new Date().toISOString() })
       const all = [...essayTrainingState.values()]
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
@@ -315,6 +340,9 @@ const server = http.createServer(async (req, res) => {
           notes,
           stars,
           cleared: stars >= 1,
+          correct: marked.correct,
+          quizTotal: marked.total,
+          marks: marked.marks,
           summary: {
             cleared: all.filter((record) => record.stars >= 1).length,
             stars: all.reduce((sum, record) => sum + record.stars, 0),

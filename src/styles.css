@@ -1660,3 +1660,137 @@ a.entry {
     flex-direction: column;
   }
 }
+
+/* ---------- 申论闯关：关卡内客观题（沿用关卡卡与答题选项的观感） ---------- */
+.essay-block h4 svg {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+.essay-quiz {
+  display: grid;
+  gap: 12px;
+}
+.essay-quiz-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e0e7ea;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+.essay-quiz-stem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: #17324d;
+  font-weight: 700;
+}
+.essay-quiz-index {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #17324d;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.essay-quiz-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eaf0f3;
+  color: #3d586b;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+.essay-quiz-badge {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 800;
+}
+.essay-quiz-badge.ok {
+  color: #176244;
+}
+.essay-quiz-badge.no {
+  color: #9a3030;
+}
+.essay-quiz-options {
+  display: grid;
+  gap: 8px;
+}
+/* 注意：选项用 button 而不是 radio——全局 input 带 width:100%/min-height:44px，
+   用 input 会被撑满整行（自评清单已经踩过一次）。 */
+.essay-quiz-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #ccd6dd;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.essay-quiz-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.essay-quiz-option.on {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.essay-quiz-option.right {
+  border-color: #1b8a5a;
+  background: #e7f6ee;
+}
+.essay-quiz-option.wrong {
+  border-color: #c25454;
+  background: #fdeaea;
+}
+.essay-quiz-key {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #edf2f5;
+  color: #3d586b;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+.essay-quiz-option.on .essay-quiz-key {
+  background: #2563eb;
+  color: #fff;
+}
+.essay-quiz-option.right .essay-quiz-key {
+  background: #1b8a5a;
+  color: #fff;
+}
+.essay-quiz-option.wrong .essay-quiz-key {
+  background: #c25454;
+  color: #fff;
+}
+.essay-quiz-solution {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid #4d8f6e;
+  border-radius: 8px;
+  background: #f4f9f6;
+  color: #40566a;
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+.essay-quiz-solution strong {
+  color: #9a3030;
+}

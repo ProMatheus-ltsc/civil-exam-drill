@@ -5,16 +5,44 @@
  * 这里钉住的是内容结构与解锁链——漏一关、清单少一条、docId 写错、星级口径改错，都会在这里暴露，
  * 而不是等到页面上出现一个点不开的「查看讲解」或者永远打不开的关卡才发现。
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEntries } from "../scripts/content/lib.mjs";
-import {
-  ESSAY_LEVELS,
-  ESSAY_STAGES,
-  essayMinutes,
-  essayPreviousLevel,
-  essayStars,
-  essayUnlocked,
-} from "../src/essay/training";
+import { ESSAY_LEVELS, ESSAY_STAGES, essayMinutes, essayPreviousLevel, essayUnlocked } from "../src/essay/training";
+import { essayQuizPassLine, essayStars } from "../src/essay/rules";
+
+describe("本地 mock 能直接加载这些源码模块", () => {
+  /**
+   * scripts/dev-api-server.mjs 用 `await import(new URL('../src/xxx.ts'))` 直接把源码交给纯 node 加载
+   * （靠 node 的 strip-types）。纯 node 的 ESM 解析要求相对路径带扩展名，所以这些文件里
+   * **不能出现静态的相对 import / export**，否则本地 mock 会在启动时 ERR_MODULE_NOT_FOUND 直接崩
+   * ——而线上（vite / wrangler 打包）完全正常，属于「只有本地会炸」的坑，所以在这里钉住。
+   * `import type` / `export type` 是例外：类型会在 strip-types 阶段被擦除（catalog.ts 就这么用）。
+   */
+  const NODE_LOADED = [
+    "src/generator/catalog.ts",
+    "src/essay/training.ts",
+    "src/essay/bank.ts",
+    "src/essay/rules.ts",
+  ];
+
+  it("不含静态的相对 import / export（类型除外）", () => {
+    const offenders = NODE_LOADED.flatMap((file) => {
+      const lines = readFileSync(resolve(process.cwd(), file), "utf8").split(/\r?\n/);
+      return lines
+        .map((line, index) => ({ text: line.trim(), line: index + 1 }))
+        .filter(
+          ({ text }) =>
+            /^(import|export)\b/.test(text) &&
+            /from\s+["']\.\.?\//.test(text) &&
+            !/^(import|export)\s+type\b/.test(text),
+        )
+        .map(({ text, line }) => `${file}:${line} ${text}`);
+    });
+    expect(offenders).toEqual([]);
+  });
+});
 
 describe("申论 21 天闯关：关卡定义", () => {
   it("恰好 21 关，Day 1~21 各一关且顺序一致", () => {
@@ -119,12 +147,10 @@ describe("申论 21 天闯关：关卡定义", () => {
     expect(essayPreviousLevel(ESSAY_LEVELS[1])?.id).toBe("essay-day01");
   });
 
-  it("星级口径：≥80% 一星通关、≥90% 二星、全中三星", () => {
-    expect(essayStars(0, 10)).toBe(0);
-    expect(essayStars(7, 10)).toBe(0);
-    expect(essayStars(8, 10)).toBe(1);
-    expect(essayStars(9, 10)).toBe(2);
-    expect(essayStars(10, 10)).toBe(3);
-    expect(essayStars(0, 0)).toBe(0);
+  it("星级与及格线规则从 rules.ts 统一出口（训练页与服务端共用同一份）", () => {
+    // 详细口径在 tests/essay-bank.test.ts 里逐档钉住；这里只保证 training.ts 的再导出没被改坏
+    expect(essayStars({ correct: 5, quizTotal: 5, checked: 10, checklistTotal: 10 })).toBe(3);
+    expect(essayStars({ correct: 3, quizTotal: 5, checked: 10, checklistTotal: 10 })).toBe(0);
+    expect(essayQuizPassLine(5)).toBe(4);
   });
 });

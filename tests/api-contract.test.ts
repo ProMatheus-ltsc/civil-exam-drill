@@ -1,6 +1,23 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { app } from "../functions/api/[[path]]";
+import { essayQuestionById, essayQuizOf } from "../src/essay/bank";
+
+/**
+ * 客观题的标准答案与作答构造（测试专用）。
+ * 标准答案只在服务端存在——GET 下发数据里没有，所以这里直接从题库取。
+ */
+const essayAnswerKeys = (levelId: string) =>
+  essayQuizOf(levelId).map((item) => ({
+    id: item.id,
+    key: (essayQuestionById.get(item.id) as { answer: number }).answer,
+  }));
+/** 前 correct 道答对，其余答错（错项的 key 一定与正确项不同） */
+const essayAnswers = (levelId: string, correct: number) =>
+  essayAnswerKeys(levelId).map((item, index) => ({
+    id: item.id,
+    key: index < correct ? item.key : (item.key + 1) % 4,
+  }));
 
 class FakeStatement {
   values: unknown[] = [];
@@ -51,6 +68,7 @@ class FakeStatement {
       return {
         levelId,
         checkedJson: JSON.stringify(record.checked),
+        quizJson: JSON.stringify(record.quiz),
         notes: record.notes,
         stars: record.stars,
         updatedAt: record.updatedAt,
@@ -70,6 +88,7 @@ class FakeStatement {
         results: [...this.db.essayProgress].map(([levelId, record]) => ({
           levelId,
           checkedJson: JSON.stringify(record.checked),
+          quizJson: JSON.stringify(record.quiz),
           notes: record.notes,
           stars: record.stars,
           updatedAt: record.updatedAt,
@@ -80,14 +99,16 @@ class FakeStatement {
   async run() {
     this.db.writes.push(this.sql);
     if (this.sql.includes("essay_training_progress")) {
-      const [levelId, checkedJson, notes, stars] = [
+      const [levelId, checkedJson, quizJson, notes, stars] = [
         String(this.values[1]),
         String(this.values[2]),
         String(this.values[3]),
-        Number(this.values[4]),
+        String(this.values[4]),
+        Number(this.values[5]),
       ];
       this.db.essayProgress.set(levelId, {
         checked: JSON.parse(checkedJson) as number[],
+        quiz: JSON.parse(quizJson) as Array<{ id: string; key: number }>,
         notes,
         stars,
         updatedAt: "2026-09-21T12:00:00Z",
@@ -102,10 +123,16 @@ class FakeDb {
   runQuestionRows: unknown[] = [];
   /** 已通关的局（用于解锁链断言）：{ topicId, difficulty, runId, total, correct, durationMs } */
   passRuns: unknown[] = [];
-  /** 申论闯关进度：levelId → { checked, notes, stars, updatedAt } */
+  /** 申论闯关进度：levelId → { checked, quiz, notes, stars, updatedAt } */
   essayProgress = new Map<
     string,
-    { checked: number[]; notes: string; stars: number; updatedAt: string }
+    {
+      checked: number[];
+      quiz: Array<{ id: string; key: number }>;
+      notes: string;
+      stars: number;
+      updatedAt: string;
+    }
   >();
   /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
   writes: string[] = [];
@@ -568,7 +595,7 @@ describe("API contract guards", () => {
     expect(payload.data.schulte).toHaveProperty("bests");
   });
 
-  it("申论闯关：下发 21 关，首关解锁、其余锁着，未通关上一关不能提交", async () => {
+  it("申论闯关：下发 21 关与每关 5 道客观题，答案不下发、未答完不能交卷", async () => {
     const db = new FakeDb();
     const list = await app.request("/api/essay/training", { headers: auth }, { ...env, DB: db });
     expect(list.status).toBe(200);
@@ -576,19 +603,63 @@ describe("API contract guards", () => {
     expect(payload.levels).toHaveLength(21);
     expect(payload.stages).toHaveLength(6);
     expect(payload.levels[0]).toMatchObject({ unlocked: true, stars: 0, day: 1 });
-    expect(payload.levels[1]).toMatchObject({ unlocked: false, previousTitle: payload.levels[0].title });
-    expect(payload.summary).toMatchObject({ total: 21, cleared: 0, stars: 0 });
+    expect(payload.levels[1]).toMatchObject({
+      unlocked: false,
+      previousTitle: payload.levels[0].title,
+    });
+    expect(payload.summary).toMatchObject({
+      total: 21,
+      cleared: 0,
+      stars: 0,
+      quizAnswered: 0,
+      quizCorrect: 0,
+    });
     // 关卡内容随定义一起下发（前端不重复打包一份文案）
     expect(payload.levels[0].checklist).toHaveLength(10);
     expect(payload.levels[0].tasks.length).toBeGreaterThanOrEqual(2);
     expect(payload.levels[0].minutes).toBeGreaterThan(30);
 
+    // 客观题：下发 5 道，四选一，选项带题库原始下标 key
+    const quiz = payload.levels[0].quiz;
+    expect(quiz).toHaveLength(5);
+    expect(quiz[0].options).toHaveLength(4);
+    expect(quiz[0].options.map((option: { key: number }) => option.key).sort()).toEqual([0, 1, 2, 3]);
+    expect(quiz[0].tag).toBeTruthy();
+    // 关键：下发数据里绝不能出现答案与解析（否则前端一看源码就知道答案）
+    const wire = JSON.stringify(payload);
+    // 字段名换个写法也不能漏（比如直接叫 answer）——所以逐个关键字都查一遍；
+    // 注意 summary.quizAnswered 里的 "Answered" 是大写 A，不会被小写 answer 误伤
+    expect(wire).not.toContain("answer");
+    expect(wire).not.toContain("answerKey");
+    expect(wire).not.toContain("explanation");
+    // 注意：不能在整份 payload 上搜「解析」——关卡要点/自评清单里本来就有这个词，只能按字段名查
+    expect(payload.levels[0].quizResult).toBeNull();
+
+    // 未答完客观题 → 400（这道校验必须先于入库，否则客观题门槛形同虚设）
+    const partial = await app.request(
+      "/api/essay/training/essay-day01",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          quiz: quiz.slice(0, 2).map((item: { id: string }) => ({ id: item.id, key: 0 })),
+          checked: [0, 1, 2, 3, 4, 5, 6, 7],
+        }),
+      },
+      { ...env, DB: db },
+    );
+    expect(partial.status).toBe(400);
+    const partialError = (await partial.json()).error;
+    expect(partialError.code).toBe("QUIZ_INCOMPLETE");
+    expect(partialError.message).toContain("未作答");
+
+    // 未通关上一关 → 409（先判解锁，再判卷面；这里故意连题都没答）
     const locked = await app.request(
       "/api/essay/training/essay-day02",
       {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
-        body: JSON.stringify({ checked: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }),
+        body: JSON.stringify({ quiz: [], checked: [] }),
       },
       { ...env, DB: db },
     );
@@ -600,54 +671,74 @@ describe("API contract guards", () => {
       {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
-        body: JSON.stringify({ checked: [] }),
+        body: JSON.stringify({ quiz: [], checked: [] }),
       },
       { ...env, DB: db },
     );
     expect(missing.status).toBe(404);
   });
 
-  it("申论闯关：按清单勾选率给星（80/90/100 → 1/2/3 星），星级只增不减，通关后解锁下一关", async () => {
+  it("申论闯关：客观题是硬门槛，加上自评按加权总分定星（80/90/100 → 1/2/3 星），星级只增不减", async () => {
     const db = new FakeDb();
-    const submit = (levelId: string, checked: number[]) =>
-      app.request(
+    const submit = async (levelId: string, quiz: unknown, checked: number[]) => {
+      const response = await app.request(
         `/api/essay/training/${levelId}`,
         {
           method: "POST",
           headers: { ...auth, "content-type": "application/json" },
-          body: JSON.stringify({ checked, notes: "复盘结论" }),
+          body: JSON.stringify({ quiz, checked, notes: "复盘结论" }),
         },
         { ...env, DB: db },
       );
+      return (await response.json()).data;
+    };
 
-    // 8/10 = 80% → 一星通关
-    const eight = await submit("essay-day01", [0, 1, 2, 3, 4, 5, 6, 7]);
-    expect(eight.status).toBe(200);
-    expect((await eight.json()).data).toMatchObject({
-      stars: 1,
-      cleared: true,
-      checked: [0, 1, 2, 3, 4, 5, 6, 7],
-    });
+    // 计分：客观题每题 2 分、自评每条 1 分（满分 20）。
+    // 4/5 + 自评 8/10 → 8+8 = 16/20 = 80% → 一星通关
+    const one = await submit("essay-day01", essayAnswers("essay-day01", 4), [0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(one).toMatchObject({ correct: 4, quizTotal: 5, stars: 1, cleared: true });
 
-    // 星级只增不减：回头把自评改少了，已拿到的星不抹掉（与专项训练取历史最佳同口径）
-    expect((await (await submit("essay-day01", [0, 1])).json()).data.stars).toBe(1);
+    // 星级只增不减：重新交卷答得更差也不抹掉已拿到的星（与专项训练取历史最佳同口径）
+    expect((await submit("essay-day01", essayAnswers("essay-day01", 0), [0, 1])).stars).toBe(1);
 
-    // 9/10 → 二星；10/10 → 三星
-    expect((await (await submit("essay-day02", [0, 1, 2, 3, 4, 5, 6, 7, 8])).json()).data.stars).toBe(2);
-    expect((await (await submit("essay-day02", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])).json()).data.stars).toBe(3);
+    // 5/5 + 8/10 = 18/20 = 90% → 二星；5/5 + 10/10 = 满分 → 三星
+    expect((await submit("essay-day02", essayAnswers("essay-day02", 5), [0, 1, 2, 3, 4, 5, 6, 7])).stars).toBe(2);
+    expect((await submit("essay-day02", essayAnswers("essay-day02", 5), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])).stars).toBe(3);
 
-    // 越界下标被丢弃：提交 0~14 也只按 10 项算
-    const over = (await (await submit("essay-day03", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])).json()).data;
-    expect(over.checked).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    expect(over.stars).toBe(3);
+    // Day3 这时才解锁（要 Day2 通关）：客观题只答对 3/5 → 即使清单全勾也不通关，越界下标同时被丢弃
+    const gated = await submit("essay-day03", essayAnswers("essay-day03", 3), [
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    ]);
+    expect(gated).toMatchObject({ correct: 3, quizTotal: 5, stars: 0, cleared: false });
+    expect(gated.checked).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-    // 逐关解锁 + 汇总
+    // 补上 Day3：5/5 + 清单全勾 → 三星（星级从 0 提上来）
+    const marked = await submit("essay-day03", essayAnswers("essay-day03", 5), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(marked).toMatchObject({ correct: 5, stars: 3, cleared: true });
+    // 判分回传每题的对错、正确项与解析（交卷后才给，前端用它渲染错题解析）
+    expect(marked.marks).toHaveLength(5);
+    expect(
+      marked.marks.every(
+        (mark: { correct: boolean; explanation: string; answerKey: number }) =>
+          mark.correct && Boolean(mark.explanation) && Number.isInteger(mark.answerKey),
+      ),
+    ).toBe(true);
+
+    // 逐关解锁 + 汇总：Day3 通关后 Day4 才开
     const after = (
       await (await app.request("/api/essay/training", { headers: auth }, { ...env, DB: db })).json()
     ).data;
     expect(after.levels.slice(0, 4).every((level: { unlocked: boolean }) => level.unlocked)).toBe(true);
-    expect(after.levels[4]).toMatchObject({ unlocked: false }); // Day 5 还等着 Day 4 通关
+    expect(after.levels[4]).toMatchObject({ unlocked: false });
     expect(after.levels[0].notes).toBe("复盘结论");
     expect(after.summary).toMatchObject({ cleared: 3, stars: 7, total: 21 });
+    // 交卷后 GET 带回每题的对错与解析（页面刷新后还能看到上次的错题解析）；
+    // 星取历史最好、作答留最近一次：Day1 最后一次只答对 0 题，星仍是 1
+    expect(after.levels[0].quizResult).toMatchObject({ correct: 0, total: 5 });
+    expect(after.levels[0].quizResult.marks).toHaveLength(5);
+    expect(after.levels[0].stars).toBe(1);
+    // 没交过卷的关卡不下发判分结果（答案面为零）
+    expect(after.levels[5].quizResult).toBeNull();
+    expect(after.summary).toMatchObject({ quizAnswered: 15, quizCorrect: 10 });
   });
 });

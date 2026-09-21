@@ -2,18 +2,20 @@
  * 申论 21 天闯关：关卡定义（单一事实源——前端关卡图、接口校验、测试共用）。
  *
  * 内容蒸馏自《申论 21 天深度操作指南》的 21 天计划：每天一关，六阶段递进，
- * 逐关解锁（通关上一关的高难度自评才算通关）。关卡定义只放「学什么、练什么、怎么算过关」，
+ * 逐关解锁（通关上一关才算通关）。关卡定义只放「学什么、练什么、怎么算过关」，
  * 延伸讲解挂到 essay 知识库的既有专文（docId），不重复造文档。
  *
  * 与专项训练（资料速算/数字推理）的对应关系：
  *   阶段            ↔ 轨道分组        六阶段 = 关卡图上的「阶段」小节
  *   rating 1/2/3   ↔ 基础/进阶/高阶   同一套徽标
- *   checklist 达成率 ↔ 一局 10 题的准确率（≥80% 一星通关、≥90% 二星、全中三星）
+ *   客观题 + 自评清单 ↔ 一局 10 题的准确率（同为 80/90/100 → 1/2/3 星，规则见 ./rules.ts）
  *   逐关解锁        ↔ 模块前置（第一关是入口，其余关卡要求上一关已通关）
+ *
+ * 通关不只看自评：客观题（./bank.ts，每关下发 5 道）答对不足 80% 直接不通关，
+ * 自评清单校验的是「任务真的做了」——两者缺一不可。
  *
  * id 一经发布不要改：进度表 essay_training_progress 以 level_id 为键。
  */
-
 export type EssayStageId =
   | "cognition"
   | "reading"
@@ -43,7 +45,7 @@ export interface EssayLevel {
   /** 核心要点（速记版，详细讲解挂 docId） */
   points: string[];
   tasks: EssayTask[];
-  /** 通关自评清单：一条一句可验证的话（固定 10 条，星级按勾中比例算） */
+  /** 通关自评清单：一条一句可验证的话（固定 10 条，每条 1 分；另有客观题每题 2 分，见 ./rules.ts） */
   checklist: string[];
   /** 延伸讲解：essay 知识库里的专文 id */
   docId: string;
@@ -105,7 +107,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我就申论与高考作文写出了至少三条区别",
       "我理解「答案要点必须来自给定材料」是这次备考的底线",
       "我把自己的作答误区整理成了后续要逐条解决的问题清单",
-      "我知道本关的星级由自评清单的达成率决定（≥80% 通关）",
+      "我知道本关的通关要求：客观题答对 ≥4 题、且与自评清单的加权总分 ≥80%",
       "我没有把「背热点」当作备考的主要手段",
       "我能用一句话说明申论为什么要站在公务员立场作答",
       "我清楚接下来 20 天每一阶段练什么（已看过阶段划分）",
@@ -1020,19 +1022,6 @@ export const essayLevelById = new Map(ESSAY_LEVELS.map((level) => [level.id, lev
 /** 一关的预计用时（各实操任务之和，分钟） */
 export function essayMinutes(level: EssayLevel): number {
   return level.tasks.reduce((sum, task) => sum + task.minutes, 0);
-}
-
-/**
- * 星级：与专项训练同一套口径——勾中比例 ≥80% 一星（通关）、≥90% 二星、全中三星。
- * 服务端按清单条数重算，不信任客户端传来的星数。
- */
-export function essayStars(checkedCount: number, total: number): 0 | 1 | 2 | 3 {
-  if (total <= 0) return 0;
-  const rate = checkedCount / total;
-  if (rate >= 1) return 3;
-  if (rate >= 0.9) return 2;
-  if (rate >= 0.8) return 1;
-  return 0;
 }
 
 /**

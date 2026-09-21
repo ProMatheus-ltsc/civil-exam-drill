@@ -26,9 +26,10 @@ import {
   essayLevelById,
   essayMinutes,
   essayPreviousLevel,
-  essayStars,
   essayUnlocked,
 } from "../../src/essay/training";
+import { essayQuizIssue, essayQuizOf, gradeEssayQuiz } from "../../src/essay/bank";
+import { essayStars } from "../../src/essay/rules";
 
 interface Statement {
   bind(...values: unknown[]): Statement;
@@ -681,6 +682,19 @@ app.post("/essay/reviews", async (c) => {
   );
 });
 
+/** 解析历史作答（[{id,key}]）；坏数据一律当没答过，不能让一条脏行把整页卡死 */
+function parseQuiz(raw: string): Array<{ id: string; key: number }> {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item.id === "string" && Number.isInteger(item.key))
+      .map((item) => ({ id: String(item.id), key: Number(item.key) }));
+  } catch {
+    return [];
+  }
+}
+
 /** 自评清单勾选只存下标（数组 JSON），并对清单长度变化做兜底 */
 function parseChecked(json: string, total: number): number[] {
   try {
@@ -714,12 +728,13 @@ async function loadEssayStars(c: {
 
 app.get("/essay/training", async (c) => {
   const rows = await c.env.DB.prepare(
-    "SELECT level_id AS levelId,checked_json AS checkedJson,notes,stars,updated_at AS updatedAt FROM essay_training_progress WHERE user_id=?",
+    "SELECT level_id AS levelId,checked_json AS checkedJson,quiz_json AS quizJson,notes,stars,updated_at AS updatedAt FROM essay_training_progress WHERE user_id=?",
   )
     .bind(c.get("userId"))
     .all<{
       levelId: string;
       checkedJson: string;
+      quizJson: string;
       notes: string;
       stars: number;
       updatedAt: string;
@@ -747,6 +762,11 @@ app.get("/essay/training", async (c) => {
       checked,
       notes: String(record?.notes ?? ""),
       updatedAt: record?.updatedAt ?? null,
+      // 只下发题干与选项（带原始下标 key），答案与解析要交卷后才给——与专项训练同口径
+      quiz: essayQuizOf(level.id),
+      quizResult: record?.quizJson
+        ? gradeEssayQuiz(level.id, parseQuiz(String(record.quizJson)))
+        : null,
     };
   });
   return c.json(
@@ -757,6 +777,9 @@ app.get("/essay/training", async (c) => {
         total: levels.length,
         cleared: levels.filter((level) => level.stars >= 1).length,
         stars: levels.reduce((sum, level) => sum + level.stars, 0),
+        // 客观题累计：只统计已作答过的关卡（老数据没作答，不该被算成 0 分）
+        quizAnswered: levels.reduce((sum, level) => sum + (level.quizResult?.total ?? 0), 0),
+        quizCorrect: levels.reduce((sum, level) => sum + (level.quizResult?.correct ?? 0), 0),
       },
     }),
   );
@@ -769,6 +792,14 @@ app.post("/essay/training/:levelId", async (c) => {
   const body = await jsonBody(
     c.req.raw,
     z.object({
+      quiz: z
+        .array(
+          z.object({
+            id: z.string().min(1).max(64),
+            key: z.number().int().min(0).max(3),
+          }),
+        )
+        .max(32),
       checked: z.array(z.number().int().min(0)).max(64),
       notes: z.string().max(4000).optional(),
     }),
@@ -783,6 +814,10 @@ app.post("/essay/training/:levelId", async (c) => {
       ),
       409,
     );
+  // 客观题必须答完才判分：没答完的提交不入库，否则「客观题门槛」等于没有
+  const quizIssue = essayQuizIssue(levelId, body.quiz);
+  if (quizIssue) return c.json(fail("QUIZ_INCOMPLETE", quizIssue), 400);
+  const quiz = gradeEssayQuiz(levelId, body.quiz);
   const existing = await c.env.DB.prepare(
     "SELECT checked_json AS checkedJson,notes,stars FROM essay_training_progress WHERE user_id=? AND level_id=?",
   )
@@ -795,16 +830,22 @@ app.post("/essay/training/:levelId", async (c) => {
   // 星级只增不减：改自评不该把已拿到的星级抹掉（与专项训练取历史最佳同口径）
   const nextStars = Math.max(
     Number(existing?.stars ?? 0),
-    essayStars(checked.length, level.checklist.length),
+    essayStars({
+      correct: quiz.correct,
+      quizTotal: quiz.total,
+      checked: checked.length,
+      checklistTotal: level.checklist.length,
+    }),
   );
   const notes = body.notes ?? String(existing?.notes ?? "");
   await c.env.DB.prepare(
-    "INSERT INTO essay_training_progress(user_id,level_id,checked_json,notes,stars,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,level_id) DO UPDATE SET checked_json=excluded.checked_json,notes=excluded.notes,stars=excluded.stars,updated_at=excluded.updated_at",
+    "INSERT INTO essay_training_progress(user_id,level_id,checked_json,quiz_json,notes,stars,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,level_id) DO UPDATE SET checked_json=excluded.checked_json,quiz_json=excluded.quiz_json,notes=excluded.notes,stars=excluded.stars,updated_at=excluded.updated_at",
   )
     .bind(
       c.get("userId"),
       levelId,
       JSON.stringify(checked),
+      JSON.stringify(body.quiz),
       notes,
       nextStars,
       iso(),
@@ -819,6 +860,9 @@ app.post("/essay/training/:levelId", async (c) => {
       notes,
       stars: nextStars,
       cleared: nextStars >= 1,
+      correct: quiz.correct,
+      quizTotal: quiz.total,
+      marks: quiz.marks,
       summary: {
         cleared: [...updated.values()].filter((value) => value >= 1).length,
         stars: [...updated.values()].reduce((sum, value) => sum + value, 0),
