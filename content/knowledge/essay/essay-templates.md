@@ -1,11 +1,11 @@
 ---
 id: essay-templates
 module: essay
-category: "writing"
+category: materials
 title: "作文写作模板"
 summary: "作文写作模板的完整知识要点与方法说明。"
 order: 1221
-updatedAt: 2026-09-02
+updatedAt: 2026-09-21
 ---
 # 作文写作模板
 

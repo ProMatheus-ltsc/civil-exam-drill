@@ -1,11 +1,11 @@
 ---
 id: famous-quotes
 module: essay
-category: "writing"
+category: materials
 title: "名言积累"
 summary: "名言积累的完整知识要点与方法说明。"
 order: 1223
-updatedAt: 2026-09-02
+updatedAt: 2026-09-21
 ---
 # 名言积累
 

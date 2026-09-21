@@ -1,11 +1,11 @@
 ---
 id: character-materials
 module: essay
-category: "questions"
+category: materials
 title: "人物素材"
 summary: "人物素材的完整知识要点与方法说明。"
 order: 1219
-updatedAt: 2026-09-02
+updatedAt: 2026-09-21
 ---
 # 人物素材
 
