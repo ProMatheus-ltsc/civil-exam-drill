@@ -1,7 +1,7 @@
 ---
 id: essay-day21
 module: essay
-category: training
+category: training-sprint
 title: "Day 21 · 冲刺收官——政策储备、模拟实战与总复习"
 summary: "储备必要的政策理论素材，进行最后一次完整的模拟实战，系统回顾21天的学习成果，以最佳状态迎接考试。"
 order: 21
@@ -145,3 +145,4 @@ updatedAt: 2026-09-21
 
 - 《名言积累》：政策话语与名言素材
 - 《人物素材》：人物事例素材
+- 规范词卡片：考前一天再过一遍规范表达，见「规范词卡片」页

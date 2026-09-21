@@ -1,7 +1,7 @@
 ---
 id: essay-day04
 module: essay
-category: training
+category: training-cognition
 title: "Day 4 · 确立申论写作三大原则——方向定了再出发"
 summary: "深入理解申论写作的\"镣铐\"与\"舞蹈\"内涵，掌握三个基本原则（依据材料、联系实际、求真务实），建立正确的角色定位意识。"
 order: 4

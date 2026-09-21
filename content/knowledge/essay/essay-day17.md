@@ -1,7 +1,7 @@
 ---
 id: essay-day17
 module: essay
-category: training
+category: training-article
 title: "Day 17 · 大作文实战（二）——起承转合与深度打磨"
 summary: "在Day 16完整写作的基础上，重点训练文章的起承转合技巧，强化上下文之间的逻辑衔接，提升文章的整体品质和深度。"
 order: 17
@@ -66,4 +66,4 @@ updatedAt: 2026-09-21
 
 需要更细的展开时，翻知识库里这一篇（本篇没写的部分）：
 
-- 《申论文章写作》：论证段的分析方法与关系型结构
+- 《作文写作模板》：标题与开头的范式，便于对照打磨

@@ -1,7 +1,7 @@
 ---
 id: essay-day02
 module: essay
-category: training
+category: training-cognition
 title: "Day 2 · 破除备考误区——热点预测与模板套路的真相"
 summary: "正确认识热点的作用边界，学会识别和拒绝模板套路，建立\"从材料中来、到材料中去\"的正确作答意识。"
 order: 2

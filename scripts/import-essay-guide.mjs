@@ -2,75 +2,129 @@
  * 把《申论 21 天深度操作指南》的 21 天，导入成知识库里的 21 篇延伸讲解（essay-dayNN）。
  *
  * 用法：node scripts/import-essay-guide.mjs [指南路径]
- *   （默认读桌面那份；指南更新后重跑即可，输出是幂等的）
+ *   （默认读桌面那份；指南或整合映射改了之后重跑即可，输出幂等）
  *
- *
- * 为什么用脚本而不是手抄：指南是「以内容为主」的单一事实源，逐字搬运能保证不漏内容、
- * 也不掺入我自己的改写误差；脚本负责结构规范化（层级、称谓、间距、关联阅读），
- * 我只需要维护下面这张「深入阅读」映射表。
+ * 三件事：
+ *   1. 指南 → 正文主干：逐字搬运当天的「学习目标 / 核心知识点 / 实操任务 / 课后作业」，
+ *      只做结构规范化（`**1. xx**` 升成 `###`、分钟写法、引号、层级），保证不漏内容、不掺改写误差；
+ *   2. 知识库既有专文 → 按节整合：老文档与指南的逐字重复率只有 0~1%，属于「很有差异」的内容，
+ *      所以按主题整节搬家（不重写、不摘编），只丢掉重复的开篇语、推广语与图片占位；
+ *   3. 按阶段分组：category = `training-<阶段 id>`，由 src/essay/training.ts 的 ESSAY_STAGES 派生，
+ *      申论知识页因此会按六个阶段分开显示（守卫见 tests/essay-training.test.ts）。
  *
  * 输出：content/knowledge/essay/essay-dayNN.md（id = 关卡 id，一一对应）
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const GUIDE = process.argv[2] ?? "C:/Users/liyunfei/Desktop/申论21天深度操作指南 (1).md";
 const OUT_DIR = resolve(process.cwd(), "content/knowledge/essay");
 const UPDATED_AT = "2026-09-21";
 
-/** 每天的补充阅读（现有知识库里指南没有覆盖、或讲得更细的部分） */
+const { ESSAY_STAGES } = await import(new URL("../src/essay/training.ts", import.meta.url).href);
+
+/**
+ * 从老文档整合进各关的节（按标题片段匹配，取整节子树，按源文档顺序拼回）。
+ * 只列「这一关该有、而指南没写」的内容；重复的开篇语与推广语由 DROP / STOP_AT 去掉。
+ */
+const INTEGRATIONS = {
+  "essay-day01": [{ from: "overview", take: ["一、试卷结构", "二、题型分布", "三类职位分别考什么能力"] }],
+  "essay-day03": [{ from: "overview", take: ["答题卡与作答格式的 12 条硬要求"] }],
+  "essay-day05": [
+    { from: "material-reading", take: ["底层逻辑之核心要素", "二、阅读技巧", "三、真题演示", "三遍处理法"] },
+  ],
+  "essay-day06": [{ from: "material-reading", take: ["合并与规范化原则"] }],
+  "essay-day07": [
+    {
+      from: "summarization",
+      take: ["概括问题", "概括对策", "概括影响", "概括变化", "其他", "二、随笔练习", "作答小结"],
+    },
+  ],
+  "essay-day08": [{ from: "summarization", take: ["概括原因"] }],
+  "essay-day09": [{ from: "normative-words", take: ["申论规范词 方法论"] }],
+  "essay-day10": [{ from: "comprehensive-analysis", take: ["一、题型概述", "二、解题技巧", "易错点"] }],
+  "essay-day11": [
+    {
+      from: "proposals",
+      take: [
+        "一、对策找取",
+        "二、答案表述",
+        "三、对策的针对性",
+        "四、对策的可行性",
+        "五、重视审题",
+        "六、积累常见对策",
+        "七、随笔练习",
+        "表达自查",
+      ],
+    },
+  ],
+  "essay-day12": [{ from: "official-writing", take: ["14、提纲", "二、总结", "易错点"] }],
+  "essay-day13": [{ from: "article-writing", take: ["一、评分标准参考"] }],
+  "essay-day14": [{ from: "article-writing", take: ["五、文章分论点的论证"] }],
+  "essay-day15": [
+    { from: "article-writing", take: ["二、文章的布局", "三、标题", "四、文章的开头", "六、文章结尾"] },
+  ],
+  "essay-day16": [{ from: "article-writing", take: ["成文质量检查"] }],
+  "essay-day18": [{ from: "official-writing", take: ["1、通知", "2、通告"] }],
+  "essay-day19": [
+    {
+      from: "official-writing",
+      take: [
+        "3、报道",
+        "4、建议书",
+        "5、工作建议",
+        "6、倡议书",
+        "7、宣传稿",
+        "8、讲话稿",
+        "9、简报",
+        "10、短评",
+        "11、公开信",
+        "12、编者按",
+        "13、导言",
+        "15、调研报告",
+        "16、推荐材料",
+        "17、摘要",
+      ],
+    },
+  ],
+};
+
+/** 丢掉的行（推广语、字数统计、图片占位、空标题） */
+const DROP = [/关注公众号/, /^\s*【图片】\s*$/, /^\s*字数:.*时长:/, /^\s*[🏛⚖🧠🌾📈💼⚙🇨🇳♻🤖📖👀️]+\s*$/];
+/** 从这里开始的内容整段丢弃（规范词那篇末尾的九类卡片统计，卡片本身在「规范词卡片」页） */
+const STOP_AT = [/^\s*(行政执法|思想认识|城乡发展|经济生活|政府管理|社会民生|文化自信|生态环境|科技创新)类\s*$/];
+
+/** 保留的素材库文档（它们与指南没有重合，独立成篇） */
 const FURTHER_READING = {
-  1: [["申论试卷与作答格式", "三类职位分别考哪几项能力、2024 年真题卷面样例"]],
-  2: [],
-  3: [["申论试卷与作答格式", "答题卡与作答格式的 12 条硬要求"]],
-  4: [],
-  5: [["材料阅读与要点标记", "主体/处境/做法/结果四要素提取法与两套真题演示"]],
-  6: [
-    ["申论试卷与作答格式", "题型分布表与真题卷面的作答要求写法"],
-    ["归纳概括", "五种概括对象的题型分类与范例"],
+  9: [["规范词卡片", "按行政执法、思想认识、城乡发展等九类整理的规范词对照表（见「规范词卡片」页）"]],
+  13: [["作文写作模板", "按主题分类的标题与开头范式"]],
+  14: [
+    ["名言积累", "道理/引用论证可用的名言素材"],
+    ["人物素材", "举例论证可用的人物事例"],
   ],
-  7: [["归纳概括", "除段旨提取外，概括原因/影响/变化各自怎么答"]],
-  8: [["归纳概括", "概括原因题的题型分类与随笔练习"]],
-  9: [
-    ["申论规范词", "分领域规范词对照总表"],
-    ["申论规范词", "考前一天过一遍规范表达（另有九类卡片在「规范词卡片」页）"],
-  ],
-  10: [["综合分析", "启示/评论/阐释/比较四型的分型答法与易错点"]],
-  11: [["提出对策", "对策找取、答案表述与常见对策积累"]],
-  12: [["贯彻执行与应用文", "17 类文种的逐种写法与范例"]],
-  13: [["申论文章写作", "评分标准参考与三种布局思路"]],
-  14: [["申论文章写作", "分论点设置的三种角度与有效论证方法"]],
-  15: [["申论文章写作", "标题、开头、结尾的成文样例"]],
+  15: [["作文写作模板", "标题篇、开头篇的成文范式"]],
   16: [
-    ["申论文章写作", "成文质量检查清单"],
     ["名言积累", "论证可用的名言素材"],
     ["人物素材", "论证可用的人物事例"],
+    ["作文写作模板", "可对照的成文范式"],
   ],
-  17: [["申论文章写作", "论证段的分析方法与关系型结构"]],
-  18: [["贯彻执行与应用文", "八类法定公文的格式细则与范文"]],
-  19: [["贯彻执行与应用文", "九类事务文书的写法与范例"]],
-  20: [
-    ["归纳概括", "要点遗漏、照搬原文的改进方法"],
-    ["提出对策", "对策空洞、缺针对性的改进方法"],
-    ["贯彻执行与应用文", "公文类易错点清单"],
-  ],
+  17: [["作文写作模板", "标题与开头的范式，便于对照打磨"]],
   21: [
     ["名言积累", "政策话语与名言素材"],
     ["人物素材", "人物事例素材"],
-
+    ["规范词卡片", "考前一天再过一遍规范表达（见「规范词卡片」页）"],
   ],
 };
+
+const spacedMinutes = (line) => line.replace(/（(\d+)分钟）/g, "（$1 分钟）");
+const tidyQuotes = (line) => line.replace(/"([^"]{1,20})"/g, "「$1」");
+
+/* ---------- 指南解析 ---------- */
 
 const text = readFileSync(GUIDE, "utf8").split(/\r?\n/).join("\n");
 const pieces = text.split(/^##\s+Day\s+/m).slice(1);
 if (pieces.length !== 21) throw new Error(`指南里应有 21 天，实际 ${pieces.length}`);
 
-/** 把指南里的「（30分钟）」统一成「（30 分钟）」 */
-const spacedMinutes = (line) => line.replace(/（(\d+)分钟）/g, "（$1 分钟）");
-/** 标题里的直角引号统一成「」 */
-const tidyQuotes = (line) => line.replace(/"([^"]{1,20})"/g, "「$1」");
-
-/** 取某个小节（一/二/三/四）的正文 */
 function sectionBody(piece, ordinal) {
   const pattern = new RegExp(
     `^###\\s*${ordinal}、[^\\n]*\\n([\\s\\S]*?)(?=^###\\s*[一二三四]、|$(?![\\s\\S]))`,
@@ -81,7 +135,6 @@ function sectionBody(piece, ordinal) {
   return match[1].replace(/\n*---\s*$/, "").trim();
 }
 
-/** 独立成行的加粗行升级成三级标题；顺带规范分钟写法 */
 function normalizeBody(body, headingStyle) {
   return body
     .split("\n")
@@ -99,15 +152,88 @@ function normalizeBody(body, headingStyle) {
     .trim();
 }
 
+/* ---------- 老文档解析与整节提取 ---------- */
+
+/** 把一篇文档切成「节」：每个标题带上它的整棵子树（直到同级或更高级标题） */
+function splitBlocks(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  const heads = [];
+  lines.forEach((line, index) => {
+    const match = line.match(/^(#{2,4})\s+(.*)$/);
+    if (match) heads.push({ level: match[1].length, text: match[2].trim(), index });
+  });
+  return heads.map((head, order) => {
+    let end = lines.length;
+    for (let next = order + 1; next < heads.length; next += 1) {
+      if (heads[next].level <= head.level) {
+        end = heads[next].index;
+        break;
+      }
+    }
+    return { level: head.level, text: head.text, lines: lines.slice(head.index, end) };
+  });
+}
+
+function cleanLines(lines, drop, stopAt) {
+  const result = [];
+  for (const line of lines) {
+    if (stopAt.some((pattern) => pattern.test(line))) break;
+    if (drop.some((pattern) => pattern.test(line))) continue;
+    result.push(line);
+  }
+  // 去掉尾部空行
+  while (result.length && !result[result.length - 1].trim()) result.pop();
+  return result;
+}
+
+const docCache = new Map();
+function loadDoc(docId) {
+  if (!docCache.has(docId)) {
+    const file = `${OUT_DIR}/${docId}.md`;
+    if (!existsSync(file)) throw new Error(`老文档不存在：${docId}`);
+    docCache.set(docId, readFileSync(file, "utf8").replace(/^---[\s\S]*?---\n/, ""));
+  }
+  return docCache.get(docId);
+}
+
+/** 取一篇文档里的若干节（按标题片段匹配），按源文档顺序返回原始行 */
+function takeSections(docId, requests) {
+  const blocks = splitBlocks(loadDoc(docId));
+  const picked = [];
+  for (const request of requests) {
+    const block = blocks.find((item) => item.text.includes(request));
+    if (!block) throw new Error(`${docId} 里找不到「${request}」`);
+    if (!picked.includes(block)) picked.push(block);
+  }
+  picked.sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
+  const out = [];
+  for (const block of picked) {
+    // 选中的是孤儿 h3（父 h2 没被选）→ 升成 h2，避免挂到上一篇的小节下面
+    const parentSelected = picked.some(
+      (item) => item.level < block.level && item.lines[0] && blocks.indexOf(item) < blocks.indexOf(block),
+    );
+    const raw = block.lines[0];
+    if (block.level === 3 && !parentSelected) {
+      const heading = block.text.replace(/^\d+、/, "");
+      out.push(`## ${heading}`, ...block.lines.slice(1));
+    } else {
+      out.push(raw, ...block.lines.slice(1));
+    }
+  }
+  return cleanLines(out, DROP, STOP_AT);
+}
+
+/* ---------- 生成 ---------- */
+
 const written = [];
 for (const piece of pieces) {
   const head = piece.match(/^(\d+)：(.+)$/m);
   const day = Number(head[1]);
   const padded = String(day).padStart(2, "0");
+  const levelId = `essay-day${padded}`;
   const title = `Day ${day} · ${tidyQuotes(head[2].trim())}`;
 
   const goal = sectionBody(piece, "一").split("\n")[0].trim();
-  // 摘要在列表里展示，取目标的第一句（整段目标是给正文里的「今日目标」用的）
   const summary = goal.split(/(?<=[。；])/)[0].trim().slice(0, 200) || goal.slice(0, 200);
   const points = normalizeBody(sectionBody(piece, "二"), "point");
   const tasks = normalizeBody(sectionBody(piece, "三"), "task");
@@ -116,6 +242,14 @@ for (const piece of pieces) {
     .map((line) => spacedMinutes(tidyQuotes(line)))
     .join("\n")
     .trim();
+
+  // 知识库整合进来的节
+  const integrated = (INTEGRATIONS[levelId] ?? []).flatMap(({ from, take }) => [
+    `> 以下内容整合自知识库既有专文，是这一关在指南之外的补充。`,
+    "",
+    ...takeSections(from, take),
+    "",
+  ]);
 
   const reading = FURTHER_READING[day] ?? [];
   const readingBlock = reading.length
@@ -130,6 +264,9 @@ for (const piece of pieces) {
         ...reading.map(([name, why]) => `- 《${name}》：${why}`),
       ].join("\n")
     : "";
+
+  const stage = ESSAY_STAGES.find((item) => day >= item.from && day <= item.to);
+  if (!stage) throw new Error(`Day ${day} 没有落在任何阶段里`);
 
   const body = [
     `# ${title}`,
@@ -149,15 +286,16 @@ for (const piece of pieces) {
     "## 课后作业",
     "",
     homework,
+    ...(integrated.length ? ["", ...integrated] : []),
     readingBlock,
     "",
   ].join("\n");
 
   const front = [
     "---",
-    `id: essay-day${padded}`,
+    `id: ${levelId}`,
     "module: essay",
-    "category: training",
+    `category: training-${stage.id}`,
     `title: ${JSON.stringify(title)}`,
     `summary: ${JSON.stringify(summary)}`,
     `order: ${day}`,
@@ -167,21 +305,24 @@ for (const piece of pieces) {
   ].join("\n");
 
   mkdirSync(OUT_DIR, { recursive: true });
-  const file = `${OUT_DIR}/essay-day${padded}.md`;
-  writeFileSync(file, front + body);
+  writeFileSync(`${OUT_DIR}/${levelId}.md`, front + body);
   written.push({
-    day,
+    levelId,
+    stage: stage.title,
     title,
     chars: body.replace(/\s/g, "").length,
-    sections: (body.match(/^##\s+/gm) ?? []).length,
-    subs: (body.match(/^###\s+/gm) ?? []).length,
+    extra: integrated.length ? takeSectionsSources(levelId) : "",
   });
 }
 
-console.log(`已生成 ${written.length} 篇讲解：`);
+function takeSectionsSources(levelId) {
+  return (INTEGRATIONS[levelId] ?? []).map((item) => item.from).join("+");
+}
+
+const total = written.reduce((sum, item) => sum + item.chars, 0);
 for (const item of written) {
   console.log(
-    `  essay-day${String(item.day).padStart(2, "0")} | ${String(item.chars).padStart(5)}字 | ${item.sections} 大节 / ${item.subs} 小节 | ${item.title}`,
+    `${item.levelId} | ${String(item.chars).padStart(5)}字 | ${item.stage.padEnd(6)} | ${item.extra || "（仅指南）"}`,
   );
 }
-console.log("合计", written.reduce((sum, item) => sum + item.chars, 0), "字（去空白）");
+console.log(`共 ${written.length} 篇，合计 ${total} 字（去空白）`);
