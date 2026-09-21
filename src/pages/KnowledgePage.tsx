@@ -19,6 +19,7 @@ import { StatCard } from "@shared/core/components/stats/StatCard";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
 import { knowledgeDocHref } from "../lib/doc-link";
+import { EssayTraining } from "./EssayTrainingPage";
 import { useAsync } from "../hooks/useAsync";
 import { isReviewDue } from "../essay/queue";
 import { initialProgress, scheduleReview } from "../essay/scheduler";
@@ -685,10 +686,17 @@ function EssayCards() {
 }
 
 export function EssayPage() {
-  const [tab, setTab] = useState<"knowledge" | "cards">("knowledge");
+  const [tab, setTab] = useState<"knowledge" | "cards" | "training">("training");
+  const navigate = useNavigate();
   return (
     <>
       <div className="essay-tabs">
+        <button
+          className={tab === "training" ? "active" : ""}
+          onClick={() => setTab("training")}
+        >
+          21 天闯关
+        </button>
         <button
           className={tab === "knowledge" ? "active" : ""}
           onClick={() => setTab("knowledge")}
@@ -702,9 +710,11 @@ export function EssayPage() {
           规范词卡片
         </button>
       </div>
-      {tab === "knowledge" ? (
-        <KnowledgePage essay />
-      ) : (
+      {tab === "training" && (
+        <EssayTraining onDoc={(docId) => navigate(`/knowledge/${docId}`)} />
+      )}
+      {tab === "knowledge" && <KnowledgePage essay />}
+      {tab === "cards" && (
         <section className="panel">
           <p className="eyebrow">按记忆计划复习</p>
           <h2>规范词记忆</h2>

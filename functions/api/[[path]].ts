@@ -20,6 +20,15 @@ import {
   scheduleReview,
   type ReviewRating,
 } from "../../src/essay/scheduler";
+import {
+  ESSAY_LEVELS,
+  ESSAY_STAGES,
+  essayLevelById,
+  essayMinutes,
+  essayPreviousLevel,
+  essayStars,
+  essayUnlocked,
+} from "../../src/essay/training";
 
 interface Statement {
   bind(...values: unknown[]): Statement;
@@ -672,6 +681,151 @@ app.post("/essay/reviews", async (c) => {
   );
 });
 
+/** 自评清单勾选只存下标（数组 JSON），并对清单长度变化做兜底 */
+function parseChecked(json: string, total: number): number[] {
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return [
+      ...new Set(
+        parsed
+          .filter((item) => Number.isInteger(item))
+          .map((item) => Number(item))
+          .filter((index) => index >= 0 && index < total),
+      ),
+    ].sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
+}
+
+/** 该用户各关星数（解锁判定的依据） */
+async function loadEssayStars(c: {
+  env: Bindings;
+  get(key: string): string;
+}): Promise<Map<string, number>> {
+  const rows = await c.env.DB.prepare(
+    "SELECT level_id AS levelId,stars FROM essay_training_progress WHERE user_id=?",
+  )
+    .bind(c.get("userId"))
+    .all<{ levelId: string; stars: number }>();
+  return new Map(rows.results.map((row) => [String(row.levelId), Number(row.stars) || 0]));
+}
+
+app.get("/essay/training", async (c) => {
+  const rows = await c.env.DB.prepare(
+    "SELECT level_id AS levelId,checked_json AS checkedJson,notes,stars,updated_at AS updatedAt FROM essay_training_progress WHERE user_id=?",
+  )
+    .bind(c.get("userId"))
+    .all<{
+      levelId: string;
+      checkedJson: string;
+      notes: string;
+      stars: number;
+      updatedAt: string;
+    }>();
+  const byLevel = new Map(rows.results.map((row) => [String(row.levelId), row]));
+  const starsOf = (id: string) => Number(byLevel.get(id)?.stars ?? 0);
+  const levels = ESSAY_LEVELS.map((level) => {
+    const record = byLevel.get(level.id);
+    const checked = parseChecked(String(record?.checkedJson ?? []), level.checklist.length);
+    return {
+      id: level.id,
+      day: level.day,
+      stage: level.stage,
+      title: level.title,
+      goal: level.goal,
+      rating: level.rating,
+      minutes: essayMinutes(level),
+      points: level.points,
+      tasks: level.tasks,
+      checklist: level.checklist,
+      docId: level.docId,
+      previousTitle: essayPreviousLevel(level)?.title ?? null,
+      unlocked: essayUnlocked(level.id, starsOf),
+      stars: Number(record?.stars ?? 0),
+      checked,
+      notes: String(record?.notes ?? ""),
+      updatedAt: record?.updatedAt ?? null,
+    };
+  });
+  return c.json(
+    ok({
+      stages: ESSAY_STAGES,
+      levels,
+      summary: {
+        total: levels.length,
+        cleared: levels.filter((level) => level.stars >= 1).length,
+        stars: levels.reduce((sum, level) => sum + level.stars, 0),
+      },
+    }),
+  );
+});
+
+app.post("/essay/training/:levelId", async (c) => {
+  const levelId = c.req.param("levelId");
+  const level = essayLevelById.get(levelId);
+  if (!level) return c.json(fail("NOT_FOUND", "关卡不存在"), 404);
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({
+      checked: z.array(z.number().int().min(0)).max(64),
+      notes: z.string().max(4000).optional(),
+    }),
+  );
+  const stars = await loadEssayStars(c);
+  // 逐关解锁：上一关没通关不能提交本关（前端也会锁，但服务端必须有这一道）
+  if (!essayUnlocked(levelId, (id) => stars.get(id) ?? 0))
+    return c.json(
+      fail(
+        "LEVEL_LOCKED",
+        `需先通关：${essayPreviousLevel(level)?.title ?? "上一关"}`
+      ),
+      409,
+    );
+  const existing = await c.env.DB.prepare(
+    "SELECT checked_json AS checkedJson,notes,stars FROM essay_training_progress WHERE user_id=? AND level_id=?",
+  )
+    .bind(c.get("userId"), levelId)
+    .first<{ checkedJson: string; notes: string; stars: number }>();
+  const checked = parseChecked(
+    JSON.stringify([...new Set(body.checked)]),
+    level.checklist.length,
+  );
+  // 星级只增不减：改自评不该把已拿到的星级抹掉（与专项训练取历史最佳同口径）
+  const nextStars = Math.max(
+    Number(existing?.stars ?? 0),
+    essayStars(checked.length, level.checklist.length),
+  );
+  const notes = body.notes ?? String(existing?.notes ?? "");
+  await c.env.DB.prepare(
+    "INSERT INTO essay_training_progress(user_id,level_id,checked_json,notes,stars,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,level_id) DO UPDATE SET checked_json=excluded.checked_json,notes=excluded.notes,stars=excluded.stars,updated_at=excluded.updated_at",
+  )
+    .bind(
+      c.get("userId"),
+      levelId,
+      JSON.stringify(checked),
+      notes,
+      nextStars,
+      iso(),
+    )
+    .run();
+  const updated = await loadEssayStars(c);
+  updated.set(levelId, nextStars);
+  return c.json(
+    ok({
+      levelId,
+      checked,
+      notes,
+      stars: nextStars,
+      cleared: nextStars >= 1,
+      summary: {
+        cleared: [...updated.values()].filter((value) => value >= 1).length,
+        stars: [...updated.values()].reduce((sum, value) => sum + value, 0),
+      },
+    }),
+  );
+});
 app.get("/essay/reviews/history", async (c) => {
   const limit = integerQuery(c.req.query("limit"), 30, 1, 100);
   const rows = await c.env.DB.prepare(

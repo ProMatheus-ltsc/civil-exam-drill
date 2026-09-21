@@ -1514,3 +1514,149 @@ a.entry {
     display: none;
   }
 }
+
+/* ---------- 申论 21 天闯关：与专项训练关卡卡同一套观感 ---------- */
+.essay-training-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+.essay-training-chips span {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #edf2f5;
+  color: #3d586b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.essay-stars {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.essay-stage {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+.essay-stage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e4eaed;
+}
+.essay-stage-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+.essay-stage-head .muted {
+  font-size: 0.8rem;
+}
+.essay-level-body {
+  display: grid;
+  gap: 14px;
+}
+.essay-goal {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  color: #17324d;
+  font-weight: 700;
+}
+.essay-goal svg {
+  flex: none;
+  margin-top: 3px;
+  color: #bb623a;
+}
+.essay-block h4 {
+  margin: 0 0 6px;
+  color: #516676;
+  font-size: 0.86rem;
+}
+.essay-block h4 .muted {
+  font-weight: 400;
+}
+.essay-points {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 1.1em;
+}
+.essay-tasks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 1.2em;
+}
+.essay-tasks p {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+}
+.essay-checklist {
+  display: grid;
+  gap: 6px;
+}
+.essay-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dde5e9;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.essay-checklist label.on {
+  border-color: #4d8f6e;
+  background: #f2faf5;
+}
+.essay-checklist input {
+  /* 全局 input 规则是给表单输入用的 width:100%;min-height:44px，复选框必须显式收回来，
+     否则它会撑满整行、把清单文字挤成竖排（同类修正见 .map-undone-toggle input） */
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: #4d8f6e;
+}
+.essay-block textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d8e1e5;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+.essay-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.essay-submit .primary {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: #17324d;
+  color: #fff;
+  font-weight: 800;
+}
+.essay-submit .primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (max-width: 680px) {
+  .essay-stage-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

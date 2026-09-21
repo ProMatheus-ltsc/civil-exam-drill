@@ -43,6 +43,19 @@ class FakeStatement {
       return { id: "att_test" } as T;
     if (this.sql.includes("MIN(duration_ms) AS best"))
       return { best: null } as T;
+    // 申论闯关：按关卡取一行（提交时读旧星级，用来实现「星级只增不减」）
+    if (this.sql.includes("essay_training_progress") && this.sql.includes("level_id=?")) {
+      const levelId = String(this.values[1]);
+      const record = this.db.essayProgress.get(levelId);
+      if (!record) return null;
+      return {
+        levelId,
+        checkedJson: JSON.stringify(record.checked),
+        notes: record.notes,
+        stars: record.stars,
+        updatedAt: record.updatedAt,
+      } as T;
+    }
     return null;
   }
   async all<T>() {
@@ -51,10 +64,35 @@ class FakeStatement {
     // 通关判定用的「按局聚合」查询：喂 passRuns 即可模拟「某模块某难度局已通关」
     if (this.sql.includes("GROUP BY q.topic_id,q.difficulty,a.run_id"))
       return { results: this.db.passRuns as T[] };
+    // 申论闯关进度：两张查询（只取星级 / 取全部字段）都返回同一份内存记录
+    if (this.sql.includes("essay_training_progress"))
+      return {
+        results: [...this.db.essayProgress].map(([levelId, record]) => ({
+          levelId,
+          checkedJson: JSON.stringify(record.checked),
+          notes: record.notes,
+          stars: record.stars,
+          updatedAt: record.updatedAt,
+        })) as T[],
+      };
     return { results: [] as T[] };
   }
   async run() {
     this.db.writes.push(this.sql);
+    if (this.sql.includes("essay_training_progress")) {
+      const [levelId, checkedJson, notes, stars] = [
+        String(this.values[1]),
+        String(this.values[2]),
+        String(this.values[3]),
+        Number(this.values[4]),
+      ];
+      this.db.essayProgress.set(levelId, {
+        checked: JSON.parse(checkedJson) as number[],
+        notes,
+        stars,
+        updatedAt: "2026-09-21T12:00:00Z",
+      });
+    }
     return { success: true };
   }
 }
@@ -64,6 +102,11 @@ class FakeDb {
   runQuestionRows: unknown[] = [];
   /** 已通关的局（用于解锁链断言）：{ topicId, difficulty, runId, total, correct, durationMs } */
   passRuns: unknown[] = [];
+  /** 申论闯关进度：levelId → { checked, notes, stars, updatedAt } */
+  essayProgress = new Map<
+    string,
+    { checked: number[]; notes: string; stars: number; updatedAt: string }
+  >();
   /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
   writes: string[] = [];
   prepare(sql: string) {
@@ -523,5 +566,88 @@ describe("API contract guards", () => {
     expect(payload.data.cards.summary).toHaveProperty("mastered");
     expect(payload.data.mistakes).toHaveProperty("open");
     expect(payload.data.schulte).toHaveProperty("bests");
+  });
+
+  it("申论闯关：下发 21 关，首关解锁、其余锁着，未通关上一关不能提交", async () => {
+    const db = new FakeDb();
+    const list = await app.request("/api/essay/training", { headers: auth }, { ...env, DB: db });
+    expect(list.status).toBe(200);
+    const payload = (await list.json()).data;
+    expect(payload.levels).toHaveLength(21);
+    expect(payload.stages).toHaveLength(6);
+    expect(payload.levels[0]).toMatchObject({ unlocked: true, stars: 0, day: 1 });
+    expect(payload.levels[1]).toMatchObject({ unlocked: false, previousTitle: payload.levels[0].title });
+    expect(payload.summary).toMatchObject({ total: 21, cleared: 0, stars: 0 });
+    // 关卡内容随定义一起下发（前端不重复打包一份文案）
+    expect(payload.levels[0].checklist).toHaveLength(10);
+    expect(payload.levels[0].tasks.length).toBeGreaterThanOrEqual(2);
+    expect(payload.levels[0].minutes).toBeGreaterThan(30);
+
+    const locked = await app.request(
+      "/api/essay/training/essay-day02",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ checked: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }),
+      },
+      { ...env, DB: db },
+    );
+    expect(locked.status).toBe(409);
+    expect((await locked.json()).error.code).toBe("LEVEL_LOCKED");
+
+    const missing = await app.request(
+      "/api/essay/training/essay-day99",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ checked: [] }),
+      },
+      { ...env, DB: db },
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("申论闯关：按清单勾选率给星（80/90/100 → 1/2/3 星），星级只增不减，通关后解锁下一关", async () => {
+    const db = new FakeDb();
+    const submit = (levelId: string, checked: number[]) =>
+      app.request(
+        `/api/essay/training/${levelId}`,
+        {
+          method: "POST",
+          headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify({ checked, notes: "复盘结论" }),
+        },
+        { ...env, DB: db },
+      );
+
+    // 8/10 = 80% → 一星通关
+    const eight = await submit("essay-day01", [0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(eight.status).toBe(200);
+    expect((await eight.json()).data).toMatchObject({
+      stars: 1,
+      cleared: true,
+      checked: [0, 1, 2, 3, 4, 5, 6, 7],
+    });
+
+    // 星级只增不减：回头把自评改少了，已拿到的星不抹掉（与专项训练取历史最佳同口径）
+    expect((await (await submit("essay-day01", [0, 1])).json()).data.stars).toBe(1);
+
+    // 9/10 → 二星；10/10 → 三星
+    expect((await (await submit("essay-day02", [0, 1, 2, 3, 4, 5, 6, 7, 8])).json()).data.stars).toBe(2);
+    expect((await (await submit("essay-day02", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])).json()).data.stars).toBe(3);
+
+    // 越界下标被丢弃：提交 0~14 也只按 10 项算
+    const over = (await (await submit("essay-day03", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])).json()).data;
+    expect(over.checked).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(over.stars).toBe(3);
+
+    // 逐关解锁 + 汇总
+    const after = (
+      await (await app.request("/api/essay/training", { headers: auth }, { ...env, DB: db })).json()
+    ).data;
+    expect(after.levels.slice(0, 4).every((level: { unlocked: boolean }) => level.unlocked)).toBe(true);
+    expect(after.levels[4]).toMatchObject({ unlocked: false }); // Day 5 还等着 Day 4 通关
+    expect(after.levels[0].notes).toBe("复盘结论");
+    expect(after.summary).toMatchObject({ cleared: 3, stars: 7, total: 21 });
   });
 });

@@ -97,6 +97,19 @@ const catalogUrl = new URL('../src/generator/catalog.ts', import.meta.url).href
 const { topics: CATALOG, difficultyRuns: RUN_META, tracks: TRACKS, titleOf, topicBudget, difficultyBudgetMs } =
   await import(catalogUrl)
 
+// 申论 21 天闯关：关卡定义同样直接取自 src/essay/training.ts（单一事实源），本地只维护内存进度
+const essayTrainingUrl = new URL('../src/essay/training.ts', import.meta.url).href
+const {
+  ESSAY_STAGES,
+  ESSAY_LEVELS,
+  essayMinutes,
+  essayPreviousLevel,
+  essayStars,
+  essayUnlocked,
+} = await import(essayTrainingUrl)
+/** levelId -> { checked: number[], notes: string, stars: number } */
+const essayTrainingState = new Map()
+
 const RUN_LENGTH = 10
 const DIFFS = ['easy', 'medium', 'hard']
 const quizState = {
@@ -220,6 +233,98 @@ const server = http.createServer(async (req, res) => {
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ success: false, data: null, error: { message: '知识条目不存在' } }))
+    }
+    return
+  }
+
+  // === 申论 21 天闯关（与线上 functions/api 同形：定义来自 src/essay/training.ts）===
+  if (pathname === '/api/essay/training' && req.method === 'GET') {
+    const starsOf = (id) => essayTrainingState.get(id)?.stars ?? 0
+    const levels = ESSAY_LEVELS.map((level) => {
+      const record = essayTrainingState.get(level.id)
+      const checked = (record?.checked ?? []).filter((index) => index >= 0 && index < level.checklist.length)
+      return {
+        id: level.id,
+        day: level.day,
+        stage: level.stage,
+        title: level.title,
+        goal: level.goal,
+        rating: level.rating,
+        minutes: essayMinutes(level),
+        points: level.points,
+        tasks: level.tasks,
+        checklist: level.checklist,
+        docId: level.docId,
+        previousTitle: essayPreviousLevel(level)?.title ?? null,
+        unlocked: essayUnlocked(level.id, starsOf),
+        stars: record?.stars ?? 0,
+        checked,
+        notes: record?.notes ?? '',
+        updatedAt: record?.updatedAt ?? null,
+      }
+    })
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      success: true,
+      data: {
+        stages: ESSAY_STAGES,
+        levels,
+        summary: {
+          total: levels.length,
+          cleared: levels.filter((level) => level.stars >= 1).length,
+          stars: levels.reduce((sum, level) => sum + level.stars, 0),
+        },
+      },
+      error: null,
+    }))
+    return
+  }
+
+  if (pathname.startsWith('/api/essay/training/') && req.method === 'POST') {
+    const levelId = decodeURIComponent(pathname.slice('/api/essay/training/'.length))
+    const level = ESSAY_LEVELS.find((item) => item.id === levelId)
+    if (!level) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: false, data: null, error: { code: 'NOT_FOUND', message: '关卡不存在' } }))
+      return
+    }
+    try {
+      const body = JSON.parse(await readBody(req))
+      const starsByLevel = new Map([...essayTrainingState].map(([id, record]) => [id, record.stars ?? 0]))
+      if (!essayUnlocked(levelId, (id) => starsByLevel.get(id) ?? 0)) {
+        res.writeHead(409, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: false,
+          data: null,
+          error: { code: 'LEVEL_LOCKED', message: `需先通关：${essayPreviousLevel(level)?.title ?? '上一关'}` },
+        }))
+        return
+      }
+      const existing = essayTrainingState.get(levelId)
+      const checked = [...new Set((body.checked ?? []).filter((index) => Number.isInteger(index) && index >= 0 && index < level.checklist.length))].sort((a, b) => a - b)
+      const stars = Math.max(existing?.stars ?? 0, essayStars(checked.length, level.checklist.length))
+      const notes = body.notes ?? existing?.notes ?? ''
+      essayTrainingState.set(levelId, { checked, notes, stars, updatedAt: new Date().toISOString() })
+      const all = [...essayTrainingState.values()]
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: true,
+        data: {
+          levelId,
+          checked,
+          notes,
+          stars,
+          cleared: stars >= 1,
+          summary: {
+            cleared: all.filter((record) => record.stars >= 1).length,
+            stars: all.reduce((sum, record) => sum + record.stars, 0),
+          },
+        },
+        error: null,
+      }))
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: false, data: null, error: { message: e.message } }))
     }
     return
   }
