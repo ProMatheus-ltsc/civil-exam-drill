@@ -47,7 +47,10 @@ export interface EssayLevel {
   tasks: EssayTask[];
   /** 通关自评清单：一条一句可验证的话（固定 10 条，每条 1 分；另有客观题每题 2 分，见 ./rules.ts） */
   checklist: string[];
-  /** 延伸讲解：essay 知识库里的专文 id */
+  /**
+   * 延伸讲解：essay 知识库里的专文 id，**与关卡 id 一一对应**（essay-dayNN，守卫在
+   * tests/essay-training.test.ts）。讲解以《申论 21 天深度操作指南》为主、知识库既有专文为辅。
+   */
   docId: string;
 }
 
@@ -112,7 +115,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我能用一句话说明申论为什么要站在公务员立场作答",
       "我清楚接下来 20 天每一阶段练什么（已看过阶段划分）",
     ],
-    docId: "essay-introduction",
+    docId: "essay-day01",
   },
   {
     id: "essay-day02",
@@ -156,7 +159,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我知道遇到熟悉的话题也要先回材料找要点",
       "我对本题材料的独特性做了至少一句判断",
     ],
-    docId: "overview",
+    docId: "essay-day02",
   },
   {
     id: "essay-day03",
@@ -201,7 +204,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我能说出自己答案里「漏掉的得分点」和「多写的内容」",
       "我清楚写不出得分点的内容，写得再多也不加分",
     ],
-    docId: "overview",
+    docId: "essay-day03",
   },
   {
     id: "essay-day04",
@@ -246,7 +249,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我的表达里没有口语化或情绪化的句子",
       "我准备在后续每次练习后都对照清单自查",
     ],
-    docId: "essay-introduction",
+    docId: "essay-day04",
   },
   {
     id: "essay-day05",
@@ -291,7 +294,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我用颜色或符号区分了不同主体与角度",
       "我能用一句话概括这套材料的整体主题",
     ],
-    docId: "material-reading",
+    docId: "essay-day05",
   },
   {
     id: "essay-day06",
@@ -335,7 +338,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我的答案没有整句照搬材料原文",
       "我把本次问题按四类记进了反思记录",
     ],
-    docId: "overview",
+    docId: "essay-day06",
   },
   {
     id: "essay-day07",
@@ -379,7 +382,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我能说出自己这次最容易犯的归纳错误",
       "我复述过「因而」与前两个分句的逻辑关系",
     ],
-    docId: "material-reading",
+    docId: "essay-day07",
   },
   {
     id: "essay-day08",
@@ -423,7 +426,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我能举例说明「现象」与「根源」的区别",
       "我的答案没有把材料细节当成原因直接照抄",
     ],
-    docId: "summarization",
+    docId: "essay-day08",
   },
   {
     id: "essay-day09",
@@ -468,7 +471,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我知道句子扩充不能靠注水",
       "我能把自己旧答案里的口语句全部改写成公文语言",
     ],
-    docId: "normative-words",
+    docId: "essay-day09",
   },
   {
     id: "essay-day10",
@@ -514,7 +517,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我没有出现「答非所问」的情况",
       "我的答案不是材料信息的简单罗列",
     ],
-    docId: "comprehensive-analysis",
+    docId: "essay-day10",
   },
   {
     id: "essay-day11",
@@ -558,7 +561,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我的对策没有出现「万能句」",
       "我能说出对策可行性的基本公式",
     ],
-    docId: "proposals",
+    docId: "essay-day11",
   },
   {
     id: "essay-day12",
@@ -602,7 +605,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我用评价标准分析过一份参考答案",
       "我能说出贯彻执行题与归纳概括题的根本区别",
     ],
-    docId: "official-writing",
+    docId: "essay-day12",
   },
   {
     id: "essay-day13",
@@ -646,7 +649,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我理解为什么偏题会直接降档",
       "我没有把大作文当成政治论述题来写",
     ],
-    docId: "article-writing",
+    docId: "essay-day13",
   },
   {
     id: "essay-day14",
@@ -691,7 +694,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我拆解了范文并画出了结构图",
       "我能说清三要素之间的关系",
     ],
-    docId: "article-writing",
+    docId: "essay-day14",
   },
   {
     id: "essay-day15",
@@ -741,7 +744,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我理解为什么不能没有结尾",
       "我通读提纲后确认逻辑通畅、论点紧扣材料",
     ],
-    docId: "article-writing",
+    docId: "essay-day15",
   },
   {
     id: "essay-day16",
@@ -780,7 +783,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我记录了文章里材料内容与实际拓展的比例",
       "我写出了下次要改进的三件事",
     ],
-    docId: "article-writing",
+    docId: "essay-day16",
   },
   {
     id: "essay-day17",
@@ -824,7 +827,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我能说出文章深度的四个来源",
       "我知道自己最薄弱的环节是起、承、转、合中的哪一个",
     ],
-    docId: "article-writing",
+    docId: "essay-day17",
   },
   {
     id: "essay-day18",
@@ -869,7 +872,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我知道什么情况下请示与批复成对出现",
       "我能说出落款与日期的写法要求",
     ],
-    docId: "official-writing",
+    docId: "essay-day18",
   },
   {
     id: "essay-day19",
@@ -919,7 +922,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我知道要求「写提纲」时的格式处理方式",
       "我的每篇文书都符合其文体的语言风格",
     ],
-    docId: "official-writing",
+    docId: "essay-day19",
   },
   {
     id: "essay-day20",
@@ -964,7 +967,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我为每个高频错误写了可执行的改进动作",
       "我写出了自己的「考场注意事项清单」",
     ],
-    docId: "overview",
+    docId: "essay-day20",
   },
   {
     id: "essay-day21",
@@ -1013,7 +1016,7 @@ export const ESSAY_LEVELS: EssayLevel[] = [
       "我列出了考场当天的时间与文具提醒",
       "我对自己的整体水平有了明确判断",
     ],
-    docId: "famous-quotes",
+    docId: "essay-day21",
   },
 ];
 

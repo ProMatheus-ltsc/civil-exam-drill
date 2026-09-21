@@ -18,7 +18,7 @@ import { Stack } from "@shared/core/components/responsive/Stack";
 import { StatCard } from "@shared/core/components/stats/StatCard";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
-import { knowledgeDocHref } from "../lib/doc-link";
+import { knowledgeDocHref, openKnowledgeDoc } from "../lib/doc-link";
 import { EssayTraining } from "./EssayTrainingPage";
 import { useAsync } from "../hooks/useAsync";
 import { isReviewDue } from "../essay/queue";
@@ -116,6 +116,7 @@ const categoryLabels: Record<string, string> = {
   counting: "排列组合与概率",
   questions: "题型方法",
   writing: "文章写作",
+  training: "21 天精讲",
   "standard-terms": "规范表达",
   politics: "政治理论",
   management: "管理常识",
@@ -687,7 +688,6 @@ function EssayCards() {
 
 export function EssayPage() {
   const [tab, setTab] = useState<"knowledge" | "cards" | "training">("training");
-  const navigate = useNavigate();
   return (
     <>
       <div className="essay-tabs">
@@ -711,7 +711,9 @@ export function EssayPage() {
         </button>
       </div>
       {tab === "training" && (
-        <EssayTraining onDoc={(docId) => navigate(`/knowledge/${docId}`)} />
+        // 延伸讲解开新标签页（与专项训练的 📖 同口径）：讲解是「查资料」的旁支动作，
+        // 同标签页跳走会把闯关进度（展开态、已勾选但未提交的作答）丢掉
+        <EssayTraining onDoc={openKnowledgeDoc} />
       )}
       {tab === "knowledge" && <KnowledgePage essay />}
       {tab === "cards" && (

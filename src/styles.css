@@ -1794,3 +1794,53 @@ a.entry {
 .essay-quiz-solution strong {
   color: #9a3030;
 }
+
+/* ---------- 知识库正文：表格与引用块（Markdown 里最常用的两种结构） ---------- */
+.knowledge-article table {
+  width: 100%;
+  margin: 0 0 14px;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.knowledge-article th,
+.knowledge-article td {
+  padding: 8px 10px;
+  border: 1px solid #dfe7ec;
+  text-align: left;
+  vertical-align: top;
+}
+.knowledge-article th {
+  background: #f3f7f9;
+  color: #17324d;
+  font-weight: 800;
+  /* 「题号」「分值」这类短表头不换行，否则会被挤成竖排 */
+  white-space: nowrap;
+}
+.knowledge-article tbody tr:nth-child(even) td {
+  background: #fbfcfd;
+}
+/* 「今日目标 / 通关要求」这类开篇提示：一眼能看出是导读而不是正文 */
+.knowledge-article blockquote {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-left: 3px solid #9db8c7;
+  border-radius: 8px;
+  background: #f5f9fb;
+  color: #3d5866;
+}
+.knowledge-article blockquote p {
+  margin: 0 0 6px;
+}
+.knowledge-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 680px) {
+  .knowledge-article table {
+    font-size: 0.82rem;
+  }
+  .knowledge-article th,
+  .knowledge-article td {
+    padding: 6px 7px;
+  }
+}

@@ -103,7 +103,7 @@ describe("申论 21 天闯关：关卡定义", () => {
     expect(problems).toEqual([]);
   });
 
-  it("docId 都指向 essay 知识库里真实存在的文档", async () => {
+  it("docId 都指向 essay 知识库里真实存在的文档，且与关卡 id 一一对应", async () => {
     const { entries, errors } = await loadEntries();
     expect(errors).toEqual([]);
     const essayDocs = new Map(
@@ -113,6 +113,32 @@ describe("申论 21 天闯关：关卡定义", () => {
       (level) => `${level.id} → ${level.docId}`,
     );
     expect(broken).toEqual([]);
+    // 每个关卡都有自己的延伸讲解（一份讲解只服务一个关卡）：第 N 关的讲解就是 essay-dayNN。
+    // 这样讲解与关卡文案不会互相抢内容，也避免「几关共用一篇、点进去发现讲的是别人」。
+    const mismatched = ESSAY_LEVELS.filter((level) => level.docId !== level.id).map(
+      (level) => `${level.id} → ${level.docId}`,
+    );
+    expect(mismatched).toEqual([]);
+  });
+
+  it("每篇讲解的「深入阅读」点名的文档都真实存在", async () => {
+    const { entries, errors } = await loadEntries();
+    expect(errors).toEqual([]);
+    const essay = entries.filter((entry) => entry.module === "essay");
+    const titles = new Set(essay.map((entry) => String(entry.title)));
+    const byId = new Map(essay.map((entry) => [entry.id, entry]));
+    const missing: string[] = [];
+    for (const level of ESSAY_LEVELS) {
+      const doc = byId.get(level.docId);
+      if (!doc) continue; // 上面那条用例已经报告过缺失
+      // 只查「## 深入阅读」小节里的《书名》——正文里引用教材名不算
+      const tail = String(doc.markdown).split("## 深入阅读")[1] ?? "";
+      for (const match of tail.matchAll(/《([^》]+)》/g)) {
+        const name = match[1].trim();
+        if (!titles.has(name)) missing.push(`${level.docId} → 《${name}》`);
+      }
+    }
+    expect(missing).toEqual([]);
   });
 
   it("难度档只增不减（循序渐进）", () => {

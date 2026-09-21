@@ -67,7 +67,7 @@ updatedAt: 2026-09-02
 | judgment | `graphics` `definition` `analogy` `logic` `science_reasoning` |
 | common_sense | `methods` `science` `politics` `management` + 中文篇目（`人文篇` `历史篇` `法律篇` `科技篇` `经济篇` 等） |
 | quantitative | `methods` `sequences` `geometry` `counting` `mixture` `engineering` `travel` `profit` `sets` |
-| essay | `writing` `questions` `foundation` `standard-terms` |
+| essay | `writing` `questions` `foundation` `standard-terms` `training`（21 天精讲，逐日讲解、一关一篇） |
 
 英文 key 的中文展示名映射在 `src/pages/KnowledgePage.tsx` 的 `categoryLabels`；新增分类可加一行映射，未映射的 key 会原样显示（中文 key 直接显示中文）。
 
@@ -90,7 +90,9 @@ updatedAt: 2026-09-02
 | `essay` 模块 | `/#/essay` →「申论知识」 | 按 `category` 分组 |
 | `essay` + `category: standard-terms` | `/#/essay` →「规范词卡片」 | 见下方卡片规则 |
 | 申论 21 天闯关 | `/#/essay` →「21 天闯关」 | 见下方「申论闯关」规则 |
+| `essay` + `category: training` | `/#/essay` →「申论知识」→「21 天精讲」 | 21 篇逐日讲解，一关一篇 |
 | 专项训练某个关卡的讲解 | `/#/quiz` 关卡右侧 📖（**新标签页**打开） | `src/generator/catalog.ts` 里该关卡的 `docId` |
+| 申论闯关某关的延伸讲解 | `/#/essay` →「21 天闯关」关卡右侧 📖（**新标签页**打开） | `src/essay/training.ts` 的 `docId`（**= 关卡 id**，即 `essay-dayNN`） |
 
 ### 申论闯关（21 天）
 
@@ -118,6 +120,15 @@ updatedAt: 2026-09-02
   阈值才有干净分界）；再为该关在 `BANK` 里补 6 道题（题干、四选项、正确项下标、解析），
   考点标签与解析要能对应本关要点。`tests/essay-training.test.ts` 核关卡结构与解锁链，
   `tests/essay-bank.test.ts` 核题库结构、下发口径（不泄答案）与判星规则。
+- **延伸讲解（21 篇逐日讲解）**：每关卡片右侧 📖 在**新标签页**打开自己的讲解（`essay-dayNN`），
+  与专项训练的 📖 同口径——讲解是「查资料」的旁支动作，同页跳转会把闯关进度（展开态、未提交的作答）丢掉。
+  内容**以《申论 21 天深度操作指南》为主、知识库既有专文为辅**：正文就是指南当天的「学习目标 / 核心知识点 /
+  实操任务 / 课后作业」，结尾「深入阅读」只列知识库里指南没展开的部分（不重复搬运）。
+  指南更新后跑 `node scripts/import-essay-guide.mjs [指南路径]` 重新导入（幂等），
+  **不要手改这 21 篇**——它们是生成物，手改会在下次导入时丢失。
+- **讲解与关卡一一对应**：`docId === level.id`（守卫在 `tests/essay-training.test.ts`），一份讲解只服务一个关卡，
+  避免「几关共用一篇、点进去发现讲的是别人」。同一守卫还会检查每篇「深入阅读」点名的文档真实存在
+  （改名/删文档会红）。
 - **本地 mock 的加载约束**：`scripts/dev-api-server.mjs` 用纯 node 直接 `import` 上面这几个源码文件，
   所以它们**不能有静态的相对 import/export**（纯 node 的 ESM 要求相对路径带扩展名，
   会 ERR_MODULE_NOT_FOUND 让 mock 启动即崩；`import type` / `export type` 例外，类型会被擦除）。
