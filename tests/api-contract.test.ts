@@ -362,12 +362,13 @@ describe("API contract guards", () => {
     const byId = new Map(
       progress.map((p) => [`${p.topicId}:${p.difficulty}`, p]),
     );
-    expect(progress).toHaveLength(35 * 3);
+    expect(progress).toHaveLength(36 * 3);
     expect(byId.get("addition:easy").unlocked).toBe(true);
     expect(byId.get("addition:hard").unlocked).toBe(true);
     // 计算功底是一条链：什么都没过时，只有入口「加法」可练
     expect(byId.get("subtraction:easy").unlocked).toBe(false);
     expect(byId.get("sum-many:easy").unlocked).toBe(false);
+    expect(byId.get("sum-long:easy").unlocked).toBe(false);
     expect(byId.get("diff-many:easy").unlocked).toBe(false);
     expect(byId.get("multiply:easy").unlocked).toBe(false);
 
@@ -421,10 +422,11 @@ describe("API contract guards", () => {
     expect(none.get("addition")).toBe(true);
     expect(none.get("subtraction")).toBe(false);
 
-    // 过了加法：减法与多项求和一并解锁，但多项求差、乘法还锁着
+    // 过了加法：减法与多项求和一并解锁，但多项求差、多项连加、乘法还锁着
     const afterAdd = await afterPassing("addition");
     expect(afterAdd.get("subtraction")).toBe(true);
     expect(afterAdd.get("sum-many")).toBe(true);
+    expect(afterAdd.get("sum-long")).toBe(false);
     expect(afterAdd.get("diff-many")).toBe(false);
     expect(afterAdd.get("multiply")).toBe(false);
 
@@ -433,11 +435,17 @@ describe("API contract guards", () => {
     expect(afterSub.get("diff-many")).toBe(true);
     expect(afterSub.get("multiply")).toBe(false);
 
-    // 过了多项求和：乘法与平方解锁（除法仍挂在下游）
+    // 过了多项求和：只解锁「多项连加」，乘法要等连加通关（4 项以上先练顺再进乘法）
     const afterSum = await afterPassing("addition", "sum-many");
-    expect(afterSum.get("multiply")).toBe(true);
+    expect(afterSum.get("sum-long")).toBe(true);
+    expect(afterSum.get("multiply")).toBe(false);
     expect(afterSum.get("divide")).toBe(false);
     expect(afterSum.get("diff-many")).toBe(false);
+
+    // 过了多项连加：乘法与平方解锁（除法仍挂在下游）
+    const afterSumLong = await afterPassing("addition", "sum-many", "sum-long");
+    expect(afterSumLong.get("multiply")).toBe(true);
+    expect(afterSumLong.get("divide")).toBe(false);
   });
 
   it("generates the first run question of the requested difficulty run", async () => {

@@ -6,6 +6,7 @@ export type TopicId =
   | "addition"
   | "subtraction"
   | "sum-many"
+  | "sum-long"
   | "diff-many"
   | "multiply"
   | "divide"
@@ -82,6 +83,9 @@ export const TOPIC_BUDGET_OVERRIDES: Partial<Record<TopicId, Record<Difficulty, 
   // 加法/减法只出两项、数字小，10 题一局控制在最多 100 秒
   addition: { easy: 8, medium: 10, hard: 10 },
   subtraction: { easy: 8, medium: 10, hard: 10 },
+  // 多项连加比多项求和多 1~3 项，按项数给一点加时（tool 档 15/22/30，高难另含 12 秒读材料）；
+  // 覆盖值直接给每题预算，不再叠加材料时间：18 = 15+3、26 = 22+4、46 = 30+12+4。
+  "sum-long": { easy: 18, medium: 26, hard: 46 },
 };
 
 /**
@@ -193,13 +197,15 @@ export function topicBudget(t: TrainingTopic) {
 export const topics: TrainingTopic[] = [
   // ===== 资料速算轨道（先计算功底，再增长线/比重线，高阶综合带材料） =====
   // 计算功底是一条解锁链，不是并列四项：
-  //   加法（入口）→ 减法 / 多项求和 →（减法之后）多项求差、（多项求和之后）乘法与平方
-  // 会加才会减、才会连加；会减了再练连减，连加稳了才进乘法。
+  //   加法（入口）→ 减法 / 多项求和 →（减法之后）多项求差、（求和之后）多项连加 →（连加之后）乘法与平方
+  // 会加才会减；连加分两步走——先把 3 项与位数练顺（多项求和），再单独练 4 项以上（多项连加）；
+  // 会减了再练连减，连加稳了才进乘法。
   topic("addition", 1, "speed", false, "tool", [], "加法", "多位数加法：拆分凑整与高位叠加"),
   topic("subtraction", 1, "speed", false, "tool", ["addition"], "减法", "多位数减法：退位、减数凑整与整十整百被减数"),
-  topic("sum-many", 1, "speed", false, "tool", ["addition"], "多项求和", "3~5 项连加：配对凑整、分组与基准数法"),
+  topic("sum-many", 1, "speed", false, "tool", ["addition"], "多项求和", "3 项连加：个位凑十先配对、分位相加与基准数法"),
+  topic("sum-long", 1, "speed", false, "tool", ["sum-many"], "多项连加", "4~6 项连加：基准数法、配对凑整与分位累加"),
   topic("diff-many", 1, "speed", false, "tool", ["subtraction"], "多项求差", "连减、两组和相减与“总量减去各部分”"),
-  topic("multiply", 1, "speed", false, "tool", ["sum-many"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
+  topic("multiply", 1, "speed", false, "tool", ["sum-long"], "乘法与平方", "两位数乘法与常见平方（选项末两位一致，尾数法失效）"),
   topic("divide", 1, "speed", false, "tool", ["multiply"], "除法估算", "直除首位、除数倍数与商值范围"),
   topic("sensitive", 2, "speed", false, "tool", ["multiply"], "敏感数与百化分", "分数、百分数与份数关系的快速转换"),
   topic("decimal", 2, "speed", false, "tool", ["addition", "multiply"], "小数速算", "小数对齐、凑整与移位技巧"),

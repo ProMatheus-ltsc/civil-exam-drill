@@ -4,7 +4,7 @@ module: data_analysis
 category: methods
 title: "小数速算"
 summary: "小数题的难点在小数点位置：加减对齐小数点逐位算，位数由选项差距决定，乘 1.1/1.25/1.5 拆成加法，先定量级再比有效数字。"
-order: 27
+order: 28
 updatedAt: 2026-09-15
 ---
 

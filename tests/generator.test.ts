@@ -3,24 +3,26 @@ import { round } from "../src/generator/random";
 import {
   difficulties,
   generateQuestion,
+  perQuestionBudgetSeconds,
   topicById,
   topics,
   titleOf,
 } from "../src/generator";
-import type { TopicId } from "../src/generator";
+import type { TopicId, TrainingTopic } from "../src/generator";
 
 describe("question generator", () => {
   /**
    * 计算功底的解锁链（设计意图，改链条时这里要一起改）：
-   *   加法（入口）→ 减法 | 多项求和 →（减法之后）多项求差、（多项求和之后）乘法与平方
+   *   加法（入口）→ 减法 | 多项求和 →（减法之后）多项求差、（求和之后）多项连加 →（连加之后）乘法与平方
    */
-  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/乘法与平方", () => {
+  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/多项连加/乘法与平方", () => {
     const unlockOf = (id: TopicId) => topicById.get(id)?.unlock ?? [];
     expect(unlockOf("addition")).toEqual([]);
     expect(unlockOf("subtraction")).toEqual(["addition"]);
     expect(unlockOf("sum-many")).toEqual(["addition"]);
+    expect(unlockOf("sum-long")).toEqual(["sum-many"]);
     expect(unlockOf("diff-many")).toEqual(["subtraction"]);
-    expect(unlockOf("multiply")).toEqual(["sum-many"]);
+    expect(unlockOf("multiply")).toEqual(["sum-long"]);
     // 下游不受影响：除法与敏感数仍挂在乘法上
     expect(unlockOf("divide")).toEqual(["multiply"]);
     expect(unlockOf("sensitive")).toEqual(["multiply"]);
@@ -87,6 +89,21 @@ describe("question generator", () => {
       }
     }
     expect(cyclic).toEqual([]);
+  });
+
+  /**
+   * 项数越多不能反而更赶：多项连加的每题预算必须不低于多项求和（同难度档逐个对比）。
+   * 时间预算是「逼你用方法而不是硬算」的杠杆，某一档写少了会让这一关变成不可通关。
+   */
+  it("多项连加每档的每题预算 ≥ 多项求和（项数多就该给加时）", () => {
+    const sumMany = topicById.get("sum-many") as TrainingTopic;
+    const sumLong = topicById.get("sum-long") as TrainingTopic;
+    for (const difficulty of difficulties) {
+      const where = `sum-long/${difficulty.id}`;
+      expect(perQuestionBudgetSeconds(sumLong, difficulty.id), where).toBeGreaterThanOrEqual(
+        perQuestionBudgetSeconds(sumMany, difficulty.id),
+      );
+    }
   });
 
   for (const topic of topics) {
@@ -200,17 +217,23 @@ describe("question generator", () => {
   });
 
   /**
-   * 加法/减法/多项求和/多项求差是纯算数题：题干里的算式就是答案本身，
+   * 加法/减法/多项求和/多项连加/多项求差是纯算数题：题干里的算式就是答案本身，
    * 这一条不变量比「选项互异」硬得多——取值区间写错（比如减数大于被减数）、
    * 选项出现负数、把答案和选项写岔了，都会在这里暴露。
    */
-  it("计算功底四关：答案等于算式本身，且选项里没有负数", () => {
+  it("计算功底五关：答案等于算式本身，且选项里没有负数", () => {
     const evaluate = (expression: string) =>
       (expression.match(/[+-]?\s*\d+(?:\.\d+)?/g) ?? []).reduce(
         (sum, token) => sum + Number(token.replace(/\s+/g, "")),
         0,
       );
-    for (const topicId of ["addition", "subtraction", "sum-many", "diff-many"] as const) {
+    for (const topicId of [
+      "addition",
+      "subtraction",
+      "sum-many",
+      "sum-long",
+      "diff-many",
+    ] as const) {
       for (const difficulty of difficulties) {
         for (let seed = 0; seed < 80; seed += 1) {
           const question = generateQuestion({
@@ -238,7 +261,13 @@ describe("question generator", () => {
    * 2. 5 项求和的材料标签只给了 4 个季度，第 5 项退化成「第 5 阶段」且柱状图少一根。
    */
   it("高难材料题：材料里不出现负数，且每一项都有标签与柱子", () => {
-    for (const topicId of ["addition", "subtraction", "sum-many", "diff-many"] as const) {
+    for (const topicId of [
+      "addition",
+      "subtraction",
+      "sum-many",
+      "sum-long",
+      "diff-many",
+    ] as const) {
       for (let seed = 0; seed < 40; seed += 1) {
         const question = generateQuestion({
           topicId,
@@ -252,11 +281,18 @@ describe("question generator", () => {
           ...(question.material?.table?.rows.flat() ?? []),
         ].join(" ");
         expect(text, `${topicId} seed=${seed}：${text}`).not.toMatch(/[−-]\s*\d/);
-        if (topicId === "addition" || topicId === "sum-many") {
+        if (topicId === "addition" || topicId === "sum-many" || topicId === "sum-long") {
           const terms = String(question.params.expression).split("+").length;
           const where = `${topicId} seed=${seed}（${terms} 项）`;
           expect(question.material?.table?.rows.length, where).toBe(terms);
           expect(question.material?.chart?.categories.length, where).toBe(terms);
+          // 5~6 项要走「1—N 月各月」框架：写死「1—5 月」时 6 项的第 6 个标签会缺失
+          if (terms >= 5) {
+            expect(question.material?.table?.rows[terms - 1]?.[0], where).toBe(
+              `${terms} 月`,
+            );
+            expect(question.stem).toContain(`1—${terms} 月合计`);
+          }
         }
       }
     }

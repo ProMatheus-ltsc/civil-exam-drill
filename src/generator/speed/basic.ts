@@ -194,37 +194,119 @@ export function generateSubtraction(r: Rng): QuestionDraft {
 }
 
 /**
- * 多项求和：3~5 项连加。至多 1/10 的题造出「个位凑十」的对子，
- * 让「先配对」与基准数法都是真能省事的做法；其余为普通随机数，练分位相加。
+ * 连加的三种解法。按「题面本身有什么结构」选，不按项数硬套：
+ * - base  各项都挤在同一整十附近 → 基准数法（基准×项数 ＋ 差值合计）
+ * - pair  个位能两两凑成整十     → 配对凑整（项数减半）
+ * - digit 没有上述结构           → 分位累加（个位/十位/百位各收一列，只做一次进位）
+ * 项数越多越不该「一项一项累加」：中间和要一直记着，进位还要反复做。
  */
-export function generateSumMany(r: Rng): QuestionDraft {
-  const { level, integer, pick, random } = r;
-  const count = level === 1 ? 3 : level === 2 ? pick([4, 5]) : 5;
-  const min = level === 1 ? 12 : level === 2 ? 106 : 118;
-  const max = level === 1 ? 98 : level === 2 ? 896 : 976;
-  const values: number[] = [];
-  const friendly = random() > 0.9;
-  while (values.length + 2 <= count) {
-    const [a, b] = friendly
-      ? friendlyPair(integer, min, max)
-      : [integer(min, max), integer(min, max)];
-    values.push(a, b);
+type SumMode = "base" | "pair" | "digit";
+
+/** 造一对个位相加为 10 的数（27 与 63）。个位是 0 的数不参与配对，否则「凑十」是假的 */
+function unitPair(integer: Rng["integer"], min: number, max: number): [number, number] {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const first = integer(min, max);
+    if (first % 10 === 0) continue;
+    const second = integer(Math.ceil(min / 10), Math.floor(max / 10)) * 10 + (10 - (first % 10));
+    if (second >= min && second <= max) return [first, second];
   }
-  while (values.length < count) values.push(integer(min, max));
-  const answer = values.reduce((sum, value) => sum + value, 0);
-  const spread = Math.max(...values) - Math.min(...values);
-  const base = Math.round(answer / count / 10) * 10;
-  let method: string;
-  if (count >= 4 && spread <= 45 && base > 0) {
-    // 基准数法：各项都挤在同一个整十附近时，比逐项相加稳
-    const diffs = values.map((value) => value - base);
-    method = `基准数法：以 ${base} 为基准，${values
-      .map(
-        (value, index) =>
-          `${value}=${base}${diffs[index] >= 0 ? "+" : "−"}${Math.abs(diffs[index])}`,
-      )
-      .join("、")}；基准部分 ${base}×${count}=${base * count}，差值合计 ${diffs.reduce((s, d) => s + d, 0)}`;
+  return friendlyPair(integer, min, max);
+}
+
+/** 造一组都挤在同一整十附近的数：基准数法要用得上，跨度就得真的小 */
+function clusteredValues(
+  integer: Rng["integer"],
+  count: number,
+  min: number,
+  max: number,
+  spread: number,
+): { values: number[]; base: number } {
+  const center = Math.round(integer(min + spread, max - spread) / 10) * 10;
+  const values = Array.from({ length: count }, () =>
+    Math.min(max, Math.max(min, center + integer(-spread, spread))),
+  );
+  const average = values.reduce((sum, value) => sum + value, 0) / count;
+  const base = Math.max(10, Math.round(average / 10) * 10);
+  return { values, base };
+}
+
+/**
+ * 分位累加的分步说明：个位收一列、十位收一列……逐位写数并进位，最后拼出结果。
+ * 这是项数多时的通用解法，也是唯一不会在中间某一步丢数的算法。
+ */
+function columnSteps(values: number[]) {
+  const columns = [
+    { name: "个位", place: 0 },
+    { name: "十位", place: 1 },
+    { name: "百位", place: 2 },
+    { name: "千位", place: 3 },
+  ];
+  let carry = 0;
+  const steps: string[] = [];
+  const digits: string[] = [];
+  for (const [index, column] of columns.entries()) {
+    const columnDigits = values.map((value) => Math.floor(value / 10 ** column.place) % 10);
+    const columnSum = columnDigits.reduce((sum, digit) => sum + digit, 0);
+    const total = columnSum + carry;
+    if (index > 0 && total === 0) break;
+    const kept = total % 10;
+    const next = Math.floor(total / 10);
+    steps.push(
+      `${column.name} ${columnDigits.join("+")}=${columnSum}${carry > 0 ? `，加低位进位 ${carry} 得 ${total}` : ""} → 留 ${kept}${next > 0 ? `、进 ${next}` : ""}`,
+    );
+    digits.unshift(String(kept));
+    carry = next;
+  }
+  if (carry > 0) digits.unshift(String(carry));
+  return { text: steps.join("；"), result: digits.join("") };
+}
+
+/** 连加题的共用主体：造数（按结构分三种）＋ 对应解法的解析 ＋ 选项 */
+function sumDraft(
+  topicId: "sum-many" | "sum-long",
+  r: Rng,
+  count: number,
+  min: number,
+  max: number,
+): QuestionDraft {
+  const { integer, random } = r;
+  const spread = max >= 100 ? 25 : 12;
+  const roll = random();
+  let values: number[];
+  let mode: SumMode;
+  let base = 0;
+  if (roll < 0.34) {
+    mode = "base";
+    const clustered = clusteredValues(integer, count, min, max, spread);
+    values = clustered.values;
+    base = clustered.base;
+  } else if (roll < 0.68) {
+    mode = "pair";
+    values = [];
+    while (values.length + 2 <= count) values.push(...unitPair(integer, min, max));
+    while (values.length < count) values.push(integer(min, max));
   } else {
+    mode = "digit";
+    values = Array.from({ length: count }, () => integer(min, max));
+  }
+  const answer = values.reduce((sum, value) => sum + value, 0);
+  let method: string;
+  if (mode === "base") {
+    const diffs = values.map((value) => value - base);
+    const diffSum = diffs.reduce((sum, diff) => sum + diff, 0);
+    const spreadOfValues = Math.max(...values) - Math.min(...values);
+    method =
+      `基准数法：${count} 项都落在 ${base} 附近（实际跨度 ${spreadOfValues}），先把整十部分拎出来算——` +
+      `各项写成 ${values
+        .map((value, index) =>
+          diffs[index] === 0
+            ? `${value}（正好是基准）`
+            : `${value}=${base}${diffs[index] > 0 ? "+" : "−"}${Math.abs(diffs[index])}`,
+        )
+        .join("、")}；基准部分 ${base}×${count}=${base * count}，差值合计 ${
+        diffSum >= 0 ? `+${diffSum}` : `−${Math.abs(diffSum)}`
+      }，合计 ${answer}。`;
+  } else if (mode === "pair") {
     const pairs: string[] = [];
     const rest: number[] = [];
     for (let index = 0; index + 1 < values.length; index += 2) {
@@ -233,21 +315,66 @@ export function generateSumMany(r: Rng): QuestionDraft {
       else rest.push(values[index], values[index + 1]);
     }
     if (values.length % 2 === 1) rest.push(values[values.length - 1]);
-    const onesPart = values.reduce((sum, value) => sum + (value % 10), 0);
-    const carry = Math.floor(onesPart / 10);
+    const restSum = rest.reduce((sum, value) => sum + value, 0);
     method =
-      pairs.length > 0
-        ? `先配对凑整：${pairs.join("、")}${rest.length > 0 ? `；再加其余项 ${rest.join("+")}=${rest.reduce((s, v) => s + v, 0)}` : ""}`
-        : `分位相加：整十部分合计 ${values.reduce((sum, value) => sum + tensOf(value), 0)}、零头合计 ${onesPart}${carry > 0 ? `（向十位进 ${carry}）` : ""}`;
+      `配对凑整：先扫个位，把能凑成整十的两项配成对——${pairs.join("、")}` +
+      (rest.length === 1
+        ? `；再加余下的 ${rest[0]}`
+        : rest.length > 1
+          ? `；再加余下的 ${rest.join("+")}=${restSum}`
+          : "") +
+      `，合计 ${answer}。` +
+      (pairs.length > 1
+        ? `${count} 项配完只剩 ${pairs.length} 个整十加数，加法次数少一半。`
+        : `${count} 项里能配成对就先配，配不上的零头单独加。`);
+  } else {
+    const columns = columnSteps(values);
+    method =
+      (count >= 4
+        ? "分位累加：项数多时别一项一项加（中间和记不住、进位还得反复做），改成按位收——"
+        : "分位累加（高位叠加）：把同一位上的数分别相加、逐位进位——") +
+      `${columns.text}；` +
+      `拼起来是 ${columns.result}。个位那一列之和的个位（${answer % 10}）是天然的校验位，对不上就是进位错了。`;
   }
   const { set, tip } = numericOptions(answer, random);
+  const methodTip =
+    mode === "base"
+      ? count >= 4
+        ? "项数越多这一招越省：多次多位加法换成了一次乘法加几个小差值。"
+        : "几项都挤在同一个整十附近时，这样算比逐项相加少做一次进位。"
+      : mode === "pair"
+        ? "配对只看个位（3 与 7、4 与 6、9 与 1、2 与 8、5 与 5），配不上的零头最后单独加。"
+        : "按位收的好处是不必记住越来越大的中间和，进位只在最后合并时做一次。";
   return {
-    templateId: `sum-many-${["three", "four", "five"][count - 3]}-v2`,
+    templateId: `${topicId}-${mode}-v3`,
     params: { expression: values.join("+"), answer },
     stem: `不使用计算器，计算 ${values.join("+")}。`,
     ...set,
-    explanation: `${method}，合计 ${answer}。${tip}`,
+    explanation: `${method}${methodTip}${tip}`,
   };
+}
+
+/**
+ * 多项求和：固定 3 项。梯度只拉「位数」这一维（2 位 → 3 位），
+ * 不再把项数一起加进来——4 项以上的连加另立一关《多项连加》。
+ */
+export function generateSumMany(r: Rng): QuestionDraft {
+  const { level } = r;
+  return sumDraft("sum-many", r, 3, level === 1 ? 12 : 106, level === 3 ? 976 : level === 1 ? 98 : 896);
+}
+
+/**
+ * 多项连加：4 项起步，梯度只拉「项数」这一维——
+ * easy 4 项两位数（先把「多一项」练顺）→ medium 4 项三位数 → hard 5~6 项三位数（实战材料）。
+ * 项数一多，逐项累加必错，所以造数刻意给出三种真实结构：各项挤在同一整十附近（基准数法）、
+ * 个位能成对凑十（配对凑整）、以及没有结构的普通散布（分位累加）。
+ */
+export function generateSumLong(r: Rng): QuestionDraft {
+  const { level, random } = r;
+  const count = level <= 2 ? 4 : random() < 0.3 ? 6 : 5;
+  const min = level === 1 ? 12 : level === 2 ? 106 : 118;
+  const max = level === 1 ? 98 : level === 2 ? 896 : 976;
+  return sumDraft("sum-long", r, count, min, max);
 }
 
 /**

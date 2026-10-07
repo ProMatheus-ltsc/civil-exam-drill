@@ -4,7 +4,7 @@ module: data_analysis
 category: methods
 title: "敏感数与百化分"
 summary: "把常见百分数记成1/n，看到16.7%就想1/6：求整体用份数法，求占比先约成敏感分数，增长量用现期÷(n+1)。"
-order: 26
+order: 27
 updatedAt: 2026-09-15
 ---
 

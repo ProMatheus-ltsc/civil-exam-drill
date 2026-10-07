@@ -88,7 +88,7 @@ function arithmeticScenario(templateId: string, params: Record<string, number | 
       ], `2023—2024 年某市一般公共预算收入。`),
     };
   }
-  // 求和（分阶段合计 / 多项合计）：2 项→上/下半年、3~4 项→季度、5 项→1—5 月各月
+  // 求和（分阶段合计 / 多项合计）：2 项→上/下半年、3~4 项→季度、5~6 项→1—N 月各月
   const useMonths = values.length >= 5;
   const labels = useMonths
     ? MONTHS.slice(0, values.length)
@@ -96,11 +96,17 @@ function arithmeticScenario(templateId: string, params: Record<string, number | 
       ? HALVES
       : QUARTERS.slice(0, values.length);
   const rows = values.map((value, index) => [labels[index], String(value)]);
-  const scope = useMonths ? " 1—5 月各月" : "分阶段";
+  const scope = useMonths ? ` 1—${values.length} 月各月` : "分阶段";
+  // 合计口径要跟标签对齐：2 项=上/下半年、3 项=前三季度、4 项=四个季度、5~6 项=1—N 月
+  const totalLabel = useMonths
+    ? `1—${values.length} 月`
+    : values.length === 3
+      ? "前三季度"
+      : "全年";
   return {
     stem: `2024 年某地区${scope}完成规模以上工业增加值如下（单位：亿元）：${labels
       .map((label, index) => `${label} ${values[index]}`)
-      .join("、")}。则该地区${useMonths ? " 1—5 月合计" : "全年合计"}为多少亿元？`,
+      .join("、")}。则该地区${totalLabel}合计为多少亿元？`,
     material: buildMaterial(
       `某地区 2024 年${scope}完成指标（单位：亿元）`,
       rows,
@@ -212,6 +218,7 @@ export function rephraseDraft(
     topicId === "addition" ||
     topicId === "subtraction" ||
     topicId === "sum-many" ||
+    topicId === "sum-long" ||
     topicId === "diff-many"
   )
     return arithmeticScenario(draft.templateId, draft.params);
