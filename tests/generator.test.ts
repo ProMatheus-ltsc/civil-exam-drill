@@ -13,16 +13,17 @@ import type { TopicId, TrainingTopic } from "../src/generator";
 describe("question generator", () => {
   /**
    * 计算功底的解锁链（设计意图，改链条时这里要一起改）：
-   *   加法（入口）→ 减法 | 多项求和 →（减法之后）多项求差、（求和之后）多项连加 →（连加之后）乘法与平方
+   *   加法（入口）→ 减法 | 多项求和 →（减法之后）多项求差、（求和之后）乘法与平方 →（乘法之后）多项连加
    */
-  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/多项连加/乘法与平方", () => {
+  it("计算功底解锁链：加法 → 减法/多项求和 → 多项求差/乘法与平方 → 多项连加", () => {
     const unlockOf = (id: TopicId) => topicById.get(id)?.unlock ?? [];
     expect(unlockOf("addition")).toEqual([]);
     expect(unlockOf("subtraction")).toEqual(["addition"]);
     expect(unlockOf("sum-many")).toEqual(["addition"]);
-    expect(unlockOf("sum-long")).toEqual(["sum-many"]);
     expect(unlockOf("diff-many")).toEqual(["subtraction"]);
-    expect(unlockOf("multiply")).toEqual(["sum-long"]);
+    expect(unlockOf("multiply")).toEqual(["sum-many"]);
+    // 连加的解法用到「基准 × 项数」的乘法，所以排在乘法与平方之后
+    expect(unlockOf("sum-long")).toEqual(["multiply"]);
     // 下游不受影响：除法与敏感数仍挂在乘法上
     expect(unlockOf("divide")).toEqual(["multiply"]);
     expect(unlockOf("sensitive")).toEqual(["multiply"]);

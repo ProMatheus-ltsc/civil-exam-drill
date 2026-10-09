@@ -422,30 +422,30 @@ describe("API contract guards", () => {
     expect(none.get("addition")).toBe(true);
     expect(none.get("subtraction")).toBe(false);
 
-    // 过了加法：减法与多项求和一并解锁，但多项求差、多项连加、乘法还锁着
+    // 过了加法：减法与多项求和一并解锁，但多项求差、乘法、多项连加还锁着
     const afterAdd = await afterPassing("addition");
     expect(afterAdd.get("subtraction")).toBe(true);
     expect(afterAdd.get("sum-many")).toBe(true);
-    expect(afterAdd.get("sum-long")).toBe(false);
     expect(afterAdd.get("diff-many")).toBe(false);
     expect(afterAdd.get("multiply")).toBe(false);
+    expect(afterAdd.get("sum-long")).toBe(false);
 
     // 过了减法：多项求差解锁
     const afterSub = await afterPassing("addition", "subtraction");
     expect(afterSub.get("diff-many")).toBe(true);
     expect(afterSub.get("multiply")).toBe(false);
 
-    // 过了多项求和：只解锁「多项连加」，乘法要等连加通关（4 项以上先练顺再进乘法）
+    // 过了多项求和：乘法与平方解锁，但多项连加要等乘法通关（连加用得到乘法）
     const afterSum = await afterPassing("addition", "sum-many");
-    expect(afterSum.get("sum-long")).toBe(true);
-    expect(afterSum.get("multiply")).toBe(false);
+    expect(afterSum.get("multiply")).toBe(true);
+    expect(afterSum.get("sum-long")).toBe(false);
     expect(afterSum.get("divide")).toBe(false);
     expect(afterSum.get("diff-many")).toBe(false);
 
-    // 过了多项连加：乘法与平方解锁（除法仍挂在下游）
-    const afterSumLong = await afterPassing("addition", "sum-many", "sum-long");
-    expect(afterSumLong.get("multiply")).toBe(true);
-    expect(afterSumLong.get("divide")).toBe(false);
+    // 过了乘法：多项连加与除法估算一并解锁（敏感数也挂在下游）
+    const afterMultiply = await afterPassing("addition", "sum-many", "multiply");
+    expect(afterMultiply.get("sum-long")).toBe(true);
+    expect(afterMultiply.get("divide")).toBe(true);
   });
 
   it("generates the first run question of the requested difficulty run", async () => {

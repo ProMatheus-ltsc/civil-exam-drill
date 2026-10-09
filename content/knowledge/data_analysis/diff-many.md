@@ -4,7 +4,7 @@ module: data_analysis
 category: methods
 title: "多项求差"
 summary: "公考里多项求差的三种形态：连减求剩余、两组之和相减求增量、顺差型嵌套求差；核心是先合并再相减，少做几次借位。"
-order: 24
+order: 23
 updatedAt: 2026-10-07
 ---
 
