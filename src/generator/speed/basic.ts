@@ -513,12 +513,13 @@ export function generateMultiply(r: Rng): QuestionDraft {
         ? "两数第三位都在 8~9，全部进位"
         : "前两位有效数字较小的一方四舍五入、较大的一方反向取舍";
   const diffRate = fmt(Math.abs((estimate - answer) / answer) * 100, 1);
+  const correct = set.options[set.answerIndex];
   return {
     templateId: "multiply-estimate-v3",
     params: { a, b, answer },
     stem: `不使用计算器估算 ${a}×${b}，下列各选项中最接近实际结果的是？`,
     ...set,
-    explanation: `【估算】看三位、取两位：${ruleText}，${a} 取 ${fmt(approxA)}、${b} 取 ${fmt(approxB)}，得 ${fmt(approxA)}×${fmt(approxB)}=${fmt(estimate)}，与实际值相差约 ${diffRate}%，最接近的选项为 ${fmt(answer)}。 资料分析里乘法几乎都是这样估的——选项差距 ≥5% 时，"首位对得上"就够定位，硬算完整乘积反而浪费时间。`,
+    explanation: `【估算】看三位、取两位：${ruleText}，${a} 取 ${fmt(approxA)}、${b} 取 ${fmt(approxB)}，得 ${fmt(approxA)}×${fmt(approxB)}=${fmt(estimate)}，与实际值（${fmt(answer)}）相差约 ${diffRate}%，最接近的选项为 ${correct}。 资料分析里乘法几乎都是这样估的——选项差距 ≥5% 时，"首位对得上"就够定位，硬算完整乘积反而浪费时间。`,
   };
 }
 
