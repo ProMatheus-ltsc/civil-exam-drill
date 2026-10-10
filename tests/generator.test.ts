@@ -232,16 +232,38 @@ describe("question generator", () => {
           count.exact += 1;
         } else {
           expect(question.templateId.startsWith("multiply-estimate")).toBe(true);
-          // 估算题：相邻刻度差距 >4%，且题干点明「最接近」
+          // 估算题：相邻刻度差距 ≥5.5%（生成器保证 ≥6%，这里留出取整余量），题干点明「最接近」
           const sorted = [...nums].sort((x, y) => x - y);
           for (let index = 1; index < sorted.length; index += 1) {
             const gap = (sorted[index] - sorted[index - 1]) / sorted[index];
-            expect(gap).toBeGreaterThan(0.04);
+            expect(gap).toBeGreaterThanOrEqual(0.055);
           }
           expect(question.stem).toContain("最接近");
           count.estimate += 1;
         }
+        // 乘法全题型共同约束：四项末位必须完全一致，杜绝尾数法秒杀
+        const lastDigits = new Set(question.options.map((option) => option.slice(-1)));
+        expect(lastDigits.size).toBe(1);
       }
+    }
+    // 估算题：被标记的答案必须确实是「离精确乘积最近」的那个选项
+    for (let seed = 0; seed < 200; seed += 1) {
+      const question = generateQuestion({
+        topicId: "multiply",
+        difficulty: difficulties[seed % difficulties.length].id,
+        excludedFingerprints: [],
+        randomSeed: `closest-${seed}`,
+      });
+      if (!question.templateId.startsWith("multiply-estimate")) continue;
+      const a = Number((question.stem.match(/估算\s*(\d+)/) ?? [])[1]);
+      const b = Number((question.stem.match(/×(\d+)/) ?? [])[1]);
+      if (!a || !b) continue;
+      const truth = a * b;
+      const nums = question.options.map((option) => Number(option));
+      const closest = nums.reduce((best, value) =>
+        Math.abs(value - truth) < Math.abs(best - truth) ? value : best,
+      );
+      expect(nums[question.answerIndex]).toBe(closest);
     }
     // 估算必须是主体（>50%），精算必须明显是少数（<30%）
     const total = count.estimate + count.exact + count.square;
