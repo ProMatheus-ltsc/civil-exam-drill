@@ -118,7 +118,7 @@ function arithmeticScenario(templateId: string, params: Record<string, number | 
 }
 
 function multiplyScenario(templateId: string, params: Record<string, number | string>): Scenario | null {
-  if (templateId.startsWith("square-")) {
+  if (templateId.startsWith("multiply-square")) {
     const side = Number(params.a);
     if (!Number.isFinite(side)) return null;
     const area = side * side;
@@ -136,22 +136,43 @@ function multiplyScenario(templateId: string, params: Record<string, number | st
   const a = Number(params.a);
   const b = Number(params.b);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  // 估算题（有效数字乘法）：给一组"基期量 × 倍数/系数"的材料，正是资料分析 A×B 的真实形态。
+  // 题干统一保留「最接近的是」的设问口径，与不带材料的估算题保持一致。
+  if (templateId.startsWith("multiply-estimate")) {
+    return {
+      stem: `某地区上年度指标为 ${a}，本年度按 ${b} 的系数折算。则本年度该项指标最接近下列哪个数值？`,
+      material: buildMaterial(
+        "指标折算数据",
+        [
+          ["上年度指标", String(a)],
+          ["折算系数", String(b)],
+        ],
+        "",
+        [
+          { label: "上年度指标", value: a },
+          { label: "折算系数", value: b },
+        ],
+        `某地区上年度指标 ${a}，按 ${b} 的系数折算本年度该项指标。`,
+      ),
+    };
+  }
   const total = a * b;
   const unit = "元";
+  // 精算形态：模拟资料分析里"部分量 × 单价/系数"的两位数乘法，数量与单价都贴近真题口径
   return {
-    stem: `某市场本月出货 ${b} 件商品，每件单价 ${a} 元。则本月该批商品总销售额为多少元？`,
+    stem: `某市场本月出货 ${b} 批商品，每批平均货值 ${a} 元。则该批商品总货值约为多少元？（精确到个位）`,
     material: buildMaterial(
-      "商品销售数据",
+      "商品货值数据",
       [
-        ["数量(件)", String(b)],
-        ["单价(元/件)", String(a)],
+        ["批数(批)", String(b)],
+        ["每批货值(元)", String(a)],
       ],
       unit,
       [
-        { label: "数量", value: b },
-        { label: "单价", value: a },
+        { label: "批数", value: b },
+        { label: "每批货值", value: a },
       ],
-      `某市场本月商品销售情况：数量 ${b} 件、单价 ${a} 元/件。`,
+      `某市场本月商品货值情况：共 ${b} 批、每批平均 ${a} 元。`,
     ),
   };
 }
