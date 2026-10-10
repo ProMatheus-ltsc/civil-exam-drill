@@ -38,8 +38,8 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
   return (
     <main className="login-shell dvh">
       <section className="login-card">
-        <p className="eyebrow">个人备考工具</p>
-        <h1>公考加油站</h1>
+        <p className="eyebrow">个人学习工具</p>
+        <h1>学习助手</h1>
         <p className="muted">登录后继续知识复习和专项训练。</p>
         <Stack gap="1rem">
           <label>
@@ -82,7 +82,7 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
 function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
   const nav = [
     { to: "/knowledge", icon: BookOpen, label: "知识库" },
-    { to: "/essay", icon: FileText, label: "申论" },
+    { to: "/essay", icon: FileText, label: "写作" },
     { to: "/quiz", icon: Calculator, label: "专项训练" },
     { to: "/mistakes", icon: ListChecks, label: "错题本" },
     { to: "/schulte", icon: Brain, label: "舒尔特方格" },
@@ -91,7 +91,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
   return (
     <Layout
       navItems={nav}
-      appConfig={{ name: "公考加油站", icon: Brain }}
+      appConfig={{ name: "学习助手", icon: Brain }}
       storageKey="civil-exam-nav"
       user={{ username: user.nickname }}
       onLogout={onLogout}
