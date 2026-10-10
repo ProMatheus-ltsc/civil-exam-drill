@@ -1,6 +1,6 @@
 /** 资料速算 · 计算功底模块（加法/减法/多项求和/多项求差/乘法平方/除法估算/敏感数/小数） */
 import { fmt, round } from "../random";
-import { options, tailLockedOptions, tailLockInfo } from "../options";
+import { options, tailLockedOptions, tailLockInfo, estimateOptions, significantPair } from "../options";
 import type { QuestionDraft, Rng } from "../types";
 
 /** 一个数「十位以上的部分」，用于拆分说明：137 → 130 */
@@ -421,89 +421,104 @@ export function generateDiffMany(r: Rng): QuestionDraft {
   };
 }
 
-/** 乘法最优拆分文本：就近整十/整百拆分，返回「算式文本」 */
-function roundSplit(a: number, b: number): string | null {
-  // 将 a 凑到最近的 10/100 的倍数
-  const candidates = [
-    { base: Math.round(a / 10) * 10, near: 10 },
-    { base: Math.round(a / 100) * 100, near: 100 },
-  ].sort((x, y) => Math.abs(x.base - a) - Math.abs(y.base - a));
-  for (const cand of candidates) {
-    const d = cand.base - a;
-    if (d === 0) continue;
-    if (Math.abs(d) <= Math.max(3, cand.near / 5) || cand.base > 0) {
-      const sign = d > 0 ? "+" : "−";
-      const abs = Math.abs(d);
-      const rough = cand.base * b;
-      return `${a}×${b}=${cand.base}×${b}${sign}${abs}×${b}=${fmt(rough)}${sign}${fmt(abs * b)}=${fmt(a * b)}`;
+/**
+ * 把两位数拆成两个一位数：12~49 中只有 12、14、15、16、18、21、24、27、28、32、35、36、42、45、48 等能拆。
+ * 返回 null 表示拆不开（如质数 23、29、31、37、41、43、47），此时应改用凑整十的分配律。
+ */
+function factorPair(b: number): [number, number] | null {
+  for (let first = 2; first <= 9; first += 1) {
+    if (b % first === 0) {
+      const second = b / first;
+      if (second >= 2 && second <= 9) return [first, second];
     }
   }
   return null;
 }
 
+/**
+ * 乘法与平方：对齐资料分析真题的三种形态，按固定比例混合出题（三档通用）。
+ *
+ * 1）**估算题（主体，约 65%）**：两数各取前两位有效数字（"看三位、取两位"）算出估算值，
+ *    选项按 6% 刻度铺开。这正是资料分析里 A×B 的真实解法——选项差距 ≥5% 时只需求到
+ *    首位有效数字，练的是"敢不敢估、估得准不准"，而不是"算得快不快"。
+ * 2）**平方题（约 20%）**：凑整十展开，对应 (1+r)² 复合增长与几何面积场景。
+ * 3）**精算题（少数派，约 15%）**：模拟"选项差距 <5%、必须算全"的情形，选项尾位锁定。
+ *    资料分析里这类题占比很低，所以每档只掺 1~2 道，不作为整档主线。
+ *
+ * 平方只保留"贴近实战"的形态，方法收敛到「凑整十 ± 补数」一条主线。
+ */
 export function generateMultiply(r: Rng): QuestionDraft {
   const { level, integer, pick, random } = r;
-  const square = random() > 0.62;
-  let a: number;
-  let b: number;
-  let templateId: string;
-  if (square) {
-    if (level === 1) {
-      a = integer(11, 30);
-      templateId = "square-diff-v2";
-    } else if (level === 2) {
-      a = integer(26, 60);
-      templateId = "square-diff-v2";
-    } else {
-      a = integer(61, 99);
-      templateId = "square-round100-v2";
-    }
-    b = a;
-  } else if (level === 1) {
-    a = integer(12, 89);
-    b = integer(2, 9);
-    templateId = "multiply-round-v2";
-  } else if (level === 2) {
-    a = integer(11, 89);
-    b = integer(11, 19);
-    templateId = "multiply-round-v2";
-  } else {
-    a = integer(103, 999);
-    b = integer(11, 49);
-    templateId = "multiply-round100-v2";
-  }
-  const answer = a * b;
-  const set = tailLockedOptions(answer, random);
-  const lock = tailLockInfo(set);
-  const tailTip = lock.lastTwoSame
-    ? `选项末两位均为 ${String(answer).slice(-2)}，尾数法完全失效，必须完整计算。`
-    : `选项末位相同，单看尾数无法定位；干扰项量级接近，需结合完整乘积判断。`;
-  let method = "";
-  if (square && templateId === "square-round100-v2") {
-    const x = 100 - a;
-    method = `${a}² 靠近 100，用补数展开：(100−${x})²=10000−200×${x}+${x}²=${fmt(10000 - 200 * x + x * x)}，即 ${answer}。`;
-  } else if (square) {
-    // 就近整十：d = |a − 最近的整十|
+  // 三种形态按固定比例抽取，三档通用：
+  //   估算（有效数字乘法，主体，~65%）
+  //   平方（凑整十展开，对应 (1+r)²/几何面积，~20%）
+  //   精算（选项差距小、锁尾位，少数派场景，~15%）
+  const roll = random();
+  const wantSquare = roll > 0.82;
+  const wantExact = roll > 0.67 && roll <= 0.82;
+  if (wantSquare) {
+    const a = level === 1 ? integer(12, 39) : level === 2 ? integer(41, 89) : integer(61, 99);
+    const answer = a * a;
     const near = Math.round(a / 10) * 10;
-    const d = Math.abs(a - near);
-    if (d === 0) method = `${a}² 可按 ${a}×${a} 直乘：${answer}。`;
-    else {
-      const lower = a - d;
-      const upper = a + d;
-      method = `${a}² 用平方差变形：(a−d)(a+d)+d²=(${lower})(${upper})+${d}²=${fmt(lower * upper)}+${d * d}=${fmt(answer)}（整十数与 ${d}² 心算更快）。`;
-    }
-  } else {
-    const split = roundSplit(a, b);
-    method = split
-      ? `${split}。`
-      : `拆分 ${b} 后分配律：${a}×${b}=${a}×${fmt(b - 1)}+${a}=${fmt(a * (b - 1))}+${a}=${fmt(answer)}。`;
+    const d = a - near;
+    const method =
+      d === 0
+        ? `${a}² 即 ${a}×${a}，直接相乘得 ${fmt(answer)}。`
+        : `${a}² 用凑整十展开：(${near}${d > 0 ? "+" : ""}${d})²=${fmt(near)}²${d > 0 ? "+" : "−"}2×${Math.abs(near)}×${Math.abs(d)}+${Math.abs(d)}²=${fmt(near * near)}${d > 0 ? "+" : "−"}${fmt(2 * Math.abs(near) * Math.abs(d))}+${Math.abs(d) * Math.abs(d)}=${fmt(answer)}。`;
+    const set = estimateOptions(answer, 0.06, random, 0);
+    return {
+      templateId: "multiply-square-v3",
+      params: { a, b: a, answer },
+      stem: `不使用计算器，计算 ${a}²。`,
+      ...set,
+      explanation: `【最优解】${method}${d === 0 ? "" : ` 关键是把 ${a} 折到整十 ${near}，用「整十平方 ± 补数项」一步出结果。`} 选项均落在平方值附近（差距约 6%），漏掉补数项 ${Math.abs(d) * 2 * Math.abs(near)} 就会选到相邻的干扰项。`,
+    };
   }
+
+  // 精算形态（三档各约 15%）：模拟"选项差距 <5%、必须算全"的少数派场景
+  if (wantExact) {
+    const a = integer(103, 999);
+    const b = level === 1 ? integer(12, 29) : integer(11, 49);
+    const answer = a * b;
+    const set = tailLockedOptions(answer, random);
+    const lock = tailLockInfo(set);
+    const tailTip = lock.lastTwoSame
+      ? `选项末两位均为 ${String(answer).slice(-2)}，估算与尾数法都失效，必须精确计算。`
+      : `选项末位相同，单看尾数无法定位；干扰项量级接近，需结合完整乘积判断。`;
+    // 优先判断 b 能否拆成两个一位数（降维最省），否则退回凑整十的分配律
+    const factors = factorPair(b);
+    const method = factors
+      ? `先把 ${b} 降维成 ${factors[0]}×${factors[1]}：${a}×${factors[0]}=${fmt(a * factors[0])}，再 ×${factors[1]} 得 ${fmt(answer)}`
+      : `把 ${b} 拆成 ${fmt(tensOf(b))}+${b % 10}：${a}×${fmt(tensOf(b))}=${fmt(a * tensOf(b))}，${a}×${b % 10}=${fmt(a * (b % 10))}，两部分相加得 ${fmt(answer)}`;
+    return {
+      templateId: "multiply-exact-v3",
+      params: { a, b, answer },
+      stem: `不使用计算器，计算 ${a}×${b}（结果精确到个位）。`,
+      ...set,
+      explanation: `【精确计算】${method}。 本题选项锁定尾位、差距很小，估算救不了，只能算全（资料分析里这类题只占少数）：先看 ${b} 能不能拆成两个一位数——${factors ? "能拆，降维最省两次一位数乘法" : `${b} 拆不开（或拆分不划算），改用凑整十的分配律`}。${tailTip}`,
+    };
+  }
+
+  // 估算形态（默认，三档主体）：有效数字乘法。
+  // 两数都给三位以上，保证「第三位观察位」真实存在——否则取两位后数字没变化，估算无从练起。
+  const a = level === 1 ? integer(112, 986) : level === 2 ? integer(1024, 9876) : integer(10024, 98765);
+  const b = level === 2 ? integer(1032, 9864) : level === 3 ? integer(1123, 9865) : integer(113, 985);
+  const answer = a * b;
+  const { approxA, approxB, estimate, rule } = significantPair(a, b);
+  const set = estimateOptions(answer, 0.06, random, 0);
+  const ruleText =
+    rule === "舍"
+      ? "两数第三位都在 0~2，全部舍去"
+      : rule === "进"
+        ? "两数第三位都在 8~9，全部进位"
+        : "前两位有效数字较小的一方四舍五入、较大的一方反向取舍";
+  const diffRate = fmt(Math.abs((estimate - answer) / answer) * 100, 1);
   return {
-    templateId,
+    templateId: "multiply-estimate-v3",
     params: { a, b, answer },
-    stem: `不使用计算器，计算 ${a}×${b}。`,
+    stem: `不使用计算器估算 ${a}×${b}，下列各选项中最接近实际结果的是？`,
     ...set,
-    explanation: `【最优解】${method} ${tailTip}`,
+    explanation: `【估算】看三位、取两位：${ruleText}，${a} 取 ${fmt(approxA)}、${b} 取 ${fmt(approxB)}，得 ${fmt(approxA)}×${fmt(approxB)}=${fmt(estimate)}，与实际值相差约 ${diffRate}%，最接近的选项为 ${fmt(answer)}。 资料分析里乘法几乎都是这样估的——选项差距 ≥5% 时，"首位对得上"就够定位，硬算完整乘积反而浪费时间。`,
   };
 }
 
