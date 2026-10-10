@@ -98,13 +98,21 @@ export function tailLockInfo(optionsSet: OptionSet) {
  * 「估算刻度」选项构建器：用于资料分析类的乘法估算题。
  *
  * 资料分析真题里选项差距通常 ≥5%，只要估到「数量级 + 首位有效数字」就能定答案，
- * 因此四个选项按同一个相对刻度 spread 围绕答案铺开（首位不同、量级一致），
- * 让「估错一个刻度就选错」成为唯一失分方式——这正是有效数字乘法要练的能力。
+ * 因此四个选项围绕答案按同一相对刻度铺开（差距可分辨、量级一致）。
  *
- * @param answer 精确值（题目真实计算结果，作为唯一正确项）
+ * **两条硬约束**（否则估算能力根本没被考到）：
+ * 1. **四选项尾数必须完全一致**——否则尾数法秒杀；
+ * 2. **正确答案也必须写成「整齐的估计值」**——否则只有答案是个"丑数字"，
+ *    考生一眼就能反推出它，比尾数法还快。
+ *
+ * 做法：按答案量级取一个刻度粒度 grain，把答案与全部干扰项都对齐到 grain 的整数倍，
+ * 于是四项同尾（对齐到十位则尾位全 0、对齐到百位则末两位全 00），
+ * 且都是"整齐数"；正确项即"最接近精确值的那个整齐数"。
+ *
+ * @param answer 题目真实计算结果（用于派生正确项与干扰项）
  * @param spread 相对间距，0.06 表示相邻选项相差约 6%
  * @param random 洗牌随机源
- * @param digits 结果保留小数位
+ * @param digits 结果保留小数位（估算题通常为 0）
  */
 export function estimateOptions(
   answer: number,
@@ -113,16 +121,24 @@ export function estimateOptions(
   digits = 0,
 ): OptionSet {
   if (!Number.isFinite(answer) || answer <= 0) throw new Error("INVALID_ESTIMATE_ANSWER");
-  const step = round(answer * spread, digits);
-  // 步长下限保证四舍五入到 digits 位后仍能产生互异且可分辨的选项
-  const safeStep = Math.max(step, 10 ** -digits);
-  // 只取「答案 ± k·step」，k 为非零整数：保证任意两个选项之间的相对差距都 ≥ spread
-  const raw = [answer, answer + safeStep, answer - safeStep, answer + safeStep * 2]
-    .map((value) => round(value, digits))
-    .filter((value) => value > 0);
-  const unique = [...new Set(raw)];
+  const rounded = round(answer, digits);
+  // 对齐粒度：答案量级的 1/100（如 5 位数 → 1000、6 位数 → 10000），
+  // 保证四项同尾且刻度明显可分辨。
+  const magnitude = Math.floor(Math.log10(rounded));
+  const grain = 10 ** Math.max(1, magnitude - 1);
+  // 正确项 = 最接近精确值的整齐数
+  const correct = Math.round(rounded / grain) * grain;
+  // 单个刻度：向上取整到 grain 的整数倍，并保证相邻选项相对差距 ≥6%。
+  // grain 取整可能让间距缩水（如 answer=4.7M、grain=100k、spread=6% → 步长 300k，
+  // 但实际相邻选项差 300k/4.4M ≈ 6.8%，最小处可能低于 6%），
+  // 所以这里迭代放大步长直到「最小间距 / 最大选项」也满足 6%。
+  let stepCount = Math.max(1, Math.round((rounded * spread) / grain));
+  while (stepCount * grain < rounded * 0.06 * 1.05) stepCount += 1;
+  const step = stepCount * grain;
+  const candidates = [correct, correct + step, correct - step, correct + 2 * step];
+  const unique = [...new Set(candidates)].filter((value) => value > 0);
   for (let k = 3; unique.length < 4; k += 1) {
-    const candidate = round(answer + safeStep * k, digits);
+    const candidate = correct + k * step;
     if (candidate > 0 && !unique.includes(candidate)) unique.push(candidate);
   }
   for (let index = unique.length - 1; index > 0; index -= 1) {
@@ -136,7 +152,7 @@ export function estimateOptions(
       string,
       string,
     ],
-    answerIndex: unique.indexOf(round(answer, digits)) as 0 | 1 | 2 | 3,
+    answerIndex: unique.indexOf(correct) as 0 | 1 | 2 | 3,
   };
 }
 
