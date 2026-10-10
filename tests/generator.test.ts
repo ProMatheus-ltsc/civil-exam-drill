@@ -202,18 +202,64 @@ describe("question generator", () => {
     }
   });
 
-  it("multiply questions lock the trailing digit of every option", () => {
-    for (let seed = 0; seed < 60; seed += 1) {
+  /**
+   * 乘法模块对齐资料分析真题后是三档混合出题，测试按「题型」而非「难度」验证：
+   * - 估算题（主体）：选项按 ≥5% 相对刻度铺开，考的是有效数字估算；
+   * - 精算题（少数派）：选项尾位全锁（尾数法失效），必须算准；
+   * - 平方题：凑整十展开，选项互异即可。
+   * 同时统计三档的题型分布，确保「精算只是少数派、估算才是主线」。
+   */
+  it("multiply 三档均为混合出题：估算为主、精算为辅、选项刻度可分辨", () => {
+    const count = { estimate: 0, exact: 0, square: 0 };
+    for (let seed = 0; seed < 80; seed += 1) {
       for (const difficulty of difficulties) {
         const question = generateQuestion({
           topicId: "multiply",
           difficulty: difficulty.id,
           excludedFingerprints: [],
-          randomSeed: `tail-${difficulty.id}-${seed}`,
+          randomSeed: `mix-${difficulty.id}-${seed}`,
         });
-        const units = question.options.map((option) => option.slice(-1));
-        expect(new Set(units).size).toBe(1);
+        const nums = question.options.map((option) => Number(option));
+        expect(new Set(question.options).size).toBe(4);
+        expect(nums[question.answerIndex]).toBeGreaterThan(0);
+
+        if (question.templateId.startsWith("multiply-square")) {
+          count.square += 1;
+        } else if (question.templateId.startsWith("multiply-exact")) {
+          // 精算题：尾位全锁
+          const units = question.options.map((option) => option.slice(-1));
+          expect(new Set(units).size).toBe(1);
+          count.exact += 1;
+        } else {
+          expect(question.templateId.startsWith("multiply-estimate")).toBe(true);
+          // 估算题：相邻刻度差距 >4%，且题干点明「最接近」
+          const sorted = [...nums].sort((x, y) => x - y);
+          for (let index = 1; index < sorted.length; index += 1) {
+            const gap = (sorted[index] - sorted[index - 1]) / sorted[index];
+            expect(gap).toBeGreaterThan(0.04);
+          }
+          expect(question.stem).toContain("最接近");
+          count.estimate += 1;
+        }
       }
+    }
+    // 估算必须是主体（>50%），精算必须明显是少数（<30%）
+    const total = count.estimate + count.exact + count.square;
+    expect(count.estimate / total).toBeGreaterThan(0.5);
+    expect(count.exact / total).toBeLessThan(0.3);
+    // 精算题在三档都要出现，做到「每档 1~2 道」
+    for (const difficulty of difficulties) {
+      let exactInLevel = 0;
+      for (let seed = 0; seed < 80; seed += 1) {
+        const question = generateQuestion({
+          topicId: "multiply",
+          difficulty: difficulty.id,
+          excludedFingerprints: [],
+          randomSeed: `mix-${difficulty.id}-${seed}`,
+        });
+        if (question.templateId.startsWith("multiply-exact")) exactInLevel += 1;
+      }
+      expect(exactInLevel).toBeGreaterThan(0);
     }
   });
 
