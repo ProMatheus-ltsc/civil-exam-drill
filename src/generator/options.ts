@@ -93,3 +93,104 @@ export function tailLockInfo(optionsSet: OptionSet) {
   const lastTwoSame = new Set(tails).size === 1;
   return { lastDigitSame, lastTwoSame, tails };
 }
+
+/**
+ * 「估算刻度」选项构建器：用于资料分析类的乘法估算题。
+ *
+ * 资料分析真题里选项差距通常 ≥5%，只要估到「数量级 + 首位有效数字」就能定答案，
+ * 因此四个选项按同一个相对刻度 spread 围绕答案铺开（首位不同、量级一致），
+ * 让「估错一个刻度就选错」成为唯一失分方式——这正是有效数字乘法要练的能力。
+ *
+ * @param answer 精确值（题目真实计算结果，作为唯一正确项）
+ * @param spread 相对间距，0.06 表示相邻选项相差约 6%
+ * @param random 洗牌随机源
+ * @param digits 结果保留小数位
+ */
+export function estimateOptions(
+  answer: number,
+  spread: number,
+  random: () => number,
+  digits = 0,
+): OptionSet {
+  if (!Number.isFinite(answer) || answer <= 0) throw new Error("INVALID_ESTIMATE_ANSWER");
+  const step = round(answer * spread, digits);
+  // 步长下限保证四舍五入到 digits 位后仍能产生互异且可分辨的选项
+  const safeStep = Math.max(step, 10 ** -digits);
+  // 只取「答案 ± k·step」，k 为非零整数：保证任意两个选项之间的相对差距都 ≥ spread
+  const raw = [answer, answer + safeStep, answer - safeStep, answer + safeStep * 2]
+    .map((value) => round(value, digits))
+    .filter((value) => value > 0);
+  const unique = [...new Set(raw)];
+  for (let k = 3; unique.length < 4; k += 1) {
+    const candidate = round(answer + safeStep * k, digits);
+    if (candidate > 0 && !unique.includes(candidate)) unique.push(candidate);
+  }
+  for (let index = unique.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(random() * (index + 1));
+    [unique[index], unique[target]] = [unique[target], unique[index]];
+  }
+  return {
+    options: unique.map((value) => fmt(value, digits)) as [
+      string,
+      string,
+      string,
+      string,
+    ],
+    answerIndex: unique.indexOf(round(answer, digits)) as 0 | 1 | 2 | 3,
+  };
+}
+
+/**
+ * 有效数字乘法（「看三位、取两位」）：两数各自保留前两位有效数字，第三位决定取舍。
+ * 返回缺失舍入后的两个乘数与估算结果，供解析逐步展示。
+ *
+ * 取舍规则（与公考培训机构口径一致）：
+ * - 全舍：两数第三位都在 0/1/2 → 全部舍去；
+ * - 全进：两数第三位都在 8/9 → 全部进位；
+ * - 一进一舍：前两位有效数字较小的一方四舍五入，较大的一方反向变化。
+ */
+export function significantPair(a: number, b: number): {
+  approxA: number;
+  approxB: number;
+  estimate: number;
+  rule: "舍" | "进" | "一进一舍";
+} {
+  const split = (value: number) => {
+    const magnitude = Math.floor(Math.log10(Math.abs(value)));
+    const scale = 10 ** (magnitude - 1);
+    const firstTwo = Math.floor(Math.abs(value) / scale);
+    const third = Math.floor((Math.abs(value) / scale) * 10) % 10;
+    return { scale, firstTwo, third, sign: Math.sign(value) || 1 };
+  };
+  const sa = split(a);
+  const sb = split(b);
+  const build = (part: ReturnType<typeof split>, rounded: number) =>
+    part.sign * Math.round(rounded) * part.scale;
+
+  let rule: "舍" | "进" | "一进一舍";
+  let roundedA: number;
+  let roundedB: number;
+  if (sa.third <= 2 && sb.third <= 2) {
+    rule = "舍";
+    roundedA = sa.firstTwo;
+    roundedB = sb.firstTwo;
+  } else if (sa.third >= 8 && sb.third >= 8) {
+    rule = "进";
+    roundedA = sa.firstTwo + 1;
+    roundedB = sb.firstTwo + 1;
+  } else {
+    rule = "一进一舍";
+    const aIsSmaller = sa.firstTwo < sb.firstTwo;
+    const roundHalfUp = (third: number) => (third >= 5 ? 1 : 0);
+    if (aIsSmaller) {
+      roundedA = sa.firstTwo + roundHalfUp(sa.third);
+      roundedB = sb.firstTwo + (roundHalfUp(sa.third) === 1 ? 0 : 1);
+    } else {
+      roundedB = sb.firstTwo + roundHalfUp(sb.third);
+      roundedA = sa.firstTwo + (roundHalfUp(sb.third) === 1 ? 0 : 1);
+    }
+  }
+  const approxA = build(sa, roundedA);
+  const approxB = build(sb, roundedB);
+  return { approxA, approxB, estimate: approxA * approxB, rule };
+}
