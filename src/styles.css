@@ -1298,6 +1298,7 @@ a.entry {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .difficulty-runs {
   display: grid;
@@ -1431,6 +1432,7 @@ a.entry {
   align-items: center;
   gap: 12px;
   width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -1515,7 +1517,25 @@ a.entry {
   }
 }
 
-/* ---------- 申论 21 天闯关：与专项训练关卡卡同一套观感 ---------- */
+/* ---------- 申论 39 关闯关：与专项训练关卡卡同一套观感 ---------- */
+
+/* 窄屏：卡片头允许换行，让关卡标题独占一行。
+   否则「徽标 + 星星 + 箭头 + 详情按钮」会把标题挤成逐字换行。
+   用 .essay-stage 限定，只作用于申论页，不影响专项训练页。 */
+@media (max-width: 680px) {
+  .essay-stage .stage-card-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .essay-stage .stage-card-head .stage-text {
+    flex: 1 1 100%;
+    order: 3;
+  }
+  .essay-stage .stage-card-head .stage-arrow {
+    order: 4;
+    margin-left: auto;
+  }
+}
 .essay-training-chips {
   display: flex;
   flex-wrap: wrap;
