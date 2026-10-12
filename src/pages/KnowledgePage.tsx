@@ -699,7 +699,7 @@ export function EssayPage() {
           className={tab === "training" ? "active" : ""}
           onClick={() => setTab("training")}
         >
-          21 天闯关
+          39 天闯关
         </button>
         <button
           className={tab === "knowledge" ? "active" : ""}
