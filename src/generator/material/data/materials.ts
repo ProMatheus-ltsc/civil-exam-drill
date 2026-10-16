@@ -24,10 +24,10 @@ export const MATERIALS: MaterialEntry[] = [
       footnote: "注：数据为海关统计口径，增速均为名义同比。",
     },
     indicators: [
-      { name: "货物进出口总额", where: "第一段", unit: "亿元", ask: "求货物进出口总额的同比增速", caliber: "同比" },
-      { name: "出口额", where: "第一段", unit: "亿元", ask: "求出口额的同比增长量", caliber: "同比" },
-      { name: "进口额", where: "第一段", unit: "亿元", ask: "求进口额的同比增速", caliber: "同比" },
-      { name: "对“一带一路”沿线国家进出口总额", where: "第二段", unit: "亿元", ask: "求对沿线国家进出口额的同比增速", caliber: "同比" },
+      { name: "货物进出口总额", where: "第一段", unit: "亿元", ask: "求货物进出口总额的同比增速", caliber: "同比", value: 412680 },
+      { name: "出口额", where: "第一段", unit: "亿元", ask: "求出口额的同比增长量", caliber: "同比", value: 235420 },
+      { name: "进口额", where: "第一段", unit: "亿元", ask: "求进口额的同比增速", caliber: "同比", value: 177260 },
+      { name: "对“一带一路”沿线国家进出口总额", where: "第二段", unit: "亿元", ask: "求对沿线国家进出口额的同比增速", caliber: "同比", value: 156340 },
     ],
     computables: [
       {
@@ -87,10 +87,10 @@ export const MATERIALS: MaterialEntry[] = [
       },
     },
     indicators: [
-      { name: "诉求总量", where: "第一段", unit: "万件", ask: "求诉求总量的同比增速", caliber: "同比" },
-      { name: "投诉量", where: "第二段", unit: "万件", ask: "求投诉量的同比增速", caliber: "同比" },
-      { name: "举报量", where: "第二段", unit: "万件", ask: "求举报量的同比增速", caliber: "同比" },
-      { name: "咨询量", where: "第二段", unit: "万件", ask: "求咨询量占诉求总量的比重", caliber: "占比" },
+      { name: "诉求总量", where: "第一段", unit: "万件", ask: "求诉求总量的同比增速", caliber: "同比", value: 220.4 },
+      { name: "投诉量", where: "第二段", unit: "万件", ask: "求投诉量的同比增速", caliber: "同比", value: 55.6 },
+      { name: "举报量", where: "第二段", unit: "万件", ask: "求举报量的同比增速", caliber: "同比", value: 26.3 },
+      { name: "咨询量", where: "第二段", unit: "万件", ask: "求咨询量占诉求总量的比重", caliber: "占比", value: 138.5 },
       { name: "各月接收诉求量", where: "柱状图", unit: "万件", ask: "求某月诉求量环比变化", caliber: "环比" },
     ],
     computables: [
@@ -154,9 +154,9 @@ export const MATERIALS: MaterialEntry[] = [
       },
     },
     indicators: [
-      { name: "全体居民人均可支配收入", where: "表格“全体居民”行", unit: "元", ask: "求全体居民人均可支配收入的同比增速", caliber: "同比" },
-      { name: "城镇居民人均可支配收入", where: "表格“城镇居民”行", unit: "元", ask: "求城镇居民人均可支配收入的同比增量", caliber: "同比" },
-      { name: "农村居民人均可支配收入", where: "表格“农村居民”行", unit: "元", ask: "求农村居民人均可支配收入的同比增速", caliber: "同比" },
+      { name: "全体居民人均可支配收入", where: "表格“全体居民”行", unit: "元", ask: "求全体居民人均可支配收入的同比增速", caliber: "同比", value: 63830 },
+      { name: "城镇居民人均可支配收入", where: "表格“城镇居民”行", unit: "元", ask: "求城镇居民人均可支配收入的同比增量", caliber: "同比", value: 74997 },
+      { name: "农村居民人均可支配收入", where: "表格“农村居民”行", unit: "元", ask: "求农村居民人均可支配收入的同比增速", caliber: "同比", value: 40311 },
     ],
     computables: [
       {
@@ -203,10 +203,10 @@ export const MATERIALS: MaterialEntry[] = [
       ],
     },
     indicators: [
-      { name: "社会消费品零售总额", where: "第一段", unit: "亿元", ask: "求社会消费品零售总额的同比增速", caliber: "同比" },
-      { name: "城镇消费品零售额", where: "第二段", unit: "亿元", ask: "求城镇消费品零售额的同比增速", caliber: "同比" },
-      { name: "乡村消费品零售额", where: "第二段", unit: "亿元", ask: "求乡村消费品零售额占总额的比重", caliber: "占比" },
-      { name: "餐饮收入", where: "第三段", unit: "亿元", ask: "求餐饮收入的同比增量", caliber: "同比" },
+      { name: "社会消费品零售总额", where: "第一段", unit: "亿元", ask: "求社会消费品零售总额的同比增速", caliber: "同比", value: 8260 },
+      { name: "城镇消费品零售额", where: "第二段", unit: "亿元", ask: "求城镇消费品零售额的同比增速", caliber: "同比", value: 7100 },
+      { name: "乡村消费品零售额", where: "第二段", unit: "亿元", ask: "求乡村消费品零售额占总额的比重", caliber: "占比", value: 1160 },
+      { name: "餐饮收入", where: "第三段", unit: "亿元", ask: "求餐饮收入的同比增量", caliber: "同比", value: 960 },
     ],
     computables: [
       {
@@ -275,9 +275,9 @@ export const MATERIALS: MaterialEntry[] = [
       },
     },
     indicators: [
-      { name: "规模以上工业增加值增速", where: "第一段", unit: "%", ask: "求规上工业增加值的同比增速", caliber: "同比" },
-      { name: "采矿业增加值增速", where: "表格“采矿业”行", unit: "%", ask: "求采矿业增加值的同比增速", caliber: "同比" },
-      { name: "制造业增加值增速", where: "表格“制造业”行", unit: "%", ask: "求制造业增加值的同比增速", caliber: "同比" },
+      { name: "规模以上工业增加值增速", where: "第一段", unit: "%", ask: "求规上工业增加值的同比增速", caliber: "同比", value: 6.4 },
+      { name: "采矿业增加值增速", where: "表格“采矿业”行", unit: "%", ask: "求采矿业增加值的同比增速", caliber: "同比", value: -1.2 },
+      { name: "制造业增加值增速", where: "表格“制造业”行", unit: "%", ask: "求制造业增加值的同比增速", caliber: "同比", value: 7.1 },
       { name: "当月同比增速", where: "折线图", unit: "%", ask: "求某月当月增速与上月相比的变化", caliber: "环比" },
     ],
     computables: [
@@ -324,10 +324,10 @@ export const MATERIALS: MaterialEntry[] = [
       ],
     },
     indicators: [
-      { name: "一般公共预算支出", where: "第一段", unit: "亿元", ask: "求一般公共预算支出的同比增速", caliber: "同比" },
-      { name: "教育支出", where: "第二段", unit: "亿元", ask: "求教育支出的同比增量", caliber: "同比" },
-      { name: "社会保障和就业支出", where: "第二段", unit: "亿元", ask: "求社会保障和就业支出的同比增速", caliber: "同比" },
-      { name: "交通运输支出", where: "第二段", unit: "亿元", ask: "求交通运输支出占总支出的比重", caliber: "占比" },
+      { name: "一般公共预算支出", where: "第一段", unit: "亿元", ask: "求一般公共预算支出的同比增速", caliber: "同比", value: 5860 },
+      { name: "教育支出", where: "第二段", unit: "亿元", ask: "求教育支出的同比增量", caliber: "同比", value: 1080 },
+      { name: "社会保障和就业支出", where: "第二段", unit: "亿元", ask: "求社会保障和就业支出的同比增速", caliber: "同比", value: 920 },
+      { name: "交通运输支出", where: "第二段", unit: "亿元", ask: "求交通运输支出占总支出的比重", caliber: "占比", value: 460 },
     ],
     computables: [
       {
@@ -390,10 +390,10 @@ export const MATERIALS: MaterialEntry[] = [
       },
     },
     indicators: [
-      { name: "粮食总产量", where: "第一段", unit: "万吨", ask: "求粮食总产量的同比增速", caliber: "同比" },
-      { name: "夏粮产量", where: "表格“夏粮”行", unit: "万吨", ask: "求夏粮产量的同比增量", caliber: "同比" },
-      { name: "早稻产量", where: "表格“早稻”行", unit: "万吨", ask: "求早稻产量占粮食总产量的比重", caliber: "占比" },
-      { name: "秋粮产量", where: "表格“秋粮”行", unit: "万吨", ask: "求秋粮产量的同比增速", caliber: "同比" },
+      { name: "粮食总产量", where: "第一段", unit: "万吨", ask: "求粮食总产量的同比增速", caliber: "同比", value: 69541 },
+      { name: "夏粮产量", where: "表格“夏粮”行", unit: "万吨", ask: "求夏粮产量的同比增量", caliber: "同比", value: 14613 },
+      { name: "早稻产量", where: "表格“早稻”行", unit: "万吨", ask: "求早稻产量占粮食总产量的比重", caliber: "占比", value: 2834 },
+      { name: "秋粮产量", where: "表格“秋粮”行", unit: "万吨", ask: "求秋粮产量的同比增速", caliber: "同比", value: 52094 },
     ],
     computables: [
       {
@@ -456,10 +456,10 @@ export const MATERIALS: MaterialEntry[] = [
       },
     },
     indicators: [
-      { name: "固定资产投资增速", where: "第一段", unit: "%", ask: "求固定资产投资的同比增速", caliber: "同比" },
-      { name: "第一产业投资额", where: "表格“第一产业”行", unit: "亿元", ask: "求第一产业投资的同比增速", caliber: "同比" },
-      { name: "第二产业投资额", where: "表格“第二产业”行", unit: "亿元", ask: "求第二产业投资的同比增量", caliber: "同比" },
-      { name: "第三产业投资额", where: "表格“第三产业”行", unit: "亿元", ask: "求第三产业投资额占三次产业合计的比重", caliber: "占比" },
+      { name: "固定资产投资增速", where: "第一段", unit: "%", ask: "求固定资产投资的同比增速", caliber: "同比", value: 5.4 },
+      { name: "第一产业投资额", where: "表格“第一产业”行", unit: "亿元", ask: "求第一产业投资的同比增速", caliber: "同比", value: 120 },
+      { name: "第二产业投资额", where: "表格“第二产业”行", unit: "亿元", ask: "求第二产业投资的同比增量", caliber: "同比", value: 2480 },
+      { name: "第三产业投资额", where: "表格“第三产业”行", unit: "亿元", ask: "求第三产业投资额占三次产业合计的比重", caliber: "占比", value: 5320 },
     ],
     computables: [
       {
