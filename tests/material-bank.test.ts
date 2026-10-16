@@ -97,6 +97,26 @@ describe("资料实战材料库", () => {
 
   const VALID_CALIBERS = new Set(["同比", "环比", "累计", "年均"]);
 
+  it("算式题的答案只使用材料中出现的数字（题干与材料必须自洽）", () => {
+    // 常数白名单：1 来自 (1+r)；4 是季度数；365 题干已注明「按 365 天计」
+    const CONSTANTS = new Set(["1", "4", "365", "100"]);
+    const numbersIn = (text: string) =>
+      [...text.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+    for (const entry of MATERIALS) {
+      const available = new Set(numbersIn(materialText(entry.material)));
+      for (const item of entry.computables) {
+        for (const raw of item.answer.matchAll(/\d+(?:\.\d+)?/g)) {
+          const n = raw[0];
+          if (CONSTANTS.has(n)) continue;
+          expect(
+            available.has(Number(n)),
+            `${entry.id}「${item.ask}」的算式 ${item.answer} 用到了材料里没有的数字 ${n}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
   it("所有指标的时间口径都合法（不能是「占比」「差值」这类问法类型）", () => {
     for (const entry of MATERIALS) {
       for (const ind of entry.indicators) {
