@@ -43,7 +43,9 @@ export type TopicId =
   // 资料实战轨道（真实材料：读材料 → 找数据 → 列式）
   | "material-reading"
   | "data-locating"
-  | "formula-setup";
+  | "formula-base"
+  | "formula-ratio"
+  | "formula-amount";
 
 export type TrackId = "speed" | "sequence" | "material";
 
@@ -237,10 +239,16 @@ export const topics: TrainingTopic[] = [
   // ===== 资料实战轨道（真实材料 · 全难度带材料）=====
   // 与「资料速算」互补：速算练最后一步「算」，本轨道练前三步「读材料 → 找数据 → 列式」，
   // 材料取自国考/省考资料分析真题（结构/口径真实），题目由材料派生。
-  // 解锁链：材料阅读 → 数据定位 → 列式训练（先会读，再会找，最后会列）。
+  // 解锁链：材料阅读 → 数据定位 → 列式三关（先会读，再会找，最后会列）。
+  // 列式按**公式族**拆成三关，每关只考一条主线，避免一个模块里混着 9 种公式、
+  // 练不出单一技能的密度：
+  //   基期与增速（已知现期求过去 / 求增速）→ 比重与百分点（部分比整体 / 两期变化）
+  //   → 增长量与平均数（增长多少 / 平均多少）。
   topic("material-reading", 1, "material", true, "material", [], "材料阅读", "材料主题·指标·口径·单位的快速识别", "material-reading"),
   topic("data-locating", 2, "material", true, "material", ["material-reading"], "数据定位", "由问题定位数据所在的段落或表格行列", "data-locating"),
-  topic("formula-setup", 2, "material", true, "material", ["data-locating"], "列式训练", "由问题与数据确定正确算式，不涉计算", "formula-setup"),
+  topic("formula-base", 2, "material", true, "material", ["data-locating"], "基期与增速", "求基期量、求增长率——只列式不算", "formula-base"),
+  topic("formula-ratio", 2, "material", true, "material", ["formula-base"], "比重与百分点", "求比重、比两期变化——只列式不算", "formula-ratio"),
+  topic("formula-amount", 2, "material", true, "material", ["formula-ratio"], "增长量与平均数", "求增长量、求平均数——只列式不算", "formula-amount"),
   // ===== 数字推理轨道 =====
   // 数列类型大多是并列的题型，真正的依赖只有两条腿：
   //   基础数列（识别等差/等比/质数等基本规律）→ 多级数列（作差作和）、幂次数列（乘方与修正）

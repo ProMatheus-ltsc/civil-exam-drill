@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { app } from "../functions/api/[[path]]";
+import { topics } from "../src/generator";
 import { essayQuestionById, essayQuizOf } from "../src/essay/bank";
 
 /**
@@ -362,7 +363,8 @@ describe("API contract guards", () => {
     const byId = new Map(
       progress.map((p) => [`${p.topicId}:${p.difficulty}`, p]),
     );
-    expect(progress).toHaveLength(39 * 3);
+    // 每个模块 × 三档难度；数量随目录自动派生，新增模块不必手改
+    expect(progress).toHaveLength(topics.length * 3);
     expect(byId.get("addition:easy").unlocked).toBe(true);
     expect(byId.get("addition:hard").unlocked).toBe(true);
     // 计算功底是一条链：什么都没过时，只有入口「加法」可练

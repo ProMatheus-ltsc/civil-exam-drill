@@ -58,7 +58,7 @@ import {
 // 资料实战（真实材料）
 import { generateMaterialReading } from "./material/reading";
 import { generateDataLocating } from "./material/locate";
-import { generateFormulaSetup } from "./material/formula";
+import { generateFormulaBase, generateFormulaRatio, generateFormulaAmount } from "./material/formula";
 
 export type { TopicId } from "./catalog";
 export type { GeneratedQuestion, Difficulty, MaterialSpec } from "./types";
@@ -105,7 +105,9 @@ const generators: Record<TopicId, Generator> = {
   "seq-factor": generateSeqFactor,
   "material-reading": generateMaterialReading,
   "data-locating": generateDataLocating,
-  "formula-setup": generateFormulaSetup,
+  "formula-base": generateFormulaBase,
+  "formula-ratio": generateFormulaRatio,
+  "formula-amount": generateFormulaAmount,
 };
 
 export function isCatalogTopic(id: string): id is TopicId {
