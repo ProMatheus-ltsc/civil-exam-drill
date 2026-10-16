@@ -39,9 +39,13 @@ export type TopicId =
   | "seq-recursive"
   | "seq-fraction"
   | "seq-split"
-  | "seq-factor";
+  | "seq-factor"
+  // 资料实战轨道（真实材料：读材料 → 找数据 → 列式）
+  | "material-reading"
+  | "data-locating"
+  | "formula-setup";
 
-export type TrackId = "speed" | "sequence";
+export type TrackId = "speed" | "sequence" | "material";
 
 /** 题目难度预算档：tool=纯心算 / concept=资料概念 / material=带短材料 / sequence=数字推理（秒/题） */
 export type BudgetClass = "tool" | "concept" | "material" | "sequence";
@@ -230,6 +234,13 @@ export const topics: TrainingTopic[] = [
   topic("diff-rate", 3, "speed", true, "material", ["base-difference", "part-quantity"], "差值增长率", "总量与部分增速已知，求差值（如顺差/逆差）的同比增速（材料实战）"),
   topic("contribution-rate", 3, "speed", true, "material", ["growth-amount", "part-quantity"], "增长贡献率", "部分增量÷整体增量（材料实战）"),
   topic("pull-growth", 3, "speed", true, "material", ["contribution-rate"], "拉动增长率", "部分增量÷整体基期量，与贡献率区分（材料实战）"),
+  // ===== 资料实战轨道（真实材料 · 全难度带材料）=====
+  // 与「资料速算」互补：速算练最后一步「算」，本轨道练前三步「读材料 → 找数据 → 列式」，
+  // 材料取自国考/省考资料分析真题（结构/口径真实），题目由材料派生。
+  // 解锁链：材料阅读 → 数据定位 → 列式训练（先会读，再会找，最后会列）。
+  topic("material-reading", 1, "material", true, "material", [], "材料阅读", "材料主题·指标·口径·单位的快速识别", "material-reading"),
+  topic("data-locating", 2, "material", true, "material", ["material-reading"], "数据定位", "由问题定位数据所在的段落或表格行列", "data-locating"),
+  topic("formula-setup", 2, "material", true, "material", ["data-locating"], "列式训练", "由问题与数据确定正确算式，不涉计算", "formula-setup"),
   // ===== 数字推理轨道 =====
   // 数列类型大多是并列的题型，真正的依赖只有两条腿：
   //   基础数列（识别等差/等比/质数等基本规律）→ 多级数列（作差作和）、幂次数列（乘方与修正）
@@ -267,6 +278,7 @@ export const legacyTopics: Array<{ id: string; title: string }> = [
 export const tracks: Array<{ id: TrackId; title: string; description: string }> = [
   { id: "speed", title: "资料速算", description: "计算功底 → 增长 → 比重与平均数 → 实战高阶" },
   { id: "sequence", title: "数字推理", description: "按数字排列规律与难度划分的 9 类数列" },
+  { id: "material", title: "资料实战", description: "真实材料：读材料 → 找数据 → 列式" },
 ];
 
 export function titleOf(topicId: string): string {

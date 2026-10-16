@@ -176,10 +176,14 @@ describe("question generator", () => {
           excludedFingerprints: [],
           randomSeed: `combat-${topic.id}-${seed}`,
         });
-        if (topic.track === "speed") {
+        if (topic.track === "sequence") {
+          // 数字推理轨道保持纯数列，不带材料
+          expect(question.material).toBeNull();
+        } else {
+          // 资料速算（高难度局）与资料实战（全难度局）都应附材料
           expect(
             question.material?.paragraphs.length,
-            `${topic.id} 高难度应附材料`,
+            `${topic.id} 应附材料`,
           ).toBeGreaterThan(0);
           const materialText = [
             ...(question.material?.paragraphs ?? []),
@@ -187,8 +191,6 @@ describe("question generator", () => {
           ].join(" ");
           // 不泄漏原始参数名/占位标签
           expect(materialText).not.toMatch(/数值一|指标 A|第 \d+ 项数值|denominator|numerator|surplus|params/);
-        } else {
-          expect(question.material).toBeNull();
         }
         if (
           ["addition", "subtraction", "sum-many", "diff-many", "multiply", "divide"].includes(

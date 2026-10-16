@@ -18,6 +18,7 @@ import type { TrackId } from "../src/generator/catalog";
 const MODULE_OF_TRACK: Record<TrackId, string> = {
   speed: "data_analysis",
   sequence: "quantitative",
+  material: "data_analysis",
 };
 
 async function knowledgeIndex() {

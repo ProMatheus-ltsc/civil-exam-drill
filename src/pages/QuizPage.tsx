@@ -34,7 +34,7 @@ import { perQuestionBudgetSeconds } from "../generator/catalog";
 import type { MaterialSpec } from "../generator/types";
 import { MaterialView } from "../components/MaterialView";
 
-type TrackId = "speed" | "sequence";
+type TrackId = "speed" | "sequence" | "material";
 type Difficulty = "easy" | "medium" | "hard";
 type BudgetClass = "tool" | "concept" | "material" | "sequence";
 type RunDifficultyMeta = {
@@ -789,7 +789,8 @@ function RunView({
         <div className="run-progress">
           <span className="run-title">
             {topic.title} · {DIFF_LABEL[difficulty]} · 第 {current.index + 1}/{current.runLength} 题
-            {difficulty === "hard" && topic.track === "speed" && (
+            {((difficulty === "hard" && topic.track === "speed") ||
+              topic.track === "material") && (
               <em className="stage-material">实战材料</em>
             )}
           </span>
@@ -882,7 +883,9 @@ function ResultView({
         <h3>{summary.passed ? "通关成功" : "本局未通过"}</h3>
         <p className="run-result-sub">
           {topic.title} · {DIFF_LABEL[difficulty]}
-          {difficulty === "hard" && topic.track === "speed" && "（实战）"}
+          {((difficulty === "hard" && topic.track === "speed") ||
+            topic.track === "material") &&
+            "（实战）"}
         </p>
         <div className="stars big" aria-label={`${stars} 星`}>
           {Array.from({ length: 3 }, (_, i) => (

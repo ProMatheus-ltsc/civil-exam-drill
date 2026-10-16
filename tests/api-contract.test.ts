@@ -362,7 +362,7 @@ describe("API contract guards", () => {
     const byId = new Map(
       progress.map((p) => [`${p.topicId}:${p.difficulty}`, p]),
     );
-    expect(progress).toHaveLength(36 * 3);
+    expect(progress).toHaveLength(39 * 3);
     expect(byId.get("addition:easy").unlocked).toBe(true);
     expect(byId.get("addition:hard").unlocked).toBe(true);
     // 计算功底是一条链：什么都没过时，只有入口「加法」可练

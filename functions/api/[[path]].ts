@@ -12,6 +12,7 @@ import {
   titleOf,
   legacyTopics,
   difficulties,
+  tracks as catalogTracks,
 } from "../../src/generator";
 import type { TopicId } from "../../src/generator";
 import type { MaterialSpec } from "../../src/generator/types";
@@ -952,15 +953,12 @@ app.get("/quiz/catalog", (c) =>
         { id: "medium", label: "中难度", short: "中", description: "选项更接近、数字更复杂，需要两步换算" },
         { id: "hard", label: "高难度 · 实战", short: "高", description: "资料速算附文字/表格/图表材料，选项接近、数字复杂" },
       ],
-      tracks: ["speed", "sequence"].map((trackId) => {
-        const items = topics.filter((t) => t.track === trackId);
+      tracks: catalogTracks.map((track) => {
+        const items = topics.filter((t) => t.track === track.id);
         return {
-          id: trackId,
-          title: trackId === "speed" ? "资料速算" : "数字推理",
-          description:
-            trackId === "speed"
-              ? "计算功底 → 增长 → 比重与平均数 → 实战高阶"
-              : "按数字排列规律与难度划分的 9 类数列",
+          id: track.id,
+          title: track.title,
+          description: track.description,
           topics: items.map((t) => ({
             ...t,
             budgetMs: topicBudget(t),

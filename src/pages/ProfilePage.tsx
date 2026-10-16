@@ -184,13 +184,15 @@ function QuizBreakdown({
         />
       ) : (
         <Stack gap="1rem">
-          {(["speed", "sequence"] as const).map((trackId) => {
+          {(["speed", "sequence", "material"] as const).map((trackId) => {
             const list = byTrack.get(trackId) ?? [];
             if (!list.length) return null;
+            const trackTitle =
+              trackId === "speed" ? "资料速算" : trackId === "sequence" ? "数字推理" : "资料实战";
             return (
               <div key={trackId}>
                 <p className="subtitle">
-                  {trackId === "speed" ? "资料速算" : "数字推理"} · {list.length} 关有记录
+                  {trackTitle} · {list.length} 关有记录
                 </p>
                 <div className="stat-table">
                   <div className="stat-row stat-row-head">
