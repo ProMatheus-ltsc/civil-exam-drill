@@ -257,29 +257,32 @@ export const topics: TrainingTopic[] = [
   // 解锁链：材料阅读 → 数据定位 → 列式 18 关（先会读，再会找，最后会列）。
   // 列式的 18 关与「资料速算」轨道的 18 个「资料概念」**一一同名**，
   // 知识库共用同一篇专文：速算关练「这个概念怎么算得快」，列式关练「该用哪个算式」。
-  // 题由程序生成（不依赖材料库），因此每关题池无限；18 关并列解锁，便于按薄弱概念挑着练。
+  // 题由程序生成（不依赖材料库），因此每关题池无限。
+  // **前置关系与速算轨道保持同构**（速算中依赖「计算功底」的入口，这里统一改为依赖「数据定位」）：
+  //   三个入口——增长率 / 比重与整体量 / 平均数基础；其余按概念依赖逐级解锁，
+  //   如 增长率 → 基期量 → 基期差 → 差值增长率，比重与整体量 → 基期比重 → 两期比重差。
   topic("material-reading", 1, "material", true, "material", [], "材料阅读", "材料主题·指标·口径·单位的快速识别", "material-reading"),
   topic("data-locating", 2, "material", true, "material", ["material-reading"], "数据定位", "由问题定位数据所在的段落或表格行列", "data-locating"),
   // ── 增长线（9 关）──
   topic("formula-growth-rate", 2, "material", true, "concept", ["data-locating"], "增长率", "由基期与现期求同比增速——只列式不算", "growth-rate"),
-  topic("formula-growth-amount", 2, "material", true, "concept", ["data-locating"], "增长量", "现期×r÷(1+r) 求增量——只列式不算", "growth-amount"),
-  topic("formula-base-amount", 2, "material", true, "concept", ["data-locating"], "基期量", "现期÷(1+r) 还原过去——只列式不算", "base-amount"),
-  topic("formula-multiples", 2, "material", true, "concept", ["data-locating"], "倍数与翻番", "是几倍 / 增长几倍 / 翻番——只列式不算", "multiples"),
-  topic("formula-base-difference", 2, "material", true, "concept", ["data-locating"], "基期差", "两对象先还原基期再相减——只列式不算", "base-difference"),
-  topic("formula-interval-growth", 2, "material", true, "concept", ["data-locating"], "间隔增长率", "R=r₁+r₂+r₁×r₂——只列式不算", "interval-growth"),
-  topic("formula-mixed-growth", 2, "material", true, "concept", ["data-locating"], "混合增长率", "整体增速介于部分之间并偏向体量大者", "mixed-growth"),
-  topic("formula-annual-amount", 2, "material", true, "concept", ["data-locating"], "年均增长量", "增量除以间隔年数——只列式不算", "annual-amount"),
-  topic("formula-annual-rate", 2, "material", true, "concept", ["data-locating"], "年均增长率", "(1+r)ⁿ 开方还原——只列式不算", "annual-rate"),
+  topic("formula-growth-amount", 2, "material", true, "concept", ["formula-growth-rate"], "增长量", "现期×r÷(1+r) 求增量——只列式不算", "growth-amount"),
+  topic("formula-base-amount", 2, "material", true, "concept", ["formula-growth-rate"], "基期量", "现期÷(1+r) 还原过去——只列式不算", "base-amount"),
+  topic("formula-multiples", 2, "material", true, "concept", ["formula-growth-rate"], "倍数与翻番", "是几倍 / 增长几倍 / 翻番——只列式不算", "multiples"),
+  topic("formula-base-difference", 2, "material", true, "concept", ["formula-base-amount"], "基期差", "两对象先还原基期再相减——只列式不算", "base-difference"),
+  topic("formula-interval-growth", 2, "material", true, "concept", ["formula-growth-rate"], "间隔增长率", "R=r₁+r₂+r₁×r₂——只列式不算", "interval-growth"),
+  topic("formula-mixed-growth", 2, "material", true, "concept", ["formula-growth-rate"], "混合增长率", "整体增速介于部分之间并偏向体量大者", "mixed-growth"),
+  topic("formula-annual-amount", 2, "material", true, "concept", ["formula-growth-amount"], "年均增长量", "增量除以间隔年数——只列式不算", "annual-amount"),
+  topic("formula-annual-rate", 2, "material", true, "concept", ["formula-multiples"], "年均增长率", "(1+r)ⁿ 开方还原——只列式不算", "annual-rate"),
   // ── 比重与平均数线（9 关）──
   topic("formula-ratio-basic", 2, "material", true, "concept", ["data-locating"], "比重与整体量", "部分÷整体与三量互求——只列式不算", "ratio-basic"),
-  topic("formula-part-quantity", 2, "material", true, "concept", ["data-locating"], "部分量", "整体×占比求部分——只列式不算", "part-quantity"),
+  topic("formula-part-quantity", 2, "material", true, "concept", ["formula-ratio-basic"], "部分量", "整体×占比求部分——只列式不算", "part-quantity"),
   topic("formula-average-basic", 2, "material", true, "concept", ["data-locating"], "平均数基础", "总量÷份数，分清比重与平均——只列式不算", "average-basic"),
-  topic("formula-base-ratio", 2, "material", true, "concept", ["data-locating"], "基期比重", "分子分母各自还原到基期——只列式不算", "base-ratio"),
-  topic("formula-ratio-change", 2, "material", true, "concept", ["data-locating"], "两期比重差", "问的是百分点，不是百分数——只列式不算", "ratio-change"),
-  topic("formula-average-rate", 2, "material", true, "concept", ["data-locating"], "平均数增长率", "(a−b)÷(1+b)——只列式不算", "average-rate"),
-  topic("formula-diff-rate", 2, "material", true, "concept", ["data-locating"], "差值增长率", "整体减部分后的增速——只列式不算", "diff-rate"),
-  topic("formula-contribution-rate", 2, "material", true, "concept", ["data-locating"], "增长贡献率", "部分增量÷整体增量——只列式不算", "contribution-rate"),
-  topic("formula-pull-growth", 2, "material", true, "concept", ["data-locating"], "拉动增长率", "部分增量÷整体基期量——只列式不算", "pull-growth"),
+  topic("formula-base-ratio", 2, "material", true, "concept", ["formula-part-quantity", "formula-base-amount"], "基期比重", "分子分母各自还原到基期——只列式不算", "base-ratio"),
+  topic("formula-ratio-change", 2, "material", true, "concept", ["formula-base-ratio"], "两期比重差", "问的是百分点，不是百分数——只列式不算", "ratio-change"),
+  topic("formula-average-rate", 2, "material", true, "concept", ["formula-average-basic", "formula-growth-rate"], "平均数增长率", "(a−b)÷(1+b)——只列式不算", "average-rate"),
+  topic("formula-diff-rate", 2, "material", true, "concept", ["formula-base-difference", "formula-part-quantity"], "差值增长率", "整体减部分后的增速——只列式不算", "diff-rate"),
+  topic("formula-contribution-rate", 2, "material", true, "concept", ["formula-growth-amount", "formula-part-quantity"], "增长贡献率", "部分增量÷整体增量——只列式不算", "contribution-rate"),
+  topic("formula-pull-growth", 2, "material", true, "concept", ["formula-contribution-rate"], "拉动增长率", "部分增量÷整体基期量——只列式不算", "pull-growth"),
   // ===== 数字推理轨道 =====
   // 数列类型大多是并列的题型，真正的依赖只有两条腿：
   //   基础数列（识别等差/等比/质数等基本规律）→ 多级数列（作差作和）、幂次数列（乘方与修正）
