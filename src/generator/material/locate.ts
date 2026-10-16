@@ -1,27 +1,22 @@
 /**
- * 「数据定位」生成器：练习「由问题 → 找到那个数」的检索能力。
+ * 「数据定位」生成器：练习「由问题 → 找到那个数」的检索能力。**只练找数，不含运算。**
  *
  * 四类题型（对齐粉笔「资料找数」的考法）：
- * - locate-value   取数题：由指标直接问**数值**（选项是数，干扰项取自同篇同类的其它数值）
- * - locate-diff    差值题：同层级两个指标相减，干扰项含"两个主体各自的数"（取错主体）
+ * - locate-value   取数题：给指标 → 找数值（选项是数，干扰项取自同篇同类的其它数）
+ * - locate-number  数值反查：给数值 → 找指标（选项是指标名，必须真读材料才能答）
  * - locate-forward 正向定位：给问法 → 选所在段落/行列
  * - locate-reverse 反向定位：给位置 → 选对应的数据项
  *
- * 前两类是「找数」的主战场（真要读材料里的数字），后两类练"先搭地图"。
+ * ⚠️ 本模块刻意**不设**任何需要计算（加减/乘除）的题型——计算属于「列式训练」与
+ * 「资料速算」两条链的职责，混进来会稀释"找数"这一项单一技能的练习密度。
  */
 import type { QuestionDraft, Rng } from "../types";
 import type { MaterialEntry, MaterialIndicator } from "./types";
 import { pickEntry, shuffle, withMaterial } from "./helpers";
 import { MATERIALS } from "./data/materials";
 
-/** 带数值的指标（取数题 / 差值题的原子） */
+/** 带数值的指标（取数题 / 数值反查题的原子） */
 type NumericIndicator = MaterialIndicator & { value: number };
-
-/**
- * 总量/整体类指标：不参与差值题。
- * 与分项相减会得到"另一个分项"，答案易与选项撞车，语义也怪。
- */
-const TOTAL_WORDS = /总额|合计|总产量|总支出|总量|余额|全体|全国|一般/;
 
 function numericOf(entry: MaterialEntry): NumericIndicator[] {
   return entry.indicators.filter(
@@ -43,6 +38,12 @@ function show(value: number): string {
   return String(value);
 }
 
+/** 数值的展示形态（带单位；百分比不加空格） */
+function withUnit(value: number, unit?: string): string {
+  if (unit === "%") return `${value}%`;
+  return unit ? `${value} ${unit}` : String(value);
+}
+
 /** 同数量级的近似值（干扰项兜底，保证不出现离谱量级） */
 function perturb(value: number, factor: number): number {
   const raw = value * factor;
@@ -53,7 +54,7 @@ function perturb(value: number, factor: number): number {
 /**
  * 取数题的干扰项：**优先取同篇同单位的真实数值**——这正是真题干扰项的来源
  * （把材料里另一个指标的数塞进选项，如问"存款增加"却给"贷款增加"的数）。
- * 不足 3 个再跨篇同单位补，最后用同数量级近似值兜底。
+ * 不足 3 个再跨篇同单位补（按量级接近度排序），最后用同数量级近似值兜底。
  */
 function valueDistractors(entry: MaterialEntry, target: NumericIndicator): string[] {
   const picked: number[] = [];
@@ -85,7 +86,7 @@ function valueDistractors(entry: MaterialEntry, target: NumericIndicator): strin
   return picked.slice(0, 3).map(show);
 }
 
-/** 取数题：这个指标的数是多少 */
+/** 取数题：给指标 → 找数值 */
 function valueQuestion(r: Rng, entry: MaterialEntry): QuestionDraft | null {
   const pool = numericOf(entry);
   if (pool.length < 2) return null;
@@ -96,74 +97,47 @@ function valueQuestion(r: Rng, entry: MaterialEntry): QuestionDraft | null {
   const { options, answerIndex } = shuffle(show(target.value), distractors, r.random);
   const unit = target.unit ?? "";
   const year = yearOf(entry);
-  const tail = unit === "%" ? "%" : unit ? ` ${unit}` : "";
+  const lead = year ? `${year}，` : "";
+  // 题干里单位紧跟括号（「（ ）亿元」）；解析里数值与单位之间留空格（「460 亿元」）
+  const qTail = unit === "%" ? "" : unit;
+  const eTail = unit === "%" ? "%" : unit ? ` ${unit}` : "";
+  // 三种问法轮换，避免"题干千篇一律"带来的记忆效应
+  const stem = r.pick([
+    `${lead}${target.name}为（ ）${qTail}。`,
+    `${lead}材料中${target.name}是（ ）${qTail}。`,
+    `材料给出的${target.name}为（ ）${qTail}。`,
+  ]);
+
   return withMaterial(entry, {
     templateId: "locate-value",
     params: { materialId: entry.id, indicator: target.name, answer: show(target.value) },
-    stem:
-      unit === "%"
-        ? `${year}，${target.name}为（ ）。`
-        : `${year}，${target.name}为（ ）${unit}。`,
+    stem,
     options,
     answerIndex,
-    explanation: `「${target.name}」在${target.where}，数值为 ${show(target.value)}${tail}。其余选项取自材料中同类的其它数值，做题时务必先认准主体与单位，别被相邻指标带偏。`,
+    explanation: `「${target.name}」在${target.where}，数值为 ${show(target.value)}${eTail}。其余选项取自材料中同类的其它数值，做题时务必先认准主体与单位，别被相邻指标带偏。`,
   });
 }
 
-interface IndicatorPair {
-  hi: NumericIndicator;
-  lo: NumericIndicator;
-}
-
-/** 同层级、同单位、可相减的指标对（同段或同表，且都不是总量） */
-function pairsOf(entry: MaterialEntry): IndicatorPair[] {
-  const pool = numericOf(entry).filter(
-    (ind) =>
-      ind.unit &&
-      ind.unit !== "%" &&
-      ind.caliber !== "占比" &&
-      !TOTAL_WORDS.test(ind.name),
-  );
-  const pairs: IndicatorPair[] = [];
-  for (let i = 0; i < pool.length; i += 1) {
-    for (let j = i + 1; j < pool.length; j += 1) {
-      const a = pool[i];
-      const b = pool[j];
-      if (a.unit !== b.unit || a.value === b.value) continue;
-      const sameTable = a.where.includes("表格") && b.where.includes("表格");
-      if (a.where !== b.where && !sameTable) continue;
-      if (a.name.includes(b.name) || b.name.includes(a.name)) continue;
-      pairs.push(a.value > b.value ? { hi: a, lo: b } : { hi: b, lo: a });
-    }
-  }
-  return pairs;
-}
-
-/** 差值题：A 比 B 多多少（干扰项 = 两个主体各自的数值，专抓"取错主体"） */
-function diffQuestion(r: Rng, entry: MaterialEntry): QuestionDraft | null {
-  const pairs = pairsOf(entry);
-  if (!pairs.length) return null;
-  const { hi, lo } = r.pick(pairs);
-  const unit = hi.unit ?? "";
-  const diff = Math.round((hi.value - lo.value) * 100) / 100;
-
-  const distractors = [
-    ...new Set(
-      [hi.value, lo.value, Math.round((hi.value + lo.value) * 100) / 100]
-        .filter((value) => value !== diff)
-        .map(show),
-    ),
-  ];
+/** 数值反查题：给数值 → 找指标（比正向取数更难，必须真的读到那个数） */
+function numberQuestion(r: Rng, entry: MaterialEntry): QuestionDraft | null {
+  const pool = numericOf(entry);
+  if (!pool.length || entry.indicators.length < 4) return null;
+  const target = r.pick(pool);
+  const distractors = entry.indicators
+    .filter((ind) => ind.name !== target.name)
+    .map((ind) => ind.name)
+    .slice(0, 3);
   if (distractors.length < 3) return null;
 
-  const { options, answerIndex } = shuffle(show(diff), distractors.slice(0, 3), r.random);
+  const { options, answerIndex } = shuffle(target.name, distractors, r.random);
+  const shown = withUnit(target.value, target.unit);
   return withMaterial(entry, {
-    templateId: "locate-diff",
-    params: { materialId: entry.id, hi: hi.name, lo: lo.name, answer: show(diff) },
-    stem: `${yearOf(entry)}，${hi.name}比${lo.name}多（ ）${unit}。`,
+    templateId: "locate-number",
+    params: { materialId: entry.id, value: target.value, answer: target.name },
+    stem: `材料中「${shown}」这个数据，对应的是（ ）。`,
     options,
     answerIndex,
-    explanation: `${hi.name} ${show(hi.value)}${unit} 减 ${lo.name} ${show(lo.value)}${unit}，得 ${show(diff)}${unit}。找数题最常错在"取错主体"——本题选项里就摆着这两个指标各自的数值，先认准谁减谁再动手。`,
+    explanation: `${shown} 对应「${target.name}」，数据在${target.where}。反过来从数找指标，要先看量级和单位缩小范围，再回材料核对主体——只凭"数字眼熟"最容易认错。`,
   });
 }
 
@@ -222,13 +196,13 @@ export function generateDataLocating(r: Rng): QuestionDraft | null {
   const entry = pickEntry(r);
   if (entry.indicators.length < 2) return null;
 
-  // 分档：简单练"取数"，中等四种混合，困难主练"差值/反向"（都要真读材料）
+  // 分档：简单正向取数；中等正向/定位混合；困难以"从数回推"为主（更难）
   const models: LocateModel[] =
     r.level === 1
       ? [valueQuestion, forward]
       : r.level === 3
-        ? [diffQuestion, reverse, valueQuestion, forward]
-        : [valueQuestion, diffQuestion, forward, reverse];
+        ? [numberQuestion, reverse, valueQuestion, forward]
+        : [valueQuestion, forward, numberQuestion, reverse];
 
   // 以随机起点轮转，逐个尝试；第一个出得来的题型即为本题（保证确定性）
   const start = Math.floor(r.random() * models.length);
