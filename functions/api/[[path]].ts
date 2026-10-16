@@ -15,7 +15,7 @@ import {
   tracks as catalogTracks,
 } from "../../src/generator";
 import type { TopicId } from "../../src/generator";
-import type { MaterialSpec } from "../../src/generator/types";
+import type { GeneratedQuestion, MaterialSpec } from "../../src/generator/types";
 import {
   initialProgress,
   scheduleReview,
@@ -1100,17 +1100,37 @@ app.post("/quiz/questions", async (c) => {
   if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}:${difficulty}`))
     return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);
   const recent = await c.env.DB.prepare(
-    "SELECT fingerprint FROM generated_questions WHERE user_id=? AND topic_id=? AND difficulty=? ORDER BY created_at DESC LIMIT 50",
+    "SELECT fingerprint FROM generated_questions WHERE user_id=? AND topic_id=? AND difficulty=? AND expires_at > ? ORDER BY created_at DESC LIMIT 50",
   )
-    .bind(c.get("userId"), body.topicId, difficulty)
+    .bind(c.get("userId"), body.topicId, difficulty, iso())
     .all<{ fingerprint: string }>();
   const seed = crypto.randomUUID();
-  const generatedQuestion = generateQuestion({
-    topicId: body.topicId as TopicId,
-    difficulty,
-    excludedFingerprints: recent.results.map((row) => row.fingerprint),
-    randomSeed: seed,
-  });
+  const excluded = recent.results.map((row) => row.fingerprint);
+  // 题池可能小于去重池（例：「基期与增速」共 20 道题、去重上限 50 条），
+  // 此时若死守"全部排除"就永远生成不出题（503）。逐级放宽，
+  // 最后允许重复——宁可出一道做过的，也别让用户卡在"加载失败"。
+  let generatedQuestion: GeneratedQuestion | null = null;
+  for (const tier of [
+    excluded,
+    excluded.slice(0, Math.floor(excluded.length / 2)),
+    excluded.slice(0, 5),
+    [],
+  ]) {
+    try {
+      generatedQuestion = generateQuestion({
+        topicId: body.topicId as TopicId,
+        difficulty,
+        excludedFingerprints: tier,
+        randomSeed: seed,
+      });
+      break;
+    } catch {
+      // 该档无解，继续放宽
+    }
+  }
+  if (!generatedQuestion) {
+    return c.json(fail("GENERATION_FAILED", "暂时无法生成合法新题，请重试"), 503);
+  }
   const questionId = uuid("q");
   const generatedAt = iso();
   const expiresAt = iso(new Date(Date.now() + 7 * 86400000));
