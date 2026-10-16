@@ -72,7 +72,7 @@ export const MATERIALS: MaterialEntry[] = [
     id: "gk2024-xzzf-02",
     source: "改编自 2024 国考·行政执法·资料分析（12315 诉求）",
     topic: "12315 平台消费诉求受理",
-    kind: "mixed",
+    kind: "chart",
     calibrated: "2022 年·同比",
     material: {
       paragraphs: [
@@ -372,7 +372,7 @@ export const MATERIALS: MaterialEntry[] = [
     id: "gk2024-xzzf-03",
     source: "改编自 2024 国考·资料分析（粮食生产）",
     topic: "粮食生产情况",
-    kind: "mixed",
+    kind: "table",
     calibrated: "2023 年·同比",
     material: {
       paragraphs: [
@@ -438,7 +438,7 @@ export const MATERIALS: MaterialEntry[] = [
     id: "sk-gd2024-02",
     source: "改编自 2024 省考·资料分析（固定资产投资）",
     topic: "固定资产投资",
-    kind: "mixed",
+    kind: "table",
     calibrated: "2023 年·同比",
     material: {
       paragraphs: [

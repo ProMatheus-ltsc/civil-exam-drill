@@ -8,6 +8,19 @@ export function pickEntry(r: Rng): MaterialEntry {
   return r.pick(MATERIALS);
 }
 
+/**
+ * 按材料的**实际结构**推导呈现形式（唯一口径，不信任手写字段）：
+ * 只有文字→文字型；有表无图→表格型；有图无表→图表型；表图都有→文字图表综合型。
+ */
+export function kindFromMaterial(material: MaterialEntry["material"]): MaterialEntry["kind"] {
+  const hasTable = !!material.table;
+  const hasChart = !!material.chart;
+  if (hasTable && hasChart) return "mixed";
+  if (hasTable) return "table";
+  if (hasChart) return "chart";
+  return "text";
+}
+
 /** 材料呈现形式的中文标签 */
 export function kindLabel(kind: MaterialEntry["kind"]): string {
   switch (kind) {
@@ -18,16 +31,17 @@ export function kindLabel(kind: MaterialEntry["kind"]): string {
     case "chart":
       return "图表型";
     default:
-      return "文字+图表综合型";
+      return "文字图表综合型";
   }
 }
 
 const KIND_POOL: MaterialEntry["kind"][] = ["text", "table", "chart", "mixed"];
 
-/** 4 个「材料类型」选项（正确项 + 其余三个） */
-export function kindOptions(entry: MaterialEntry, random: () => number) {
-  const correct = kindLabel(entry.kind);
-  const others = KIND_POOL.filter((k) => k !== entry.kind).map(kindLabel);
+/** 4 个「材料类型」选项（正确项按结构推导 + 其余三个） */
+export function kindOptions(material: MaterialEntry["material"], random: () => number) {
+  const actual = kindFromMaterial(material);
+  const correct = kindLabel(actual);
+  const others = KIND_POOL.filter((k) => k !== actual).map(kindLabel);
   return shuffle(correct, others.slice(0, 3), random);
 }
 

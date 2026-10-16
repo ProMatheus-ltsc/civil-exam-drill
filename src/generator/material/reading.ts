@@ -3,7 +3,15 @@
  * 低难度：材料主题 / 呈现形式；中难度：指标清单 / 单位；高难度：时间口径。
  */
 import type { QuestionDraft, Rng } from "../types";
-import { pickEntry, kindOptions, unitOptions, caliberOptions, shuffle, withMaterial } from "./helpers";
+import {
+  pickEntry,
+  kindOptions,
+  kindFromMaterial,
+  unitOptions,
+  caliberOptions,
+  shuffle,
+  withMaterial,
+} from "./helpers";
 
 export function generateMaterialReading(r: Rng): QuestionDraft | null {
   const entry = pickEntry(r);
@@ -32,16 +40,24 @@ function topicQuestion(r: Rng, entry: ReturnType<typeof pickEntry>): QuestionDra
   });
 }
 
-/** 呈现形式 */
+/** 呈现形式（按材料结构判定，不依赖手写字段） */
 function kindQuestion(r: Rng, entry: ReturnType<typeof pickEntry>): QuestionDraft {
-  const { options, answerIndex } = kindOptions(entry, r.random);
+  const kind = kindFromMaterial(entry.material);
+  const { options, answerIndex } = kindOptions(entry.material, r.random);
+  const parts = [
+    `${entry.material.paragraphs.length} 段文字`,
+    entry.material.table ? "1 张表格" : "",
+    entry.material.chart ? "1 张图表" : "",
+  ]
+    .filter(Boolean)
+    .join("、");
   return withMaterial(entry, {
     templateId: "material-kind",
-    params: { materialId: entry.id, kind: entry.kind },
+    params: { materialId: entry.id, kind },
     stem: "该材料的数据呈现形式是？",
     options,
     answerIndex,
-    explanation: `材料由${entry.material.paragraphs.length}段文字${entry.material.table ? "、一张表格" : ""}${entry.material.chart ? "、一张图表" : ""}组成，属于${entry.kind === "mixed" ? "文字+图表综合型" : entry.kind === "text" ? "文字型" : entry.kind === "table" ? "表格型" : "图表型"}，先看形式再定位数据能显著提速。`,
+    explanation: `判形式只看结构：本材料含${parts}。规则——只有文字＝文字型，有表无图＝表格型，有图无表＝图表型，表、图都有＝文字图表综合型。先分形式，再决定用哪种定位方式。`,
   });
 }
 

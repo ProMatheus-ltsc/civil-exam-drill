@@ -1,6 +1,7 @@
 /** 「资料实战」材料库 schema 校验：保证每篇材料都能被三个生成器安全消费 */
 import { describe, expect, it } from "vitest";
 import { MATERIALS, materialById } from "../src/generator/material/data/materials";
+import { kindFromMaterial } from "../src/generator/material/helpers";
 
 describe("资料实战材料库", () => {
   it("id 唯一且可作为查询键", () => {
@@ -20,6 +21,9 @@ describe("资料实战材料库", () => {
     expect(entry.source.length).toBeGreaterThan(0);
     expect(entry.topic.length).toBeGreaterThan(0);
     expect(entry.calibrated.length).toBeGreaterThan(0);
+
+    // kind 必须与材料实际结构一致（否则「呈现形式」题会给出错误标答）
+    expect(entry.kind, `${entry.id} 的 kind 与材料结构不符`).toBe(kindFromMaterial(entry.material));
 
     // 指标（材料阅读 + 数据定位）
     expect(entry.indicators.length).toBeGreaterThanOrEqual(2);
