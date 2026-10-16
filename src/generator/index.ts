@@ -55,10 +55,10 @@ import {
   generateSeqSplit,
   generateSeqFactor,
 } from "./sequences/advanced";
-// 资料实战（真实材料）
+// 资料实战（真实材料 + 程序生成的列式题）
 import { generateMaterialReading } from "./material/reading";
 import { generateDataLocating } from "./material/locate";
-import { generateFormulaBase, generateFormulaRatio, generateFormulaAmount } from "./material/formula";
+import { FORMULA_MODELS } from "./material/formula";
 
 export type { TopicId } from "./catalog";
 export type { GeneratedQuestion, Difficulty, MaterialSpec } from "./types";
@@ -105,9 +105,7 @@ const generators: Record<TopicId, Generator> = {
   "seq-factor": generateSeqFactor,
   "material-reading": generateMaterialReading,
   "data-locating": generateDataLocating,
-  "formula-base": generateFormulaBase,
-  "formula-ratio": generateFormulaRatio,
-  "formula-amount": generateFormulaAmount,
+  ...FORMULA_MODELS,
 };
 
 export function isCatalogTopic(id: string): id is TopicId {

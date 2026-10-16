@@ -162,6 +162,18 @@ describe("question generator", () => {
         randomSeed: `coverage-${index}`,
       }),
     );
+    if (topic.id.startsWith("formula-")) {
+      // 列式关是「一个概念一种题型」：templateId 固定，但每题的主体、年份、数值都不同。
+      // 所以改查**题面**（材料 + 题干）多样性，确保不是翻来覆去同一道题。
+      const faces = generated.map(
+        (question) => `${question.material?.paragraphs.join("") ?? ""}|${question.stem}`,
+      );
+      expect(
+        new Set(faces).size,
+        `${topic.id} 的题面重复度过高`,
+      ).toBeGreaterThanOrEqual(20);
+      return;
+    }
     expect(
       new Set(generated.map((question) => question.templateId)).size,
     ).toBeGreaterThanOrEqual(2);
