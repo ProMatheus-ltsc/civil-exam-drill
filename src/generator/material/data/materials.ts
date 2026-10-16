@@ -90,7 +90,7 @@ export const MATERIALS: MaterialEntry[] = [
       { name: "诉求总量", where: "第一段", unit: "万件", ask: "求诉求总量的同比增速", caliber: "同比", value: 220.4 },
       { name: "投诉量", where: "第二段", unit: "万件", ask: "求投诉量的同比增速", caliber: "同比", value: 55.6 },
       { name: "举报量", where: "第二段", unit: "万件", ask: "求举报量的同比增速", caliber: "同比", value: 26.3 },
-      { name: "咨询量", where: "第二段", unit: "万件", ask: "求咨询量占诉求总量的比重", caliber: "占比", value: 138.5 },
+      { name: "咨询量", where: "第二段", unit: "万件", ask: "求咨询量占诉求总量的比重", caliber: "同比", value: 138.5 },
       { name: "各月接收诉求量", where: "柱状图", unit: "万件", ask: "求某月诉求量环比变化", caliber: "环比" },
     ],
     computables: [
@@ -205,7 +205,7 @@ export const MATERIALS: MaterialEntry[] = [
     indicators: [
       { name: "社会消费品零售总额", where: "第一段", unit: "亿元", ask: "求社会消费品零售总额的同比增速", caliber: "同比", value: 8260 },
       { name: "城镇消费品零售额", where: "第二段", unit: "亿元", ask: "求城镇消费品零售额的同比增速", caliber: "同比", value: 7100 },
-      { name: "乡村消费品零售额", where: "第二段", unit: "亿元", ask: "求乡村消费品零售额占总额的比重", caliber: "占比", value: 1160 },
+      { name: "乡村消费品零售额", where: "第二段", unit: "亿元", ask: "求乡村消费品零售额占总额的比重", caliber: "同比", value: 1160 },
       { name: "餐饮收入", where: "第三段", unit: "亿元", ask: "求餐饮收入的同比增量", caliber: "同比", value: 960 },
     ],
     computables: [
@@ -327,7 +327,7 @@ export const MATERIALS: MaterialEntry[] = [
       { name: "一般公共预算支出", where: "第一段", unit: "亿元", ask: "求一般公共预算支出的同比增速", caliber: "同比", value: 5860 },
       { name: "教育支出", where: "第二段", unit: "亿元", ask: "求教育支出的同比增量", caliber: "同比", value: 1080 },
       { name: "社会保障和就业支出", where: "第二段", unit: "亿元", ask: "求社会保障和就业支出的同比增速", caliber: "同比", value: 920 },
-      { name: "交通运输支出", where: "第二段", unit: "亿元", ask: "求交通运输支出占总支出的比重", caliber: "占比", value: 460 },
+      { name: "交通运输支出", where: "第二段", unit: "亿元", ask: "求交通运输支出占总支出的比重", caliber: "同比", value: 460 },
     ],
     computables: [
       {
@@ -392,7 +392,7 @@ export const MATERIALS: MaterialEntry[] = [
     indicators: [
       { name: "粮食总产量", where: "第一段", unit: "万吨", ask: "求粮食总产量的同比增速", caliber: "同比", value: 69541 },
       { name: "夏粮产量", where: "表格“夏粮”行", unit: "万吨", ask: "求夏粮产量的同比增量", caliber: "同比", value: 14613 },
-      { name: "早稻产量", where: "表格“早稻”行", unit: "万吨", ask: "求早稻产量占粮食总产量的比重", caliber: "占比", value: 2834 },
+      { name: "早稻产量", where: "表格“早稻”行", unit: "万吨", ask: "求早稻产量占粮食总产量的比重", caliber: "同比", value: 2834 },
       { name: "秋粮产量", where: "表格“秋粮”行", unit: "万吨", ask: "求秋粮产量的同比增速", caliber: "同比", value: 52094 },
     ],
     computables: [
@@ -459,7 +459,7 @@ export const MATERIALS: MaterialEntry[] = [
       { name: "固定资产投资增速", where: "第一段", unit: "%", ask: "求固定资产投资的同比增速", caliber: "同比", value: 5.4 },
       { name: "第一产业投资额", where: "表格“第一产业”行", unit: "亿元", ask: "求第一产业投资的同比增速", caliber: "同比", value: 120 },
       { name: "第二产业投资额", where: "表格“第二产业”行", unit: "亿元", ask: "求第二产业投资的同比增量", caliber: "同比", value: 2480 },
-      { name: "第三产业投资额", where: "表格“第三产业”行", unit: "亿元", ask: "求第三产业投资额占三次产业合计的比重", caliber: "占比", value: 5320 },
+      { name: "第三产业投资额", where: "表格“第三产业”行", unit: "亿元", ask: "求第三产业投资额占三次产业合计的比重", caliber: "同比", value: 5320 },
     ],
     computables: [
       {
@@ -526,7 +526,7 @@ export const MATERIALS: MaterialEntry[] = [
     indicators: [
       { name: "能源消费总量", where: "第一段", unit: "亿吨标准煤", ask: "求能源消费总量的同比增速", caliber: "同比", value: 57.2 },
       { name: "煤炭消费量", where: "表格“煤炭”行", unit: "亿吨标准煤", ask: "求煤炭消费量的同比增量", caliber: "同比", value: 31.6 },
-      { name: "石油消费量", where: "表格“石油”行", unit: "亿吨标准煤", ask: "求石油消费量占能源消费总量的比重", caliber: "占比", value: 9.6 },
+      { name: "石油消费量", where: "表格“石油”行", unit: "亿吨标准煤", ask: "求石油消费量占能源消费总量的比重", caliber: "同比", value: 9.6 },
       { name: "天然气消费量", where: "表格“天然气”行", unit: "亿吨标准煤", ask: "求天然气消费量的同比增速", caliber: "同比", value: 4.2 },
       { name: "非化石能源消费量", where: "表格“非化石能源”行", unit: "亿吨标准煤", ask: "求非化石能源消费量的同比增量", caliber: "同比", value: 11.8 },
     ],
@@ -587,7 +587,7 @@ export const MATERIALS: MaterialEntry[] = [
     indicators: [
       { name: "营业性货运量", where: "第一段", unit: "亿吨", ask: "求营业性货运量的同比增速", caliber: "同比", value: 557.1 },
       { name: "公路货运量", where: "表格“公路”行", unit: "亿吨", ask: "求公路货运量的同比增量", caliber: "同比", value: 403.4 },
-      { name: "铁路货运量", where: "表格“铁路”行", unit: "亿吨", ask: "求铁路货运量占营业性货运量的比重", caliber: "占比", value: 50.1 },
+      { name: "铁路货运量", where: "表格“铁路”行", unit: "亿吨", ask: "求铁路货运量占营业性货运量的比重", caliber: "同比", value: 50.1 },
       { name: "水路货运量", where: "表格“水路”行", unit: "亿吨", ask: "求水路货运量的同比增速", caliber: "同比", value: 93.7 },
       { name: "管道货运量", where: "表格“管道”行", unit: "亿吨", ask: "求管道货运量的同比增量", caliber: "同比", value: 9.9 },
     ],
@@ -645,7 +645,7 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "房地产开发投资", where: "第一段", unit: "亿元", ask: "求房地产开发投资的同比降幅", caliber: "同比", value: 4820 },
-      { name: "住宅投资", where: "第二段", unit: "亿元", ask: "求住宅投资占房地产开发投资的比重", caliber: "占比", value: 3560 },
+      { name: "住宅投资", where: "第二段", unit: "亿元", ask: "求住宅投资占房地产开发投资的比重", caliber: "同比", value: 3560 },
       { name: "办公楼投资", where: "第二段", unit: "亿元", ask: "求办公楼投资的同比减少量", caliber: "同比", value: 380 },
       { name: "商业营业用房投资", where: "第二段", unit: "亿元", ask: "求商业营业用房投资的同比降幅", caliber: "同比", value: 520 },
       { name: "住宅销售面积", where: "表格“住宅”行", unit: "万平方米", ask: "求住宅销售面积的同比降幅", caliber: "同比", value: 1180 },
@@ -745,8 +745,8 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "全国人口", where: "第一段", unit: "万人", ask: "求全国人口的同比变化量", caliber: "同比", value: 140967 },
-      { name: "城镇常住人口", where: "第二段", unit: "万人", ask: "求城镇常住人口占全国人口的比重", caliber: "占比", value: 93267 },
-      { name: "乡村常住人口", where: "第二段", unit: "万人", ask: "求乡村常住人口占全国人口的比重", caliber: "占比", value: 47700 },
+      { name: "城镇常住人口", where: "第二段", unit: "万人", ask: "求城镇常住人口占全国人口的比重", value: 93267 },
+      { name: "乡村常住人口", where: "第二段", unit: "万人", ask: "求乡村常住人口占全国人口的比重", value: 47700 },
       { name: "常住人口城镇化率", where: "第二段", unit: "%", ask: "求常住人口城镇化率比上年变化", caliber: "同比", value: 66.16 },
     ],
     computables: [
@@ -805,8 +805,8 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "卫生技术人员", where: "第一段", unit: "万人", ask: "求卫生技术人员的同比增速", caliber: "同比", value: 1246.8 },
-      { name: "执业（助理）医师", where: "表格“执业（助理）医师”行", unit: "万人", ask: "求执业医师占卫生技术人员的比重", caliber: "占比", value: 478.2 },
-      { name: "注册护士", where: "表格“注册护士”行", unit: "万人", ask: "求注册护士占卫生技术人员的比重", caliber: "占比", value: 563.4 },
+      { name: "执业（助理）医师", where: "表格“执业（助理）医师”行", unit: "万人", ask: "求执业医师占卫生技术人员的比重", caliber: "同比", value: 478.2 },
+      { name: "注册护士", where: "表格“注册护士”行", unit: "万人", ask: "求注册护士占卫生技术人员的比重", caliber: "同比", value: 563.4 },
       { name: "药师（士）", where: "表格“药师（士）”行", unit: "万人", ask: "求药师（士）的同比增量", caliber: "同比", value: 53.6 },
     ],
     computables: [
@@ -864,7 +864,7 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "空气质量优良天数", where: "第一段", unit: "天", ask: "求空气质量优良天数的同比变化量", caliber: "同比", value: 285 },
-      { name: "优良天数比例", where: "第一段", unit: "%", ask: "求优良天数比例", caliber: "占比", value: 78.1 },
+      { name: "优良天数比例", where: "第一段", unit: "%", ask: "求优良天数比例", caliber: "累计", value: 78.1 },
       { name: "PM2.5 平均浓度", where: "表格“PM2.5”行", unit: "微克/立方米", ask: "求 PM2.5 平均浓度", caliber: "同比", value: 32 },
       { name: "PM10 平均浓度", where: "表格“PM10”行", unit: "微克/立方米", ask: "求 PM10 平均浓度", caliber: "同比", value: 58 },
     ],
@@ -920,8 +920,8 @@ export const MATERIALS: MaterialEntry[] = [
     indicators: [
       { name: "国内旅游总人次", where: "第一段", unit: "亿人次", ask: "求国内旅游总人次的同比增速", caliber: "同比", value: 48.91 },
       { name: "国内旅游收入", where: "第一段", unit: "万亿元", ask: "求国内旅游收入的同比增速", caliber: "同比", value: 4.91 },
-      { name: "三季度旅游人次", where: "第二段", unit: "亿人次", ask: "求三季度旅游人次占全年的比重", caliber: "占比", value: 12.9 },
-      { name: "一季度旅游人次", where: "第二段", unit: "亿人次", ask: "求一季度旅游人次占全年的比重", caliber: "占比", value: 12.16 },
+      { name: "三季度旅游人次", where: "第二段", unit: "亿人次", ask: "求三季度旅游人次占全年的比重", value: 12.9 },
+      { name: "一季度旅游人次", where: "第二段", unit: "亿人次", ask: "求一季度旅游人次占全年的比重", value: 12.16 },
     ],
     computables: [
       {
@@ -978,7 +978,7 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "网上零售额", where: "第一段", unit: "亿元", ask: "求网上零售额的同比增速", caliber: "同比", value: 154264 },
-      { name: "实物商品网上零售额", where: "第一段", unit: "亿元", ask: "求实物商品网上零售额占网上零售额的比重", caliber: "占比", value: 130174 },
+      { name: "实物商品网上零售额", where: "第一段", unit: "亿元", ask: "求实物商品网上零售额占网上零售额的比重", caliber: "同比", value: 130174 },
       { name: "用类商品零售额", where: "表格“用类商品”行", unit: "亿元", ask: "求用类商品零售额的同比增量", caliber: "同比", value: 90374 },
       { name: "吃类商品零售额", where: "表格“吃类商品”行", unit: "亿元", ask: "求吃类商品零售额的同比增速", caliber: "同比", value: 18720 },
     ],
@@ -1037,9 +1037,9 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "R&D 经费投入", where: "第一段", unit: "亿元", ask: "求 R&D 经费投入的同比增速", caliber: "同比", value: 33357.1 },
-      { name: "基础研究经费", where: "表格“基础研究”行", unit: "亿元", ask: "求基础研究经费占 R&D 经费的比重", caliber: "占比", value: 2259.1 },
+      { name: "基础研究经费", where: "表格“基础研究”行", unit: "亿元", ask: "求基础研究经费占 R&D 经费的比重", caliber: "同比", value: 2259.1 },
       { name: "应用研究经费", where: "表格“应用研究”行", unit: "亿元", ask: "求应用研究经费的同比增量", caliber: "同比", value: 3661.5 },
-      { name: "试验发展经费", where: "表格“试验发展”行", unit: "亿元", ask: "求试验发展经费占 R&D 经费的比重", caliber: "占比", value: 27436.5 },
+      { name: "试验发展经费", where: "表格“试验发展”行", unit: "亿元", ask: "求试验发展经费占 R&D 经费的比重", caliber: "同比", value: 27436.5 },
     ],
     computables: [
       {
@@ -1155,8 +1155,8 @@ export const MATERIALS: MaterialEntry[] = [
     },
     indicators: [
       { name: "基本养老保险参保人数", where: "第一段", unit: "万人", ask: "求基本养老保险参保人数的同比增量", caliber: "同比", value: 106643 },
-      { name: "城镇职工基本养老保险参保人数", where: "第二段", unit: "万人", ask: "求城镇职工参保人数占基本养老保险参保人数的比重", caliber: "占比", value: 52121 },
-      { name: "城乡居民基本养老保险参保人数", where: "第二段", unit: "万人", ask: "求城乡居民参保人数占基本养老保险参保人数的比重", caliber: "占比", value: 54522 },
+      { name: "城镇职工基本养老保险参保人数", where: "第二段", unit: "万人", ask: "求城镇职工参保人数占基本养老保险参保人数的比重", value: 52121 },
+      { name: "城乡居民基本养老保险参保人数", where: "第二段", unit: "万人", ask: "求城乡居民参保人数占基本养老保险参保人数的比重", value: 54522 },
       { name: "基本医疗保险参保人数", where: "表格“基本医疗保险”行", unit: "万人", ask: "求基本医疗保险参保人数的同比增量", caliber: "同比", value: 133389 },
       { name: "失业保险参保人数", where: "表格“失业保险”行", unit: "万人", ask: "求失业保险参保人数的同比增速", caliber: "同比", value: 24173 },
     ],

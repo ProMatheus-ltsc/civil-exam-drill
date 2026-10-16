@@ -95,8 +95,38 @@ describe("资料实战材料库", () => {
     expect(new Set(values).size, `${entry.id} 存在重复的指标数值`).toBe(values.length);
   });
 
-  it("每篇材料的数值型指标 ≥3 个（取数题 / 数值反查题的基础）", () => {
+  const VALID_CALIBERS = new Set(["同比", "环比", "累计", "年均"]);
+
+  it("所有指标的时间口径都合法（不能是「占比」「差值」这类问法类型）", () => {
     for (const entry of MATERIALS) {
+      for (const ind of entry.indicators) {
+        if (!ind.caliber) continue;
+        expect(
+          VALID_CALIBERS.has(ind.caliber),
+          `${entry.id}「${ind.name}」的口径非法：${ind.caliber}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("口径题的标答必须是时间口径", () => {
+    let checked = 0;
+    for (let seed = 0; seed < 80; seed += 1) {
+      const question = generateQuestion({
+        topicId: "material-reading",
+        difficulty: "hard",
+        excludedFingerprints: [],
+        randomSeed: `caliber-${seed}`,
+      });
+      if (question.templateId !== "material-caliber") continue;
+      const answer = question.options[question.answerIndex];
+      expect(VALID_CALIBERS.has(answer), `口径题标答非法：${question.stem} → ${answer}`).toBe(true);
+      checked += 1;
+    }
+    expect(checked, "没有抽样到口径题").toBeGreaterThan(0);
+  });
+
+  it("每篇材料的数值型指标 ≥3 个（取数题 / 数值反查题的基础）", () => {    for (const entry of MATERIALS) {
       const nums = entry.indicators.filter((i) => typeof i.value === "number");
       expect(nums.length, `${entry.id} 数值型指标不足`).toBeGreaterThanOrEqual(3);
     }
