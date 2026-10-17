@@ -163,18 +163,25 @@ export function QuizPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        const data = await api<CatalogData>("/quiz/catalog");
-        if (!cancelled) setCatalog(data);
-        await loadProgress();
-      } catch {
-        /* 空态兜底 */
+      // 目录与进度互不依赖：必须并行发。跨境链路上一次往返就要 0.3–1s，
+      // 串行等于白白多等一轮；任一失败都不影响另一个（各自兜底）。
+      const [catalogResult, progressResult] = await Promise.allSettled([
+        api<CatalogData>("/quiz/catalog"),
+        api<ProgressItem[]>("/quiz/progress"),
+      ]);
+      if (cancelled) return;
+      if (catalogResult.status === "fulfilled") setCatalog(catalogResult.value);
+      if (progressResult.status === "fulfilled") {
+        const list = progressResult.value;
+        setProgress(
+          new Map(list.map((item) => [`${item.topicId}:${item.difficulty}`, item])),
+        );
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadProgress]);
+  }, []);
 
   const progressKey = (topicId: string, diff: Difficulty) => `${topicId}:${diff}`;
   const stageTopics = useMemo(

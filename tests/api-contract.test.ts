@@ -78,8 +78,18 @@ class FakeStatement {
     return null;
   }
   async all<T>() {
-    if (this.sql.includes("FROM generated_questions WHERE user_id=? AND run_id=?"))
+    // 出题接口的合并查询：一次取回「本局已生成的题」+「去重池」
+    if (
+      this.sql.includes("FROM generated_questions") &&
+      this.sql.includes("(run_id=? OR expires_at>?)")
+    )
       return { results: this.db.runQuestionRows as T[] };
+    // 开局解锁校验：只查前置模块 hard 局的聚合（不再跑全量聚合）
+    if (
+      this.sql.includes("a.run_id IS NOT NULL") &&
+      this.sql.includes("GROUP BY q.topic_id,a.run_id")
+    )
+      return { results: this.db.passRuns as T[] };
     // 通关判定用的「按局聚合」查询：喂 passRuns 即可模拟「某模块某难度局已通关」
     if (this.sql.includes("GROUP BY q.topic_id,q.difficulty,a.run_id"))
       return { results: this.db.passRuns as T[] };
@@ -506,12 +516,16 @@ describe("API contract guards", () => {
   it("同一序号的重复请求返回同一道题，而不是 RUN_STATE", async () => {
     // 回归：客户端的「预取下一题」与用户点「下一题」会同时发出请求，
     // 老实现只比 COUNT 与 index，撞车就 409「题目序号不连续」。
+    // 出题接口现在用一次合并查询（本局已生成的题 + 去重池），因此本局的题必须带上 runId。
+    const runId = "11111111-1111-4111-8111-111111111111";
     const db = new FakeDb();
     db.runQuestionRows = [
       {
         id: "q_existing",
         topicId: "addition",
         difficulty: "hard",
+        runId,
+        fingerprint: "fp_existing",
         stem: "已经生成过的题面",
         optionsJson: JSON.stringify(["A", "B", "C", "D"]),
         materialJson: null,
@@ -527,7 +541,7 @@ describe("API contract guards", () => {
         body: JSON.stringify({
           topicId: "addition",
           difficulty: "hard",
-          runId: crypto.randomUUID(),
+          runId,
           index: 0,
         }),
       },

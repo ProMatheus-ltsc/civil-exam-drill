@@ -69,9 +69,9 @@ interface KnowledgeIndex {
 let entriesCache: KnowledgeEntry[] | null = null;
 let entriesVersion = "";
 let searchCache: KnowledgeIndex["items"] | null = null;
-// 尽力节流：同一 token 的 last_seen_at 更新间隔 ≥60s（isolate 级近似，回收后重置不影响正确性）
-const lastSeenAt = new Map<string, number>();
-const LAST_SEEN_THROTTLE_MS = 60_000;
+// 说明：sessions.last_seen_at 以前在这里每请求更新一次，节流状态存在 isolate 内存里。
+// 但 isolate 随时回收，节流几乎不生效——于是**每个 API 请求都要付一次 D1 写**（写比读贵得多），
+// 而该字段全库只写不读（仅建表时有默认值），属纯开销。已移除，登录时由 DEFAULT CURRENT_TIMESTAMP 填充。
 
 async function fetchJson<T>(c: { env: Bindings }, path: string): Promise<T> {
   const asset = c.env.ASSETS;
@@ -183,6 +183,43 @@ async function loadQuizStatus(c: { env: Bindings; get(key: string): string }) {
     });
   }
   return { passStars, stats };
+}
+
+/**
+ * 只查「指定前置模块的高难度局是否通过」，不再全量聚合。
+ *
+ * 为什么需要它：开局时要做的只是**解锁校验**，而 loadQuizStatus 会把该用户全部历史
+ * （所有模块 × 所有难度 × 每一局）JOIN 聚合一遍。它随答题量线性变慢——已经 500+ 题、
+ * 几十局时，这一趟是「点进关卡卡在加载中」的主要服务端成本。
+ * 这里把范围收窄到 topic.unlock 那 1–2 个前置模块的 hard 局，GROUP BY 组数从「全部局数」
+ * 降到「1–3 组」，扫描量只与该模块相关。
+ */
+async function loadPrereqStars(
+  c: { env: Bindings; get(key: string): string },
+  prereqIds: readonly TopicId[],
+): Promise<Map<string, number>> {
+  const stars = new Map<string, number>();
+  if (prereqIds.length === 0) return stars;
+  const placeholders = prereqIds.map(() => "?").join(",");
+  const rows = await c.env.DB.prepare(
+    `SELECT q.topic_id AS topicId,COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs
+     FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+     WHERE a.user_id=? AND q.topic_id IN (${placeholders}) AND q.difficulty='hard' AND a.run_id IS NOT NULL
+     GROUP BY q.topic_id,a.run_id`,
+  )
+    .bind(c.get("userId"), ...prereqIds)
+    .all<{ topicId: string; total: number; correct: number; durationMs: number }>();
+  for (const row of rows.results) {
+    const value = runStars({
+      topicId: String(row.topicId),
+      difficulty: "hard",
+      total: Number(row.total),
+      correct: Number(row.correct),
+      durationMs: Number(row.durationMs),
+    });
+    if (value > (stars.get(String(row.topicId)) ?? 0)) stars.set(String(row.topicId), value);
+  }
+  return stars;
 }
 
 /** 模块是否解锁：前置模块的“高难度局（实战）”均通过 */
@@ -315,16 +352,6 @@ app.use("*", async (c, next) => {
   c.set("userId", session.userId);
   c.set("tokenHash", tokenHash);
   c.set("nickname", session.nickname);
-  const now = Date.now();
-  const lastSeen = lastSeenAt.get(tokenHash);
-  if (!lastSeen || now - lastSeen > LAST_SEEN_THROTTLE_MS) {
-    lastSeenAt.set(tokenHash, now);
-    await c.env.DB.prepare(
-      "UPDATE sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=?",
-    )
-      .bind(tokenHash)
-      .run();
-  }
   await next();
 });
 
@@ -942,8 +969,11 @@ app.get("/quiz/topics", (c) =>
 );
 
 /** 关卡目录（含每关按难度局的预算/前置/文档链接；进度由 /quiz/progress 单独提供） */
-app.get("/quiz/catalog", (c) =>
-  c.json(
+app.get("/quiz/catalog", (c) => {
+  // 目录是编译期静态数据（只随发版变化），允许浏览器短暂复用，避免每次进页面都跨境重取。
+  // private：内容依赖登录态，不能被共享缓存命中；5 分钟上限，发版后最多旧 5 分钟。
+  c.header("Cache-Control", "private, max-age=300, stale-while-revalidate=600");
+  return c.json(
     ok({
       runLength: RUN_LENGTH,
       passAccuracy: 0.8,
@@ -973,8 +1003,8 @@ app.get("/quiz/catalog", (c) =>
         };
       }),
     }),
-  ),
-);
+  );
+});
 
 /** 关卡进度：按（模块 × 难度局）返回 解锁/星级/统计；模块解锁取决于前置模块高难度局通关 */
 app.get("/quiz/progress", async (c) => {
@@ -1023,29 +1053,45 @@ app.post("/quiz/questions", async (c) => {
     );
   }
   const difficulty = body.difficulty;
+  // 一次查询同时供两处使用，省掉一次跨洋往返：
+  //   ① 本局已生成的题（同序号复用，防止预取与手动点击撞车）
+  //   ② 去重池（该模块该难度最近 50 条指纹）
+  // 条件 (run_id=? OR expires_at>?) 保证「本局的题」永不被条数上限挤掉；
+  // DESC 取回后由调用处反转成生成顺序（等价于原 ORDER BY created_at ASC）。
+  const fetched = await c.env.DB.prepare(
+    `SELECT id,topic_id AS topicId,difficulty,run_id AS runId,fingerprint,stem,
+            options_json AS optionsJson,material_json AS materialJson,
+            created_at AS generatedAt,expires_at AS expiresAt
+     FROM generated_questions
+     WHERE user_id=? AND topic_id=? AND difficulty=? AND (run_id=? OR expires_at>?)
+     ORDER BY created_at DESC
+     LIMIT 60`,
+  )
+    .bind(c.get("userId"), body.topicId, difficulty, body.runId ?? "", iso())
+    .all<{
+      id: string;
+      topicId: string;
+      difficulty: RunDifficulty;
+      runId: string | null;
+      fingerprint: string;
+      stem: string;
+      optionsJson: string;
+      materialJson: string | null;
+      generatedAt: string;
+      expiresAt: string;
+    }>();
+  const runQuestions = body.runId
+    ? fetched.results.filter((row) => row.runId === body.runId).reverse()
+    : [];
   if (body.runId !== undefined) {
     if (body.index === undefined)
       return c.json(fail("INVALID_PARAM", "闯关模式需要题目序号 index"), 400);
-    const runRows = await c.env.DB.prepare(
-      "SELECT id,topic_id AS topicId,difficulty,stem,options_json AS optionsJson,material_json AS materialJson,created_at AS generatedAt,expires_at AS expiresAt FROM generated_questions WHERE user_id=? AND run_id=? ORDER BY created_at ASC",
-    )
-      .bind(c.get("userId"), body.runId)
-      .all<{
-        id: string;
-        topicId: string;
-        difficulty: RunDifficulty;
-        stem: string;
-        optionsJson: string;
-        materialJson: string | null;
-        generatedAt: string;
-        expiresAt: string;
-      }>();
-    // 本局已生成的题按生成顺序排列，第 index 题就是 runRows[index]。
+    // 本局已生成的题按生成顺序排列，第 index 题就是 runQuestions[index]。
     // 同一序号重复请求要**返回同一道题**而不是报错：客户端的「预取下一题」与用户点
     // 「下一题」可能同时发出（网络一慢必然撞车），重试也会重复同一序号。
     // 以前这里只比较 COUNT 与 index，撞车就 409 RUN_STATE「题目序号不连续」；
     // 更麻烦的是客户端会把已生成的预取结果丢掉，序号从此永久错位，只能重开一局。
-    const existingQuestion = runRows.results[body.index];
+    const existingQuestion = runQuestions[body.index];
     if (existingQuestion) {
       return c.json(
         ok({
@@ -1066,14 +1112,14 @@ app.post("/quiz/questions", async (c) => {
         }),
       );
     }
-    if (runRows.results.length >= RUN_LENGTH)
+    if (runQuestions.length >= RUN_LENGTH)
       return c.json(fail("RUN_COMPLETE", "本局已完成，请重新开始"), 409);
-    if (runRows.results.length !== body.index)
+    if (runQuestions.length !== body.index)
       return c.json(
         fail("RUN_STATE", "题目序号不连续，请重新开始本局"),
         409,
       );
-    const firstQuestion = runRows.results[0];
+    const firstQuestion = runQuestions[0];
     if (firstQuestion) {
       // 本局已经在跑：只确认模块/难度没被换掉。解锁校验在开新局（index 0）时做过一次即可，
       // 这里不再重复跑用户级聚合查询——那是每道题一次的重查询，是答题卡顿的主要来源之一。
@@ -1086,10 +1132,9 @@ app.post("/quiz/questions", async (c) => {
           409,
         );
     } else {
-      const status = await loadQuizStatus(c);
-      const locked = topic.unlock.filter(
-        (prereq) => (status.passStars.get(diffKey(prereq, "hard")) ?? 0) < 1,
-      );
+      // 只校验前置模块的 hard 局，不再跑全量聚合（见 loadPrereqStars 注释）
+      const prereqStars = await loadPrereqStars(c, topic.unlock);
+      const locked = topic.unlock.filter((prereq) => (prereqStars.get(prereq) ?? 0) < 1);
       if (locked.length > 0)
         return c.json(
           fail("TOPIC_LOCKED", `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`),
@@ -1099,13 +1144,13 @@ app.post("/quiz/questions", async (c) => {
   }
   if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}:${difficulty}`))
     return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);
-  const recent = await c.env.DB.prepare(
-    "SELECT fingerprint FROM generated_questions WHERE user_id=? AND topic_id=? AND difficulty=? AND expires_at > ? ORDER BY created_at DESC LIMIT 50",
-  )
-    .bind(c.get("userId"), body.topicId, difficulty, iso())
-    .all<{ fingerprint: string }>();
   const seed = crypto.randomUUID();
-  const excluded = recent.results.map((row) => row.fingerprint);
+  // 去重池直接复用上面那次查询（按时间倒序，取未过期的前 50 条）
+  const nowIso = iso();
+  const excluded = fetched.results
+    .filter((row) => row.expiresAt > nowIso)
+    .slice(0, 50)
+    .map((row) => row.fingerprint);
   // 题池可能小于去重池（例：「基期与增速」共 20 道题、去重上限 50 条），
   // 此时若死守"全部排除"就永远生成不出题（503）。逐级放宽，
   // 最后允许重复——宁可出一道做过的，也别让用户卡在"加载失败"。
