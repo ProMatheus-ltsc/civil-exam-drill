@@ -465,13 +465,26 @@ export function generateMultiply(r: Rng): QuestionDraft {
       d === 0
         ? `${a}² 即 ${a}×${a}，直接相乘得 ${fmt(answer)}。`
         : `${a}² 用凑整十展开：(${near}${d > 0 ? "+" : ""}${d})²=${fmt(near)}²${d > 0 ? "+" : "−"}2×${Math.abs(near)}×${Math.abs(d)}+${Math.abs(d)}²=${fmt(near * near)}${d > 0 ? "+" : "−"}${fmt(2 * Math.abs(near) * Math.abs(d))}+${Math.abs(d) * Math.abs(d)}=${fmt(answer)}。`;
-    const set = estimateOptions(answer, 0.06, random, 0);
+    // 平方是**精算题**，选项必须精确到个位：曾经误用 estimateOptions（估算选项），
+    // 它会把答案对齐到 10^(位数-1) 的整数倍——35²=1225 被抹成 1200，
+    // 用户算出 1225 反而找不到选项。改为按「经典错法」构造干扰项。
+    // 三项错法的末位都与 a² 相同（因为差值都是 2·near·d 的倍数，near 是 10 的倍数），
+    // 既保留尾数法防秒杀，又对应真实手算错误：
+    //   漏掉交叉项 / 交叉项符号反 / 交叉项算成两倍
+    const cross = 2 * near * d;
+    const wrongMissingCross = near * near + d * d;
+    const wrongSignFlip = near * near - cross + d * d;
+    const wrongDoubleCross = near * near + 2 * cross + d * d;
+    const set =
+      d === 0
+        ? tailLockedOptions(answer, random)
+        : options(answer, [wrongMissingCross, wrongSignFlip, wrongDoubleCross], "", random, 0);
     return {
       templateId: "multiply-square-v3",
       params: { a, b: a, answer },
       stem: `不使用计算器，计算 ${a}²。`,
       ...set,
-      explanation: `【最优解】${method}${d === 0 ? "" : ` 关键是把 ${a} 折到整十 ${near}，用「整十平方 ± 补数项」一步出结果。`} 选项均落在平方值附近（差距约 6%），漏掉补数项 ${Math.abs(d) * 2 * Math.abs(near)} 就会选到相邻的干扰项。`,
+      explanation: `【最优解】${method}${d === 0 ? "" : ` 关键是把 ${a} 折到整十 ${near}，用「整十平方 ± 补数项」一步出结果。`}${d === 0 ? "" : ` 干扰项里 ${fmt(wrongMissingCross)} 是漏掉交叉项、${fmt(wrongSignFlip)} 是符号搞反、${fmt(wrongDoubleCross)} 是把交叉项算成两倍——这三个正是手算平方最常见的错。`}`,
     };
   }
 
