@@ -66,15 +66,48 @@ const COUNTERS: [string, string, number, number][] = [
 
 /* ────────────────────────── 数值工具 ────────────────────────── */
 
-/** 基期量（10 的倍数，便于心算核对） */
-const baseAmount = (r: Rng) => r.integer(120, 960) * 10;
-/** 增长率（一位小数，1.5% ～ 25.5%） */
-const rateOf = (r: Rng) => round1(r.integer(15, 255) / 10);
+/** 基期量：按难度分档（位数越长，越难在脑子里估） */
+const baseAmount = (r: Rng) =>
+  r.level === 1
+    ? r.integer(120, 300) * 10
+    : r.level === 2
+      ? r.integer(120, 600) * 10
+      : r.integer(120, 960) * 10;
+
+/** 出现「下降」的概率：难度越高越常见（真实材料里负增长并不少） */
+function declineChance(r: Rng): number {
+  return r.level === 1 ? 0.15 : r.level === 2 ? 0.3 : 0.45;
+}
+
+/**
+ * 增长率（**带符号**，负号表示下降）。这是三档梯度的主要来源：
+ *   easy   整数百分比（5%–30%）、基数小 → 可纯心算
+ *   medium 一位小数（5.5%–20.5%）       → 需笔算一步
+ *   hard   一位小数、跨度更大（2.3%–35.7%）→ 需估中带算
+ */
+function rateOf(r: Rng): number {
+  const magnitude =
+    r.level === 1
+      ? r.integer(5, 30)
+      : r.level === 2
+        ? round1(r.integer(55, 205) / 10)
+        : round1(r.integer(23, 357) / 10);
+  return r.random() < declineChance(r) ? -magnitude : magnitude;
+}
+
+/** 恒正的增长率：供「两个增速复合」的公式使用（间隔/混合/平均数/差值等） */
+function ratePositive(r: Rng): number {
+  return r.level === 1
+    ? r.integer(5, 30)
+    : r.level === 2
+      ? round1(r.integer(55, 205) / 10)
+      : round1(r.integer(23, 357) / 10);
+}
 
 /** 两个**互不相同**的增长率（相同会让干扰项与正确项撞车） */
 function twoRates(r: Rng): [number, number] {
-  const a = rateOf(r);
-  let b = rateOf(r);
+  const a = ratePositive(r);
+  let b = ratePositive(r);
   if (b === a) b = round1(a + 2.5);
   return [a, b];
 }
@@ -91,6 +124,19 @@ function currentOf(base: number, rate: number): number {
 }
 
 const pct = (n: number) => `${n}%`;
+
+/** 增长率的**幅度**（不带符号）：题干写"下降 5.5%"用 */
+const pctAbs = (n: number) => `${Math.abs(round1(n))}%`;
+
+/** 题干用词：增长 / 下降 */
+const trend = (n: number) => (n >= 0 ? "增长" : "下降");
+
+/**
+ * 把 1+r 写成可直接抄进算式的形式（**带括号**，否则 `÷1+5%` 会被读成 `(x÷1)+5%`）：
+ *   增长 → `(1+5.5%)`；下降 → `(1−5.5%)`
+ * 这样同一个模板在两种场景下都成立（求基期除以它、求增量乘它）。
+ */
+const factor = (n: number) => `(1${n >= 0 ? "+" : "−"}${pctAbs(n)})`;
 
 /* ────────────────────────── 组装 ────────────────────────── */
 
@@ -132,7 +178,7 @@ function genGrowthRate(r: Rng): QuestionDraft {
     `材料中，求 ${y + 1} 年该地区${metric}的同比增速，下列算式正确的是？`,
     `(${current}−${base})÷${base}`,
     [`(${current}−${base})÷${current}`, `${current}÷${base}`, `(${base}−${current})÷${base}`],
-    `增长率＝(现期−基期)÷基期，分母永远是**基期**（${base}）。用现期作分母会系统性偏小；写成"现期÷基期"则只是倍数，还差一个减 1。`,
+    `增长率＝(现期−基期)÷基期，分母永远是**基期**（${base}）。用现期作分母会把结果压向 0；写成"现期÷基期"只是倍数，还差一个减 1。${rate < 0 ? `本题是**下降**，结果应为负数（${rate}%）；若题干问"降幅"，答绝对值。` : ""}`,
   );
 }
 
@@ -147,11 +193,15 @@ function genGrowthAmount(r: Rng): QuestionDraft {
   return buildFormula(
     r,
     "formula-growth-amount",
-    `${region} ${y} 年${metric}为 ${current} ${unit}，比上年增长 ${pct(rate)}。`,
-    `材料中，求 ${y} 年该地区${metric}的同比增量，下列算式正确的是？`,
-    `${current}×${pct(rate)}÷(1+${pct(rate)})`,
-    [`${current}×${pct(rate)}`, `${current}÷(1+${pct(rate)})`, `${current}×${pct(rate)}×(1+${pct(rate)})`],
-    `增长量＝现期×增长率÷(1+增长率)。**绝不能用「现期×增长率」**——增速是相对基期算的，拿现期去乘会把基数放大一档，结果系统性偏大。`,
+    `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${trend(rate)} ${pctAbs(rate)}。`,
+    `材料中，求 ${y} 年该地区${metric}的同比${rate >= 0 ? "增量" : "减少量"}，下列算式正确的是？`,
+    `${current}×${pctAbs(rate)}÷${factor(rate)}`,
+    [
+      `${current}×${pctAbs(rate)}`,
+      `${current}÷${factor(rate)}`,
+      `${current}×${pctAbs(rate)}×${factor(rate)}`,
+    ],
+    `${rate >= 0 ? "增长量" : "减少量"}＝现期×${rate >= 0 ? "增长率" : "降幅"}÷${factor(rate)}。**绝不能用「现期×${rate >= 0 ? "增长率" : "降幅"}」**——那个比率是相对基期算的，拿现期直接乘会把基数放大一档。${rate < 0 ? "注意：下降时分母是 (1−降幅)，不是 (1+降幅)。" : ""}`,
   );
 }
 
@@ -166,11 +216,15 @@ function genBaseAmount(r: Rng): QuestionDraft {
   return buildFormula(
     r,
     "formula-base-amount",
-    `${region} ${y} 年${metric}为 ${current} ${unit}，比上年增长 ${pct(rate)}。`,
+    `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${trend(rate)} ${pctAbs(rate)}。`,
     `材料中，求 ${y - 1} 年该地区${metric}，下列算式正确的是？`,
-    `${current}÷(1+${pct(rate)})`,
-    [`${current}×(1+${pct(rate)})`, `${current}÷(1−${pct(rate)})`, `${current}×${pct(rate)}`],
-    `求过去用除：基期量＝现期÷(1+增长率)。写成"×(1+r)"是把方向搞反了（那是求未来）；写成"÷(1−r)"则把增速的符号弄反了。`,
+    `${current}÷${factor(rate)}`,
+    [
+      `${current}×${factor(rate)}`,
+      `${current}÷${factor(-rate)}`,
+      `${current}×${pctAbs(rate)}`,
+    ],
+    `求过去用除：基期量＝现期÷${factor(rate)}。写成"×"是把方向搞反了（那是求未来）；写成"÷${factor(-rate)}"则把${rate >= 0 ? "增长" : "下降"}的符号弄反了。`,
   );
 }
 
@@ -189,7 +243,7 @@ function genMultiples(r: Rng): QuestionDraft {
     `材料中，求 ${y} 年该地区${metric}是 ${y - 1} 年的多少倍，下列算式正确的是？`,
     `${current}÷${base}`,
     [`${base}÷${current}`, `(${current}−${base})÷${base}`, `(${current}−${base})÷${current}`],
-    `"是几倍"＝现期÷基期，直接相除即可。注意区分：问"增长了几倍"才是 (现期−基期)÷基期——那个选项是经典干扰项。`,
+    `"是几倍"＝现期÷基期，直接相除即可。注意区分：问"增长了几倍"才是 (现期−基期)÷基期——那个选项是经典干扰项。${rate < 0 ? "本题现期低于基期，倍数小于 1，属正常（问的是倍数不是增速）。" : ""}`,
   );
 }
 
@@ -206,11 +260,15 @@ function genBaseDifference(r: Rng): QuestionDraft {
   return buildFormula(
     r,
     "formula-base-difference",
-    `甲市 ${y} 年${metric}为 ${ca} ${unit}，比上年增长 ${pct(ra)}；乙市为 ${cb} ${unit}，比上年增长 ${pct(rb)}。`,
+    `甲市 ${y} 年${metric}为 ${ca} ${unit}，比上年${trend(ra)} ${pctAbs(ra)}；乙市为 ${cb} ${unit}，比上年${trend(rb)} ${pctAbs(rb)}。`,
     `材料中，求 ${y - 1} 年两市${metric}之差，下列算式正确的是？`,
-    `${ca}÷(1+${pct(ra)})−${cb}÷(1+${pct(rb)})`,
-    [`${ca}−${cb}`, `${ca}÷(1+${pct(ra)})+${cb}÷(1+${pct(rb)})`, `(${ca}−${cb})÷(1+${pct(ra)})`],
-    `基期差＝各自先还原到基期再相减：A÷(1+r₁)−B÷(1+r₂)。直接用现期相减（${ca}−${cb}）是最典型的错法——两个对象的增速不同，现期之差≠基期之差。`,
+    `${ca}÷${factor(ra)}−${cb}÷${factor(rb)}`,
+    [
+      `${ca}−${cb}`,
+      `${ca}÷${factor(ra)}+${cb}÷${factor(rb)}`,
+      `(${ca}−${cb})÷${factor(ra)}`,
+    ],
+    `基期差＝各自先还原到基期再相减：A÷${factor(ra)}−B÷${factor(rb)}。直接用现期相减（${ca}−${cb}）是最典型的错法——两个对象的增速不同，现期之差≠基期之差。${ra < 0 || rb < 0 ? "注意本题有下降项，还原时用 (1−降幅)。" : ""}`,
   );
 }
 
@@ -428,11 +486,11 @@ function genDiffRate(r: Rng): QuestionDraft {
   const y = yearOf(r);
   const [part, whole, unit] = r.pick(PART_WHOLE);
   const wb = baseAmount(r) * 4;
-  const R = rateOf(r);
+  const R = ratePositive(r);
   const wc = currentOf(wb, R);
   const p = r.integer(20, 60);
   const ab = Math.round((wb * p) / 100);
-  const rr = rateOf(r);
+  const rr = ratePositive(r);
   const ac = currentOf(ab, rr);
   return buildFormula(
     r,
