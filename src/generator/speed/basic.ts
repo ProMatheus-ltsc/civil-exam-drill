@@ -449,13 +449,15 @@ function factorPair(b: number): [number, number] | null {
  */
 export function generateMultiply(r: Rng): QuestionDraft {
   const { level, integer, pick, random } = r;
-  // 三种形态按固定比例抽取，三档通用：
-  //   估算（有效数字乘法，主体，~65%）
-  //   平方（凑整十展开，对应 (1+r)²/几何面积，~20%）
+  // 四种形态按固定比例抽取，三档通用：
+  //   估算（有效数字乘法，主体，~37%）
+  //   百分数（多位数 × x.x%，~30%）——资料分析最高频的动作
   //   精算（选项差距小、锁尾位，少数派场景，~15%）
+  //   平方（凑整十展开，对应 (1+r)²/几何面积，~18%）
   const roll = random();
   const wantSquare = roll > 0.82;
   const wantExact = roll > 0.67 && roll <= 0.82;
+  const wantPercent = roll >= 0.37 && roll < 0.67;
   if (wantSquare) {
     const a = level === 1 ? integer(12, 39) : level === 2 ? integer(41, 89) : integer(61, 99);
     const answer = a * a;
@@ -509,6 +511,39 @@ export function generateMultiply(r: Rng): QuestionDraft {
       stem: `不使用计算器，计算 ${a}×${b}（结果精确到个位）。`,
       ...set,
       explanation: `【精确计算】${method}。 本题选项锁定尾位、差距很小，估算救不了，只能算全（资料分析里这类题只占少数）：先看 ${b} 能不能拆成两个一位数——${factors ? "能拆，降维最省两次一位数乘法" : `${b} 拆不开（或拆分不划算），改用凑整十的分配律`}。${tailTip}`,
+    };
+  }
+
+  // 百分数形态（~30%）：多位数 × x.x%
+  // 资料分析里乘法几乎都是这个形态——「现期 × 增长率」「整体 × 比重」。
+  // 它比纯数字乘法多一层「% 转小数」，也是最容易把小数点搞错的地方。
+  if (wantPercent) {
+    const base =
+      level === 1
+        ? integer(40, 98) * 10
+        : level === 2
+          ? integer(120, 980) * 10
+          : integer(1200, 9800) * 10;
+    const rate =
+      level === 1
+        ? integer(10, 40)
+        : Math.round(integer(15, level === 2 ? 255 : 355)) / 10;
+    const answer = Math.round((base * rate) / 100);
+    const set = estimateOptions(answer, 0.06, random, 0);
+    // 演示「取两位有效数字」：12 × 57 = 684，再按量级定小数点
+    const sigBase = Number(String(base).slice(0, 2));
+    const sigRate = Number(String(rate).replace(".", "").slice(0, 2));
+    // 小数必须收敛到 4 位：直接写 rate/100 会在解析里暴露 8.2% = 0.08199999999999999
+    const rateDecimal = Number((rate / 100).toFixed(4));
+    const zeros = String(base).length - 2;
+    const roughBase = Math.round(base / 10 ** zeros) * 10 ** zeros;
+    const baseText = roughBase === base ? `${base}` : `${base}≈${roughBase}`;
+    return {
+      templateId: "multiply-percent-v1",
+      params: { base, rate, answer },
+      stem: `不使用计算器估算 ${base}×${rate}%，下列各选项中最接近实际结果的是？`,
+      ...set,
+      explanation: `【最优解】先把 ${rate}% 转成小数（${rate}% = ${rateDecimal}），再取两位有效数字：${sigBase}×${sigRate}=${sigBase * sigRate}。定小数点：${baseText}，${roughBase}×${rateDecimal}≈${answer}。**最常见的错**是忘了「% 等于除以 100」，把结果直接放大 100 倍——看到百分号，先在心里把小数点往前挪两位。`,
     };
   }
 

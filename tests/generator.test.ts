@@ -223,8 +223,15 @@ describe("question generator", () => {
    * - 平方题：凑整十展开，选项互异即可。
    * 同时统计三档的题型分布，确保「精算只是少数派、估算才是主线」。
    */
-  it("multiply 三档均为混合出题：估算为主、精算为辅、选项刻度可分辨", () => {
-    const count = { estimate: 0, exact: 0, square: 0 };
+  it("multiply 三档均为混合出题：估算与百分数为主、精算与平方占少数", () => {
+    const count = { estimate: 0, percent: 0, exact: 0, square: 0 };
+    const assertSpread = (nums: number[]) => {
+      const sorted = [...nums].sort((x, y) => x - y);
+      for (let index = 1; index < sorted.length; index += 1) {
+        const gap = (sorted[index] - sorted[index - 1]) / sorted[index];
+        expect(gap).toBeGreaterThanOrEqual(0.055);
+      }
+    };
     for (let seed = 0; seed < 80; seed += 1) {
       for (const difficulty of difficulties) {
         const question = generateQuestion({
@@ -244,14 +251,29 @@ describe("question generator", () => {
           const units = question.options.map((option) => option.slice(-1));
           expect(new Set(units).size).toBe(1);
           count.exact += 1;
+        } else if (question.templateId.startsWith("multiply-percent")) {
+          // 百分数题：标答必须接近 base×rate/100（估算对齐到刻度，容差 9%）
+          const params = question.params as { base: number; rate: number };
+          expect(params.rate).toBeGreaterThan(0);
+          expect(params.rate).toBeLessThan(50);
+          const expected = (params.base * params.rate) / 100;
+          const chosen = Number(question.options[question.answerIndex]);
+          expect(
+            Math.abs(chosen - expected) / expected,
+            `百分数题标答偏离过大：${question.stem} → ${chosen} vs ${expected}`,
+          ).toBeLessThan(0.09);
+          expect(question.stem).toContain("%");
+          expect(question.stem).toContain("最接近");
+          // 语义守卫：百分数乘法只能表达「整体×占比」，不能问「同比增量」——
+          // 后者是现期×增长率的经典错法（正确增长量要 ÷(1+r)）。
+          expect(question.stem).not.toContain("增量");
+          expect(question.explanation).not.toMatch(/0\.\d{6,}/);
+          assertSpread(nums);
+          count.percent += 1;
         } else {
           expect(question.templateId.startsWith("multiply-estimate")).toBe(true);
           // 估算题：相邻刻度差距 ≥5.5%（生成器保证 ≥6%，这里留出取整余量），题干点明「最接近」
-          const sorted = [...nums].sort((x, y) => x - y);
-          for (let index = 1; index < sorted.length; index += 1) {
-            const gap = (sorted[index] - sorted[index - 1]) / sorted[index];
-            expect(gap).toBeGreaterThanOrEqual(0.055);
-          }
+          assertSpread(nums);
           expect(question.stem).toContain("最接近");
           count.estimate += 1;
         }
@@ -260,6 +282,12 @@ describe("question generator", () => {
         expect(lastDigits.size).toBe(1);
       }
     }
+    // 四种形态都必须真实出现，且百分数不能是点缀
+    expect(count.estimate, "估算题缺失").toBeGreaterThan(0);
+    expect(count.percent, "百分数题缺失").toBeGreaterThan(0);
+    expect(count.exact, "精算题缺失").toBeGreaterThan(0);
+    expect(count.square, "平方题缺失").toBeGreaterThan(0);
+    expect(count.percent / (count.estimate + count.percent + count.exact + count.square)).toBeGreaterThan(0.2);
     // 估算题：被标记的答案必须确实是「离精确乘积最近」的那个选项
     for (let seed = 0; seed < 200; seed += 1) {
       const question = generateQuestion({

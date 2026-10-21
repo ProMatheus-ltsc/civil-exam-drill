@@ -133,6 +133,30 @@ function multiplyScenario(templateId: string, params: Record<string, number | st
       ),
     };
   }
+  // 百分数乘法：用「整体 × 占比」的场景，语义与算式严格对齐。
+  // 注意不能用「现期 × 增长率」求增长量——那是经典错法（正确增长量要 ÷(1+r)），
+  // 会让题干与解析自相矛盾（知识库 growth-amount 专文专门警告过这一点）。
+  if (templateId.startsWith("multiply-percent")) {
+    const base = Number(params.base);
+    const rate = Number(params.rate);
+    if (!Number.isFinite(base) || !Number.isFinite(rate)) return null;
+    return {
+      stem: `某地区全年完成投资 ${base} 亿元，其中技术改造投资占 ${rate}%。技改投资最接近下列哪个数值？`,
+      material: buildMaterial(
+        "投资构成（单位：亿元）",
+        [
+          ["全年投资总额", String(base)],
+          ["技改投资占比(%)", String(rate)],
+        ],
+        "亿元",
+        [
+          { label: "投资总额", value: base },
+          { label: "技改占比", value: rate },
+        ],
+        `某地区全年完成投资 ${base} 亿元，其中技术改造投资占 ${rate}%。`,
+      ),
+    };
+  }
   const a = Number(params.a);
   const b = Number(params.b);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
