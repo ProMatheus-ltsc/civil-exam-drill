@@ -82,6 +82,7 @@ const SESSION_COOKIE = 'civil_exam_session'
 const authState = {
   users: new Map(), // email -> { id, nickname, email, password }
   sessions: new Map(), // token -> email
+  passwordResets: new Map(), // token -> { email, expiresAt }
 }
 const DEMO_ACCOUNT = { email: 'demo@civil.local', password: 'civil1234', nickname: '开发用户' }
 authState.users.set(DEMO_ACCOUNT.email, {
@@ -261,6 +262,72 @@ const server = http.createServer(async (req, res) => {
     if (token) authState.sessions.delete(token)
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`)
     sendJson(res, 200, { success: true, data: { loggedOut: true }, error: null })
+    return
+  }
+
+  if (pathname === '/api/auth/password/forgot' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req))
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const record = authState.users.get(email)
+    let devResetUrl
+    if (record) {
+      const token = crypto.randomBytes(32).toString('base64url')
+      authState.passwordResets.set(token, {
+        email,
+        expiresAt: Date.now() + 30 * 60_000,
+      })
+      devResetUrl = `http://localhost:5173/#/reset?token=${encodeURIComponent(token)}`
+      console.log(`[dev-api] 重置密码链接（${email}）：${devResetUrl}`)
+    }
+    sendJson(res, 200, {
+      success: true,
+      data: { sent: true, ...(devResetUrl ? { devResetUrl } : {}) },
+      error: null,
+    })
+    return
+  }
+
+  if (pathname === '/api/auth/password/reset' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req))
+    const token = String(body.token ?? '')
+    const password = String(body.password ?? '')
+    const reset = authState.passwordResets.get(token)
+    if (!reset || reset.expiresAt < Date.now()) {
+      sendJson(res, 400, {
+        success: false,
+        data: null,
+        error: { code: 'INVALID_RESET_TOKEN', message: '重置链接已失效，请重新申请' },
+      })
+      return
+    }
+    if (password.length < 8) {
+      sendJson(res, 400, {
+        success: false,
+        data: null,
+        error: { code: 'INVALID_PARAM', message: '密码至少 8 位' },
+      })
+      return
+    }
+    const record = authState.users.get(reset.email)
+    if (!record) {
+      sendJson(res, 400, {
+        success: false,
+        data: null,
+        error: { code: 'INVALID_RESET_TOKEN', message: '重置链接已失效，请重新申请' },
+      })
+      return
+    }
+    record.password = password
+    authState.passwordResets.delete(token)
+    for (const [sessionToken, email] of authState.sessions) {
+      if (email === record.email) authState.sessions.delete(sessionToken)
+    }
+    startMockSession(res, record.email)
+    sendJson(res, 200, {
+      success: true,
+      data: { user: publicUser(record) },
+      error: null,
+    })
     return
   }
 
@@ -665,6 +732,7 @@ const server = http.createServer(async (req, res) => {
   if (profileSummaryMatch) {
     const starsByKey = passedRuns()
     const answeredRuns = [...quizState.runs.values()].filter((run) => run.answered.length > 0)
+    const days = Math.min(90, Math.max(7, Number(query.days) || 30))
     const dayKey = (time) => new Date(time + 8 * 3600_000).toISOString().slice(0, 10)
     const today = dayKey(Date.now())
     const dayMap = new Map()
@@ -684,23 +752,19 @@ const server = http.createServer(async (req, res) => {
     }
     const itemsMap = new Map()
     const diffMap = new Map(DIFFS.map((difficulty) => [difficulty, { difficulty, total: 0, correct: 0, msSum: 0 }]))
-    const weekday = Array.from({ length: 7 }, (_, index) => ({ weekday: index, quizCount: 0, correct: 0 }))
     let total = 0
     let correctTotal = 0
     let msSum = 0
     let openMistakes = 0
 
     answeredRuns.forEach((run, index) => {
-      const date = new Date(Date.now() + 8 * 3600_000 - (index % 30) * 86400_000)
+      const date = new Date(Date.now() + 8 * 3600_000 - (index % 90) * 86400_000)
         .toISOString()
         .slice(0, 10)
       const runTotal = run.answered.length
       const runCorrect = run.answered.filter((answer) => answer.correct).length
       const runMs = run.answered.reduce((sum, answer) => sum + (answer.durationMs ?? 0), 0)
       bumpDay(date, { quizCount: runTotal, correct: runCorrect, durationMs: runMs })
-      const weekdayIndex = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7
-      weekday[weekdayIndex].quizCount += runTotal
-      weekday[weekdayIndex].correct += runCorrect
       const item = itemsMap.get(run.topicId) ?? { topicId: run.topicId, total: 0, correct: 0, msSum: 0 }
       item.total += runTotal
       item.correct += runCorrect
@@ -718,8 +782,8 @@ const server = http.createServer(async (req, res) => {
       openMistakes += runTotal - runCorrect
     })
 
-    const trend30 = Array.from({ length: 30 }, (_, index) => {
-      const date = new Date(Date.now() + 8 * 3600_000 - (29 - index) * 86400_000)
+    const trend = Array.from({ length: days }, (_, index) => {
+      const date = new Date(Date.now() + 8 * 3600_000 - (days - 1 - index) * 86400_000)
         .toISOString()
         .slice(0, 10)
       const entry = dayMap.get(date)
@@ -733,6 +797,17 @@ const server = http.createServer(async (req, res) => {
         schulteRuns: 0,
         retries: 0,
       }
+    })
+    const rangeDates = new Set(trend.map((day) => day.date))
+    const weekday = Array.from({ length: 7 }, (_, index) => ({ weekday: index, quizCount: 0, correct: 0 }))
+    answeredRuns.forEach((run, index) => {
+      const date = new Date(Date.now() + 8 * 3600_000 - (index % 90) * 86400_000)
+        .toISOString()
+        .slice(0, 10)
+      if (!rangeDates.has(date)) return
+      const weekdayIndex = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7
+      weekday[weekdayIndex].quizCount += run.answered.length
+      weekday[weekdayIndex].correct += run.answered.filter((answer) => answer.correct).length
     })
     let streak = 0
     const cursor = new Date(`${today}T00:00:00Z`)
@@ -789,8 +864,9 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       success: true,
       data: {
+        rangeDays: days,
         activity: {
-          studyDays: dayMap.size,
+          studyDays: [...dayMap.keys()].filter((date) => rangeDates.has(date)).length,
           streak,
           activeToday: Boolean(todayEntry?.quizCount),
           today: {
@@ -800,7 +876,7 @@ const server = http.createServer(async (req, res) => {
             retries: 0,
           },
         },
-        trend30,
+        trend,
         quiz: {
           items: quizItems,
           byDifficulty: [...diffMap.values()].map((item) => ({
@@ -828,7 +904,7 @@ const server = http.createServer(async (req, res) => {
         },
         cards: { summary: { total: 0, new: 0, due: 0, learning: 0, mastered: 0, accuracy: 0 }, today: 0, last7: 0 },
         mistakes: { open: openMistakes, mastered: 0, retryTotal: 0, retryAccuracy: 0 },
-        schulte: { bests: [], runs30: 0 },
+        schulte: { bests: [], runs: 0 },
       },
       error: null,
     })

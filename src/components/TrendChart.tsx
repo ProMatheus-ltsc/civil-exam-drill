@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
+
 /**
- * 30 日趋势图：并列柱状（题量/复习次数）+ 归一化折线（正确率）。
+ * 趋势图：并列柱状（题量/复习次数）+ 归一化折线（正确率）。
  * 无第三方依赖的轻量 SVG；断档日折线自动分段，不跨空连点。
  */
 type DayPoint = {
@@ -11,17 +13,33 @@ export function TrendChart({
   seriesLabels,
   colors,
   points,
+  days,
 }: {
   seriesLabels: string[];
   colors: string[];
   points: DayPoint[];
+  days?: number;
 }) {
-  const width = 860;
-  const height = 190;
-  const padL = 38;
-  const padR = 14;
+  // 手机屏上 860 宽等比缩到 ~330px，刻度会只剩 4px；窄屏改用更高的独立坐标系。
+  const [compact, setCompact] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 640px)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 640px)");
+    const update = () => setCompact(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  const width = compact ? 390 : 860;
+  const height = compact ? 230 : 190;
+  const padL = compact ? 30 : 38;
+  const padR = compact ? 42 : 44;
   const padT = 18;
-  const padB = 26;
+  const padB = compact ? 30 : 26;
+  const tickFont = compact ? 12 : 10;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
   const maxBar = Math.max(1, ...points.flatMap((p) => p.bars));
@@ -29,11 +47,13 @@ export function TrendChart({
   const groupW = slot * 0.62;
   const barW = groupW / Math.max(1, seriesLabels.length);
   const y = (value: number) => padT + plotH - (value / maxBar) * plotH;
+  const accuracyY = (ratio: number) => padT + plotH - ratio * plotH;
+  const tickStep = Math.max(1, Math.ceil(points.length / 7));
 
   if (!points.length)
     return (
       <div className="trend-empty">
-        近 30 天还没有学习记录，先去完成一次训练吧
+        近 {days ?? 30} 天还没有学习记录，先去完成一次训练吧
       </div>
     );
 
@@ -46,21 +66,28 @@ export function TrendChart({
     }
     const cx = padL + slot * index + slot / 2;
     const segment = lineSegments[lineSegments.length - 1] ?? [];
-    segment.push(`${cx},${y(point.line * maxBar)}`);
+    segment.push(`${cx},${accuracyY(point.line)}`);
     if (lineSegments.length === 0) lineSegments.push(segment);
     else lineSegments[lineSegments.length - 1] = segment;
   }
 
   return (
     <figure className="trend-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="近 30 日学习趋势">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`近 ${days ?? 30} 日学习趋势`}
+      >
         {[0, 0.5, 1].map((ratio) => {
           const yy = padT + plotH - ratio * plotH;
           return (
             <g key={ratio}>
               <line x1={padL} y1={yy} x2={width - padR} y2={yy} stroke="#e8edf0" />
-              <text x={padL - 6} y={yy + 4} textAnchor="end" fontSize="10" fill="#8b99a3">
+              <text x={padL - 6} y={yy + 4} textAnchor="end" fontSize={tickFont} fill="#8b99a3">
                 {Math.round(maxBar * ratio)}
+              </text>
+              <text x={width - padR + 6} y={yy + 4} textAnchor="start" fontSize={tickFont} fill="#a33a2e">
+                {Math.round(ratio * 100)}%
               </text>
             </g>
           );
@@ -68,11 +95,20 @@ export function TrendChart({
         {points.map((point, index) => {
           const center = padL + slot * index + slot / 2;
           const showDate =
-            index % 5 === 0 || index === points.length - 1;
+            index % tickStep === 0 || index === points.length - 1;
           return (
             <g key={point.date}>
+              <title>
+                {`${point.date} · ${seriesLabels
+                  .map((label, seriesIndex) => `${label} ${point.bars[seriesIndex] ?? 0}`)
+                  .join(" · ")}${
+                  point.line !== null
+                    ? ` · 正确率 ${Math.round(point.line * 100)}%`
+                    : ""
+                }`}
+              </title>
               {showDate && (
-                <text x={center} y={height - 8} textAnchor="middle" fontSize="10" fill="#8b99a3">
+                <text x={center} y={height - 8} textAnchor="middle" fontSize={tickFont} fill="#8b99a3">
                   {point.date.slice(5)}
                 </text>
               )}
@@ -91,7 +127,7 @@ export function TrendChart({
               {point.line !== null && (
                 <circle
                   cx={center}
-                  cy={y(point.line * maxBar)}
+                  cy={accuracyY(point.line)}
                   r="2.2"
                   fill="#fff"
                   stroke="#a33a2e"
@@ -125,7 +161,7 @@ export function TrendChart({
             <i style={{ background: "#a33a2e" }} /> 正确率
           </span>
         )}
-        <em>近 30 天 · 东八区自然日</em>
+        <em>近 {days ?? 30} 天 · 东八区自然日</em>
       </figcaption>
     </figure>
   );

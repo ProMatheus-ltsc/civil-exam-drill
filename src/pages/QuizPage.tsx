@@ -9,6 +9,7 @@
  * 由用户的点击 / 展开全部 / 收起全部决定（口径与错题本一致）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   BookOpen,
@@ -111,6 +112,8 @@ const msText = (ms: number) => `${(ms / 1000).toFixed(0)} 秒`;
 
 export function QuizPage() {
   const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusTopicId = searchParams.get("topic");
   const [catalog, setCatalog] = useState<CatalogData | null>(null);
   const [progress, setProgress] = useState<Map<string, ProgressItem> | null>(null);
   const [track, setTrack] = useState<TrackId>("speed");
@@ -206,6 +209,30 @@ export function QuizPage() {
       (prev) => new Set([...prev, firstNotCleared?.id ?? stageTopics[0].id]),
     );
   }, [track, catalog, progress, stageTopics]);
+
+  // 从数据分析页「去补强」跳进来：切到对应轨道、展开目标关卡并滚动定位。
+  const focusHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusTopicId || !catalog || focusHandled.current === focusTopicId)
+      return;
+    const targetTrack = catalog.tracks.find((item) =>
+      item.topics.some((topic) => topic.id === focusTopicId),
+    );
+    focusHandled.current = focusTopicId;
+    if (!targetTrack) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    initedTracks.current.add(targetTrack.id);
+    setTrack(targetTrack.id);
+    setExpandedIds((prev) => new Set([...prev, focusTopicId]));
+    window.setTimeout(() => {
+      document
+        .getElementById(`quiz-topic-${focusTopicId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setSearchParams({}, { replace: true });
+    }, 160);
+  }, [focusTopicId, catalog, setSearchParams]);
 
   /**
    * 本局身份放在 ref 里而不是只靠 state：开局的第一次取题/预取发生在 setState 提交之前，
@@ -597,6 +624,7 @@ function StageMap({
         const clearedHard = (itemByDiff("hard")?.stars ?? 0) >= 1;
         return (
           <div
+            id={`quiz-topic-${topic.id}`}
             className={`stage-card ${unlocked ? "" : "is-locked"} ${isExpanded ? "is-open" : ""}`}
             key={topic.id}
           >

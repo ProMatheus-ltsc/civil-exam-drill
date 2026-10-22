@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import {
   BookOpen,
   Brain,
@@ -17,6 +24,7 @@ import { EssayPage, KnowledgeDocPage, KnowledgePage } from "./pages/KnowledgePag
 import { MistakesPage } from "./pages/MistakesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QuizPage } from "./pages/QuizPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SchultePage } from "./pages/SchultePage";
 
 type User = { id: string; nickname: string; email?: string };
@@ -151,6 +159,11 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
               onKeyDown={submitOnEnter}
             />
           </label>
+          {mode === "login" && (
+            <p className="auth-forgot">
+              <Link to="/reset">忘记密码？</Link>
+            </p>
+          )}
           {mode === "register" && (
             <label>
               确认密码
@@ -238,6 +251,7 @@ export function App() {
   const [user, setUser] = useState<User | null>(null),
     [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
     api<{ user: User }>("/auth/me")
       .then((data) => setUser(data.user))
@@ -253,18 +267,19 @@ export function App() {
       });
   };
   if (loading) return <LoadingSpinner message="恢复登录状态…" />;
+  const completeLogin = (next: User) => {
+    setUser(next);
+    navigate("/knowledge");
+  };
+  if (location.pathname === "/reset")
+    return <ResetPasswordPage onLogin={completeLogin} />;
   return (
     <>
       <ToastContainer />
       {user ? (
         <SignedIn user={user} onLogout={logout} />
       ) : (
-        <Login
-          onLogin={(next) => {
-            setUser(next);
-            navigate("/knowledge");
-          }}
-        />
+        <Login onLogin={completeLogin} />
       )}
     </>
   );

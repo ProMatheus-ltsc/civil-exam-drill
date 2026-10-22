@@ -47,6 +47,10 @@ type Bindings = {
   DB: Database;
   // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
   ASSETS?: { fetch(input: string | URL | Request): Promise<Response> };
+  // 密码重置邮件（Resend）；未配置时本地开发通过 devResetUrl 直接拿到链接
+  RESEND_API_KEY?: string;
+  MAIL_FROM?: string;
+  APP_URL?: string;
 };
 type Variables = {
   userId: string;
@@ -413,6 +417,41 @@ async function createSession(c: AppContext, userId: string) {
   return expiresAt;
 }
 
+const RESET_TOKEN_MINUTES = 30;
+
+function resetToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return toBase64(bytes)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+async function sendResetEmail(c: AppContext, to: string, resetUrl: string) {
+  const apiKey = c.env.RESEND_API_KEY;
+  if (!apiKey) return false;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      from: c.env.MAIL_FROM ?? "学习助手 <onboarding@resend.dev>",
+      to: [to],
+      subject: "学习助手 · 重置密码",
+      text: `请打开以下链接重置密码（${RESET_TOKEN_MINUTES} 分钟内有效）：\n${resetUrl}\n\n如果这不是你的操作，请忽略此邮件。`,
+      html: `<p>请打开以下链接重置密码（${RESET_TOKEN_MINUTES} 分钟内有效）：</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>如果这不是你的操作，请忽略此邮件。</p>`,
+    }),
+  });
+  if (!response.ok) {
+    console.error(
+      `[auth] reset email failed: ${response.status} ${await response.text()}`,
+    );
+  }
+  return response.ok;
+}
+
 async function authAttemptsExceeded(
   c: AppContext,
   key: string,
@@ -522,7 +561,9 @@ app.use("*", async (c, next) => {
   if (
     c.req.path === "/api/health" ||
     c.req.path === "/api/auth/login" ||
-    c.req.path === "/api/auth/register"
+    c.req.path === "/api/auth/register" ||
+    c.req.path === "/api/auth/password/forgot" ||
+    c.req.path === "/api/auth/password/reset"
   )
     return next();
   const token = getCookie(c, SESSION_COOKIE) ?? "";
@@ -644,6 +685,116 @@ app.post("/auth/login", async (c) => {
     ok({
       expiresAt,
       user: { id: user.id, nickname: user.nickname, email: user.email },
+    }),
+  );
+});
+
+app.post("/auth/password/forgot", async (c) => {
+  const body = await jsonBody(c.req.raw, z.object({ email: emailSchema }));
+  const clientKey = `forgot:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
+  if (await authAttemptsExceeded(c, clientKey, 5))
+    return c.json(fail("RATE_LIMITED", "请求过于频繁，请稍后再试"), 429);
+  await recordAuthAttempt(c, clientKey, true);
+
+  const user = await c.env.DB.prepare(
+    "SELECT id,nickname,email FROM users WHERE email_normalized=? AND status='active'",
+  )
+    .bind(body.email)
+    .first<{ id: string; nickname: string; email: string }>();
+
+  let devResetUrl: string | undefined;
+  if (user) {
+    const token = resetToken();
+    const expiresAt = iso(
+      new Date(Date.now() + RESET_TOKEN_MINUTES * 60_000),
+    );
+    await c.env.DB.prepare(
+      "DELETE FROM password_resets WHERE user_id=? AND (used_at IS NOT NULL OR expires_at<=?)",
+    )
+      .bind(user.id, iso())
+      .run();
+    await c.env.DB.prepare(
+      "INSERT INTO password_resets(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)",
+    )
+      .bind(uuid("rst"), user.id, await sha(token), expiresAt)
+      .run();
+    const origin = (c.env.APP_URL ?? new URL(c.req.url).origin).replace(
+      /\/$/,
+      "",
+    );
+    const resetUrl = `${origin}/#/reset?token=${encodeURIComponent(token)}`;
+    await sendResetEmail(c, user.email, resetUrl);
+    // 本地没有邮件服务时把链接直接交给前端，生产环境绝不返回令牌
+    if (
+      ["localhost", "127.0.0.1", "[::1]"].includes(
+        new URL(c.req.url).hostname,
+      )
+    )
+      devResetUrl = resetUrl;
+  }
+
+  return c.json(ok({ sent: true, ...(devResetUrl ? { devResetUrl } : {}) }));
+});
+
+app.post("/auth/password/reset", async (c) => {
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({
+      token: z.string().trim().min(20, "重置链接不完整").max(200),
+      password: passwordSchema,
+    }),
+  );
+  const clientKey = `reset:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
+  if (await authAttemptsExceeded(c, clientKey, 10, true))
+    return c.json(fail("RATE_LIMITED", "尝试过于频繁，请稍后再试"), 429);
+
+  const record = await c.env.DB.prepare(
+    `SELECT pr.user_id AS userId,pr.expires_at AS expiresAt,pr.used_at AS usedAt,u.nickname,u.email
+     FROM password_resets pr JOIN users u ON u.id=pr.user_id
+     WHERE pr.token_hash=? AND u.status='active'`,
+  )
+    .bind(await sha(body.token))
+    .first<{
+      userId: string;
+      expiresAt: string;
+      usedAt: string | null;
+      nickname: string;
+      email: string;
+    }>();
+  const valid =
+    record &&
+    !record.usedAt &&
+    Number.isFinite(Date.parse(record.expiresAt)) &&
+    Date.parse(record.expiresAt) > Date.now();
+  await recordAuthAttempt(c, clientKey, Boolean(valid));
+  if (!record || !valid)
+    return c.json(
+      fail("INVALID_RESET_TOKEN", "重置链接已失效，请重新申请"),
+      400,
+    );
+
+  await c.env.DB.prepare(
+    "UPDATE users SET password_hash=? WHERE id=?",
+  )
+    .bind(await hashPassword(body.password), record.userId)
+    .run();
+  await c.env.DB.prepare(
+    "UPDATE password_resets SET used_at=CURRENT_TIMESTAMP WHERE user_id=?",
+  )
+    .bind(record.userId)
+    .run();
+  await c.env.DB.prepare("DELETE FROM sessions WHERE user_id=?")
+    .bind(record.userId)
+    .run();
+  const expiresAt = await createSession(c, record.userId);
+  return c.json(
+    ok({
+      expiresAt,
+      user: {
+        id: record.userId,
+        nickname: record.nickname,
+        email: record.email,
+      },
     }),
   );
 });
@@ -1693,27 +1844,29 @@ app.patch("/quiz/mistakes/:questionId/mastery", async (c) => {
 app.get("/profile/summary", async (c) => {
   const userId = c.get("userId");
   const now = iso();
-  const start45 = new Date(Date.now() - 45 * 86400000).toISOString();
+  const rangeDays = integerQuery(c.req.query("days"), 30, 7, 90);
+  // 一次取回 90 天原始记录，7/30/90 天视图都从这里裁剪，避免切换时重复查库
+  const start90 = new Date(Date.now() - 90 * 86400000).toISOString();
   const [attempts, retries, essayEvents, schulte, quizRows, difficultyRows, cardRows, mistakeRows, retryAcc, schulteBests, cards, quizStatus] = await Promise.all([
     c.env.DB.prepare(
       "SELECT created_at,correct,duration_ms FROM quiz_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
     )
-      .bind(userId, start45)
+      .bind(userId, start90)
       .all<{ created_at: string; correct: number; duration_ms: number }>(),
     c.env.DB.prepare(
       "SELECT created_at,correct FROM quiz_retry_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
     )
-      .bind(userId, start45)
+      .bind(userId, start90)
       .all<{ created_at: string; correct: number }>(),
     c.env.DB.prepare(
       "SELECT reviewed_at FROM essay_review_events WHERE user_id=? AND reviewed_at>=? ORDER BY reviewed_at DESC LIMIT 5000",
     )
-      .bind(userId, start45)
+      .bind(userId, start90)
       .all<{ reviewed_at: string }>(),
     c.env.DB.prepare(
       "SELECT created_at,duration_ms FROM schulte_results WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
     )
-      .bind(userId, start45)
+      .bind(userId, start90)
       .all<{ created_at: string; duration_ms: number }>(),
     c.env.DB.prepare(
       `SELECT q.topic_id AS topicId,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs
@@ -1753,7 +1906,7 @@ app.get("/profile/summary", async (c) => {
   ]);
   const { passStars } = quizStatus;
 
-  // —— 30 日学习趋势（本地自然日） ——
+  // —— 学习趋势（本地自然日，按请求范围裁剪） ——
   const dayMap = new Map<
     string,
     { quizCount: number; correct: number; durationMs: number; retries: number; retryCorrect: number; cardReviews: number; schulteRuns: number }
@@ -1783,11 +1936,11 @@ app.get("/profile/summary", async (c) => {
   const activityDays = new Set(dayMap.keys());
   const { streak, activeToday } = streakOf(activityDays);
   const today = cnDay(now);
-  const trend30: Array<{ date: string; quizCount: number; correct: number; accuracy: number; durationMs: number; cardReviews: number; schulteRuns: number; retries: number }> = [];
-  for (let offset = 29; offset >= 0; offset -= 1) {
+  const trend: Array<{ date: string; quizCount: number; correct: number; accuracy: number; durationMs: number; cardReviews: number; schulteRuns: number; retries: number }> = [];
+  for (let offset = rangeDays - 1; offset >= 0; offset -= 1) {
     const date = new Date(Date.now() + 8 * 3600000 - offset * 86400000).toISOString().slice(0, 10);
     const entry = dayMap.get(date);
-    trend30.push({
+    trend.push({
       date,
       quizCount: entry?.quizCount ?? 0,
       correct: entry?.correct ?? 0,
@@ -1798,6 +1951,7 @@ app.get("/profile/summary", async (c) => {
       retries: entry?.retries ?? 0,
     });
   }
+  const rangeDates = new Set(trend.map((day) => day.date));
   const todayEntry = dayMap.get(today);
 
   // —— 速算/数推按专题统计 ——
@@ -1896,13 +2050,14 @@ app.get("/profile/summary", async (c) => {
     tracks: progressTracks,
   };
 
-  // —— 星期节奏（最近 45 天作答；周一=0） ——
+  // —— 星期节奏（与趋势范围一致；周一=0） ——
   const weekday = Array.from({ length: 7 }, (_, index) => ({
     weekday: index,
     quizCount: 0,
     correct: 0,
   }));
   for (const row of attempts.results) {
+    if (!rangeDates.has(cnDay(row.created_at))) continue;
     const normalized = row.created_at.includes("T")
       ? row.created_at
       : `${row.created_at.replace(" ", "T")}Z`;
@@ -1939,8 +2094,9 @@ app.get("/profile/summary", async (c) => {
 
   return c.json(
     ok({
+      rangeDays,
       activity: {
-        studyDays: activityDays.size,
+        studyDays: [...activityDays].filter((day) => rangeDates.has(day)).length,
         streak,
         activeToday,
         today: {
@@ -1950,7 +2106,7 @@ app.get("/profile/summary", async (c) => {
           retries: todayEntry?.retries ?? 0,
         },
       },
-      trend30,
+      trend,
       quiz: {
         items: quizItems,
         byDifficulty,
@@ -1972,7 +2128,7 @@ app.get("/profile/summary", async (c) => {
       },
       schulte: {
         bests: schulteBests.results,
-        runs30: schulte.results.length,
+        runs: schulte.results.length,
       },
     }),
   );

@@ -2432,5 +2432,138 @@ a.entry {
     padding: 26px 20px;
   }
 }
-EOF
-echo done
+
+/* ===== 忘记密码 / 重置密码 ===== */
+.auth-forgot {
+  margin: -6px 0 0;
+  text-align: right;
+  font-size: 0.82rem;
+}
+.auth-forgot a {
+  color: #315c77;
+  font-weight: 700;
+}
+.auth-success {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: #ecf5f0;
+  color: #2f6b52;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.dev-reset-link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+.auth-switch a {
+  color: #315c77;
+  font-weight: 800;
+}
+
+/* ===== 统计范围 / 模块筛选 / 更多数据 ===== */
+.profile-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #e8edf0;
+}
+.module-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.weak-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #516676;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.weak-toggle input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+}
+.module-more {
+  align-self: flex-start;
+}
+.weak-hint p {
+  margin: 0 0 8px;
+}
+.weak-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.weak-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid #e9c98f;
+  border-radius: 999px;
+  background: #fff;
+  color: #7d5310;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+.weak-link em {
+  font-style: normal;
+  color: #a33a2e;
+}
+.weak-link:hover {
+  border-color: #bb623a;
+  background: #fffaf0;
+}
+.profile-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  color: #315c77;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.profile-more-toggle svg {
+  transition: transform 0.16s ease;
+}
+.profile-more-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+.profile-more-body {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 12px;
+}
+.profile-more-body > .panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.profile-more-body > .panel + .panel {
+  padding-top: 1.25rem;
+  border-top: 1px solid #e8edf0;
+}
+@media (max-width: 600px) {
+  .module-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .profile-range {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

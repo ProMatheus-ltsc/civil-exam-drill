@@ -60,10 +60,10 @@ type TrendDay = {
   retries: number;
 };
 
-/** 近 30 天学习热力（按自然周排列，颜色越深当日学习项越多） */
+/** 所选范围的学习热力（按自然周排列，颜色越深当日学习项越多） */
 export function ActivityHeatmap({ days }: { days: TrendDay[] }) {
   if (!days.length)
-    return <p className="muted hint-line">近 30 天还没有学习记录。</p>;
+    return <p className="muted hint-line">最近还没有学习记录。</p>;
   const totals = days.map(
     (day) =>
       day.quizCount + day.cardReviews + day.schulteRuns + day.retries,
@@ -108,7 +108,13 @@ export function ActivityHeatmap({ days }: { days: TrendDay[] }) {
 type WeekdayItem = { weekday: number; quizCount: number; correct: number };
 
 /** 一周答题节奏柱图（周一=0） */
-export function WeekdayBars({ items }: { items: WeekdayItem[] }) {
+export function WeekdayBars({
+  items,
+  days,
+}: {
+  items: WeekdayItem[];
+  days?: number;
+}) {
   const labels = ["一", "二", "三", "四", "五", "六", "日"];
   const max = Math.max(1, ...items.map((item) => item.quizCount));
   const total = items.reduce((sum, item) => sum + item.quizCount, 0);
@@ -138,7 +144,7 @@ export function WeekdayBars({ items }: { items: WeekdayItem[] }) {
         ))}
       </div>
       <figcaption>
-        最近 45 天答题量分布 · 周末也别忘了保持手感
+        最近 {days ?? 30} 天答题量分布 · 周末也别忘了保持手感
       </figcaption>
     </figure>
   );

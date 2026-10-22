@@ -40,6 +40,21 @@ class FakeStatement {
       } as T;
     if (this.sql === "SELECT 1") return { ok: 1 } as T;
     if (this.sql.includes("FROM auth_attempts")) return { count: 0 } as T;
+    if (this.sql.includes("FROM password_resets pr JOIN users")) {
+      const reset = this.db.passwordResets.get(String(this.values[0]));
+      if (!reset) return null;
+      const user = [...this.db.users.values()].find(
+        (item) => item.id === reset.userId,
+      );
+      if (!user) return null;
+      return {
+        userId: reset.userId,
+        expiresAt: reset.expiresAt,
+        usedAt: reset.usedAt,
+        nickname: user.nickname,
+        email: user.email,
+      } as T;
+    }
     if (this.sql.includes("FROM invite_codes")) return { id: 1 } as T;
     if (this.sql.includes("FROM users WHERE email_normalized=?")) {
       const email = String(this.values[0]);
@@ -129,6 +144,27 @@ class FakeStatement {
         passwordHash,
       });
     }
+    if (this.sql.startsWith("INSERT INTO password_resets")) {
+      const [id, userId, tokenHash, expiresAt] = this.values.map(String);
+      this.db.passwordResets.set(tokenHash, {
+        id,
+        userId,
+        expiresAt,
+        usedAt: null,
+      });
+    }
+    if (this.sql.startsWith("UPDATE users SET password_hash=?")) {
+      const [passwordHash, userId] = this.values.map(String);
+      for (const user of this.db.users.values()) {
+        if (user.id === userId) user.passwordHash = passwordHash;
+      }
+    }
+    if (this.sql.includes("UPDATE password_resets SET used_at")) {
+      const userId = String(this.values[0]);
+      for (const reset of this.db.passwordResets.values()) {
+        if (reset.userId === userId) reset.usedAt = new Date().toISOString();
+      }
+    }
     if (this.sql.includes("essay_training_progress")) {
       const [levelId, checkedJson, quizJson, notes, stars] = [
         String(this.values[1]),
@@ -153,6 +189,11 @@ class FakeDb {
   users = new Map<
     string,
     { id: string; nickname: string; email: string; passwordHash: string }
+  >();
+  /** token_hash → 重置记录 */
+  passwordResets = new Map<
+    string,
+    { id: string; userId: string; expiresAt: string; usedAt: string | null }
   >();
   batches: FakeStatement[][] = [];
   /** 本局已生成的题（questions 接口按序号回查用），默认空表示「这一序号还没生成」 */
@@ -279,6 +320,96 @@ describe("API contract guards", () => {
     expect(login.status).toBe(200);
     expect((await login.json()).data.user.email).toBe("dup@example.com");
     expect(login.headers.get("set-cookie")).toMatch(/HttpOnly/i);
+  });
+
+  it("issues a single-use reset link and switches the password", async () => {
+    const db = new FakeDb();
+    const email = "reset@example.com";
+    const registered = await app.request(
+      "/api/auth/register",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "password123" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(registered.status).toBe(201);
+
+    const forgot = await app.request(
+      "/api/auth/password/forgot",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      },
+      { ...env, DB: db },
+    );
+    expect(forgot.status).toBe(200);
+    const forgotPayload = await forgot.json();
+    expect(forgotPayload.data.sent).toBe(true);
+    expect(forgotPayload.data.devResetUrl).toMatch(/#\/reset\?token=/);
+    const token = decodeURIComponent(
+      String(forgotPayload.data.devResetUrl).split("token=")[1],
+    );
+
+    const unknown = await app.request(
+      "/api/auth/password/forgot",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "nobody@example.com" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(unknown.status).toBe(200);
+    expect((await unknown.json()).data.devResetUrl).toBeUndefined();
+
+    const reset = await app.request(
+      "/api/auth/password/reset",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, password: "newpassword123" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(reset.status).toBe(200);
+    expect(reset.headers.get("set-cookie")).toMatch(/HttpOnly/i);
+
+    const oldLogin = await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "password123" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "newpassword123" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(newLogin.status).toBe(200);
+
+    const reuse = await app.request(
+      "/api/auth/password/reset",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, password: "anotherpassword" }),
+      },
+      { ...env, DB: db },
+    );
+    expect(reuse.status).toBe(400);
+    expect((await reuse.json()).error.code).toBe("INVALID_RESET_TOKEN");
   });
 
   it("rejects unauthenticated access", async () => {
@@ -698,8 +829,15 @@ describe("API contract guards", () => {
     const payload = await response.json();
     expect(response.status).toBe(200);
     expect(payload.data.activity).toHaveProperty("streak");
-    expect(Array.isArray(payload.data.trend30)).toBe(true);
-    expect(payload.data.trend30).toHaveLength(30);
+    expect(payload.data.rangeDays).toBe(30);
+    expect(Array.isArray(payload.data.trend)).toBe(true);
+    expect(payload.data.trend).toHaveLength(30);
+    const seven = await app.request(
+      "/api/profile/summary?days=7",
+      { headers: auth },
+      env,
+    );
+    expect((await seven.json()).data.trend).toHaveLength(7);
     expect(payload.data.cards.summary).toHaveProperty("mastered");
     expect(payload.data.mistakes).toHaveProperty("open");
     expect(payload.data.schulte).toHaveProperty("bests");

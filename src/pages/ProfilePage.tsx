@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, Brain, ChartNoAxesColumn, ListChecks } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  ArrowRight,
+  BookOpen,
+  Brain,
+  ChartNoAxesColumn,
+  ChevronDown,
+  ListChecks,
+} from "lucide-react";
 import { EmptyState } from "@shared/core/components/EmptyState";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { ResponsiveGrid } from "@shared/core/components/responsive/ResponsiveGrid";
@@ -21,13 +29,14 @@ import {
 type Difficulty = "easy" | "medium" | "hard";
 
 type Summary = {
+  rangeDays: number;
   activity: {
     studyDays: number;
     streak: number;
     activeToday: boolean;
     today: { quizCount: number; cardReviews: number; schulteRuns: number; retries: number };
   };
-  trend30: Array<{
+  trend: Array<{
     date: string;
     quizCount: number;
     correct: number;
@@ -89,7 +98,7 @@ type Summary = {
     last7: number;
   };
   mistakes: { open: number; mastered: number; retryTotal: number; retryAccuracy: number };
-  schulte: { bests: Array<{ gridSize: number; variant: string; bestMs: number }>; runs30: number };
+  schulte: { bests: Array<{ gridSize: number; variant: string; bestMs: number }>; runs: number };
 };
 
 const variantLabel: Record<string, string> = {
@@ -109,7 +118,7 @@ const trackShort: Record<TrackId, string> = {
   material: "资料实战",
 };
 
-function emptySummary(): Summary {
+function emptySummary(days: number): Summary {
   const zeroDay = {
     quizCount: 0,
     correct: 0,
@@ -119,9 +128,10 @@ function emptySummary(): Summary {
     retries: 0,
   };
   return {
+    rangeDays: days,
     activity: { studyDays: 0, streak: 0, activeToday: false, today: zeroDay },
-    trend30: Array.from({ length: 30 }, (_, i) => ({
-      date: new Date(Date.now() + 8 * 3600000 - (29 - i) * 86400000)
+    trend: Array.from({ length: days }, (_, i) => ({
+      date: new Date(Date.now() + 8 * 3600000 - (days - 1 - i) * 86400000)
         .toISOString()
         .slice(0, 10),
       durationMs: 0,
@@ -157,9 +167,13 @@ function emptySummary(): Summary {
       last7: 0,
     },
     mistakes: { open: 0, mastered: 0, retryTotal: 0, retryAccuracy: 0 },
-    schulte: { bests: [], runs30: 0 },
+    schulte: { bests: [], runs: 0 },
   };
 }
+
+const RANGE_OPTIONS = [7, 30, 90] as const;
+const WEAK_MIN_TOTAL = 10;
+const MODULE_PAGE_SIZE = 12;
 
 export function ProfilePage({
   user,
@@ -168,29 +182,49 @@ export function ProfilePage({
 }) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [rangeDays, setRangeDays] = useState<(typeof RANGE_OPTIONS)[number]>(30);
   const [trackFilter, setTrackFilter] = useState<"all" | TrackId>("all");
+  const [weakOnly, setWeakOnly] = useState(false);
+  const [showAllModules, setShowAllModules] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(
+    () => !window.matchMedia("(max-width: 600px)").matches,
+  );
   useEffect(() => {
     let cancelled = false;
-    void api<Summary>("/profile/summary")
+    setRefreshing(true);
+    void api<Summary>(`/profile/summary?days=${rangeDays}`)
       .then((data) => {
         if (!cancelled) setSummary(data);
       })
       .catch(() => undefined)
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [rangeDays]);
   const filteredModules = useMemo(() => {
-    const items = summary?.quiz.items ?? [];
-    return trackFilter === "all"
-      ? items
-      : items.filter((item) => item.track === trackFilter);
-  }, [summary, trackFilter]);
+    let items = summary?.quiz.items ?? [];
+    if (trackFilter !== "all")
+      items = items.filter((item) => item.track === trackFilter);
+    if (weakOnly)
+      items = items.filter(
+        (item) =>
+          item.total >= WEAK_MIN_TOTAL && item.accuracy < 0.9,
+      );
+    return items;
+  }, [summary, trackFilter, weakOnly]);
   if (loading && !summary) return <LoadingSpinner message="统计加载中…" />;
-  const data = summary ?? emptySummary();
+  const data = summary ?? emptySummary(rangeDays);
+  const days = data.rangeDays || rangeDays;
+  const moduleLimit = showAllModules
+    ? filteredModules.length
+    : MODULE_PAGE_SIZE;
   const todayTotal =
     data.activity.today.quizCount +
     data.activity.today.cardReviews +
@@ -215,7 +249,7 @@ export function ProfilePage({
           </div>
         </div>
         <ResponsiveGrid minItemWidth="150px" gap="0.9rem">
-          <StatCard label="累计学习天数" value={`${data.activity.studyDays} 天`} />
+          <StatCard label={`近 ${days} 天学习`} value={`${data.activity.studyDays} 天`} />
           <StatCard label="连续学习" value={`${data.activity.streak} 天`} />
           <StatCard label="累计答题" value={`${data.quiz.overall.total} 题`} />
           <StatCard
@@ -228,6 +262,24 @@ export function ProfilePage({
             value={`${Math.round(data.quiz.overall.averageMs / 100) / 10}s`}
           />
         </ResponsiveGrid>
+        <div className="profile-range">
+          <span className="muted">
+            趋势与节奏范围{refreshing ? " · 更新中…" : ""}
+          </span>
+          <div className="viz-filters" role="group" aria-label="统计范围">
+            {RANGE_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`viz-chip ${rangeDays === option ? "active" : ""}`}
+                aria-pressed={rangeDays === option}
+                onClick={() => setRangeDays(option)}
+              >
+                {option} 天
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="panel">
@@ -237,25 +289,26 @@ export function ProfilePage({
         </div>
         <div className="two-col viz-two-col">
           <div>
-            <p className="subtitle">近 30 天学习热力</p>
-            <ActivityHeatmap days={data.trend30} />
+            <p className="subtitle">近 {days} 天学习热力</p>
+            <ActivityHeatmap days={data.trend} />
           </div>
           <div>
             <p className="subtitle">一周答题分布</p>
-            <WeekdayBars items={data.quiz.weekday} />
+            <WeekdayBars items={data.quiz.weekday} days={days} />
           </div>
         </div>
       </section>
 
       <section className="panel">
         <div className="section-head">
-          <h3 className="section-title">近 30 天做题与正确率趋势</h3>
-          <span className="muted">折线为当天题目正确率</span>
+          <h3 className="section-title">近 {days} 天做题与正确率趋势</h3>
+          <span className="muted">左轴题量 · 右轴正确率</span>
         </div>
         <TrendChart
+          days={days}
           seriesLabels={["速算/数推", "规范词复习", "舒尔特/错题重做"]}
           colors={["#17324d", "#bb623a", "#7fa88f"]}
-          points={data.trend30.map((day) => ({
+          points={data.trend.map((day) => ({
             date: day.date,
             bars: [day.quizCount, day.cardReviews, day.schulteRuns + day.retries],
             line: day.quizCount > 0 ? day.accuracy : null,
@@ -335,7 +388,10 @@ export function ProfilePage({
       <section className="panel">
         <div className="section-head">
           <h3 className="section-title">分模块正确率 · 弱项优先</h3>
-          <span className="muted">{filteredModules.length} 个模块有记录</span>
+          <span className="muted">
+            {filteredModules.length} 个模块
+            {weakOnly ? "符合薄弱条件" : "有记录"}
+          </span>
         </div>
         {data.quiz.items.length === 0 ? (
           <EmptyState
@@ -345,21 +401,57 @@ export function ProfilePage({
           />
         ) : (
           <Stack gap="1rem">
-            <div className="viz-filters">
-              {(["all", "speed", "sequence", "material"] as const).map(
-                (filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    className={`viz-chip ${trackFilter === filter ? "active" : ""}`}
-                    onClick={() => setTrackFilter(filter)}
-                  >
-                    {filter === "all" ? "全部" : trackShort[filter]}
-                  </button>
-                ),
-              )}
+            <div className="module-toolbar">
+              <div className="viz-filters" role="group" aria-label="按轨道筛选">
+                {(["all", "speed", "sequence", "material"] as const).map(
+                  (filter) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      className={`viz-chip ${trackFilter === filter ? "active" : ""}`}
+                      onClick={() => {
+                        setTrackFilter(filter);
+                        setShowAllModules(false);
+                      }}
+                    >
+                      {filter === "all" ? "全部" : trackShort[filter]}
+                    </button>
+                  ),
+                )}
+              </div>
+              <label className="weak-toggle">
+                <input
+                  type="checkbox"
+                  checked={weakOnly}
+                  onChange={(event) => {
+                    setWeakOnly(event.target.checked);
+                    setShowAllModules(false);
+                  }}
+                />
+                只看薄弱（题量 ≥{WEAK_MIN_TOTAL} 且正确率 &lt;90%）
+              </label>
             </div>
-            <ModuleAccuracyBars items={filteredModules} />
+            {filteredModules.length ? (
+              <ModuleAccuracyBars
+                items={filteredModules}
+                limit={moduleLimit}
+              />
+            ) : (
+              <p className="muted hint-line">
+                当前筛选下没有薄弱模块，换个轨道或取消筛选看看。
+              </p>
+            )}
+            {filteredModules.length > MODULE_PAGE_SIZE && (
+              <button
+                type="button"
+                className="secondary module-more"
+                onClick={() => setShowAllModules((value) => !value)}
+              >
+                {showAllModules
+                  ? "收起模块"
+                  : `展开全部 ${filteredModules.length} 个模块`}
+              </button>
+            )}
             <WeakHint items={data.quiz.items} />
           </Stack>
         )}
@@ -373,8 +465,30 @@ export function ProfilePage({
         <DifficultyDonut items={data.quiz.byDifficulty} />
       </section>
 
-      <CardsSection data={data} />
-      <ExtraStats data={data} />
+      <section className="panel profile-more">
+        <div className="section-head">
+          <h3 className="section-title">更多学习数据</h3>
+          <button
+            type="button"
+            className="profile-more-toggle"
+            aria-expanded={moreOpen}
+            aria-controls="profile-more-body"
+            onClick={() => setMoreOpen((value) => !value)}
+          >
+            {moreOpen ? "收起" : "展开"}
+            <ChevronDown
+              size={16}
+              className={moreOpen ? "is-open" : ""}
+            />
+          </button>
+        </div>
+        {moreOpen && (
+          <div className="profile-more-body" id="profile-more-body">
+            <CardsSection data={data} />
+            <ExtraStats data={data} />
+          </div>
+        )}
+      </section>
     </Stack>
   );
 }
@@ -387,10 +501,22 @@ function WeakHint({ items }: { items: Summary["quiz"]["items"] }) {
     .slice(0, 3);
   if (weakest.length)
     return (
-      <p className="weak-hint">
-        相对薄弱（题量 ≥10）：{weakest.map((item) => titleOf(item.topicId)).join("、")}
-        ，可回「专项训练」对应关卡重点补强。
-      </p>
+      <div className="weak-hint">
+        <p>相对薄弱（题量 ≥10），点击直达对应关卡补强：</p>
+        <div className="weak-links">
+          {weakest.map((item) => (
+            <Link
+              key={item.topicId}
+              className="weak-link"
+              to={`/quiz?topic=${encodeURIComponent(item.topicId)}`}
+            >
+              <span>{titleOf(item.topicId)}</span>
+              <em>{Math.round(item.accuracy * 100)}%</em>
+              <ArrowRight size={13} />
+            </Link>
+          ))}
+        </div>
+      </div>
     );
   if (practiced.length)
     return (
@@ -514,7 +640,7 @@ function ExtraStats({ data }: { data: Summary }) {
             </div>
           ) : (
             <p className="muted hint-line">
-              完成一次舒尔特方格后展示最佳成绩（近 30 天 {data.schulte.runs30} 次）。
+              完成一次舒尔特方格后展示最佳成绩（近期 {data.schulte.runs} 次）。
             </p>
           )}
         </div>

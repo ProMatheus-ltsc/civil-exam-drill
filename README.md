@@ -80,6 +80,8 @@ updatedAt: 2026-09-02
    - 终端 A 启动 API mock：`node scripts/dev-api-server.mjs`（监听 4174，每次请求实时读 entries.json，无需重启）
    - 终端 B 启动页面：`npm run dev`（http://localhost:5173 ，`/api` 代理到 4174）
    - 登录：页面仅支持邮箱登录。mock 内置账号 `demo@civil.local` / `civil1234`，也可在注册页直接创建新账号（账号只存在内存中，重启 mock 即清空）
+   - 忘记密码：mock 不发邮件，「忘记密码」提交后响应里带 `devResetUrl`，页面直接给出可点链接；重置成功后旧会话全部失效并自动登录
+   - 连接本地 D1 跑 `wrangler pages dev` 时，先执行 `npx wrangler d1 migrations apply civil-exam-drill-db --local`（mock 不读 D1，可跳过）
    - 前置条件：先跑过一次 `npm run content:build`（mock 读 `public/generated/knowledge/entries.json`）；mock 用 `import` 直接读 `src/generator/catalog.ts`，因此需要 Node ≥ 22.18（类型剥离默认开启；`node -v` 自查）
 5. 验证展示位置（见下节），确认后即可提交源码。
 
@@ -186,6 +188,12 @@ updatedAt: 2026-09-02
 4. 文档 `module` 必须与轨道匹配：`speed`（资料速算）→ `data_analysis`，`sequence`（数字推理）→ `quantitative`；
 5. 除 `overview` 分组外，`data_analysis` 里不允许出现“没人引用”的模块专文（测试里有一条孤儿检查）。
 
+### 账号与学习数据
+
+- **邮箱注册/登录**：密码以 PBKDF2-SHA256（12 万次、每用户随机盐）存哈希；会话是 HttpOnly + SameSite=Strict Cookie，`sessions` 表只存 token 的 SHA-256。
+- **忘记密码**：`POST /api/auth/password/forgot` 无论邮箱是否存在都返回相同成功响应（防枚举），命中账号时写入 `password_resets`（`migrations/0010`，30 分钟有效、单次使用、只存 token 哈希）；`POST /api/auth/password/reset` 成功后作废旧令牌、删除该用户全部会话并直接建立新会话。线上发信需在 Cloudflare Pages 配置 `RESEND_API_KEY`、`MAIL_FROM`，`APP_URL` 用于拼重置链接（缺省取请求 Origin）；未配置邮件服务时不发信、功能静默降级，本地 mock 则回传 `devResetUrl`。
+- **分析页**：`GET /api/profile/summary?days=7|30|90`（默认 30，取值 7–90），服务端一次取回 90 天原始记录再按视图裁剪，热力图 / 趋势图 / 星期分布共用同一范围；弱项可直接深链到 `/#/quiz?topic=<topicId>`，自动切轨道、展开并滚动到目标关卡。
+
 ## 五、新增独立页面（真正需要新入口时）
 
 只有内容形态与现有页面差异足够大时才需要：
@@ -203,6 +211,7 @@ updatedAt: 2026-09-02
 | `npm run build` | 先 `content:validate` + `content:build`，再类型检查 + 打包（`prebuild` 钩子自动完成前两步） |
 | `npm test` | 单元测试（含 `knowledge-links`：关卡 docId 必须命中真实文档、模块要与轨道一致） |
 | `npm run dev` | 本地开发（需先起 mock API，见第三节） |
+| `npx wrangler d1 migrations apply civil-exam-drill-db --local` | 本地应用 D1 迁移（`wrangler pages dev` 前执行） |
 | `npx wrangler pages deploy dist --project-name civil-exam-drill` | 部署到 Cloudflare Pages |
 
 推送 `main` 会触发 `.github/workflows/deploy.yml`（仓库根，已入库）：clone shared-core（pin 971b3e6）→ `npm ci` → `content:validate` / `content:build` → `npm test` → `npm run build` → `wrangler d1 migrations apply --remote` → 部署到 Cloudflare Pages。
