@@ -67,11 +67,15 @@ export function TrendChart({
         })}
         {points.map((point, index) => {
           const center = padL + slot * index + slot / 2;
+          const showDate =
+            index % 5 === 0 || index === points.length - 1;
           return (
             <g key={point.date}>
-              <text x={center} y={height - 8} textAnchor="middle" fontSize="9" fill="#8b99a3">
-                {point.date.slice(5)}
-              </text>
+              {showDate && (
+                <text x={center} y={height - 8} textAnchor="middle" fontSize="10" fill="#8b99a3">
+                  {point.date.slice(5)}
+                </text>
+              )}
               {point.bars.map((value, seriesIndex) => (
                 <rect
                   key={seriesIndex}
