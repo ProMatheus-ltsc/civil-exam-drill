@@ -1,0 +1,48 @@
+{
+  "name": "学习助手 · 公考练习与数据分析",
+  "short_name": "学习助手",
+  "description": "资料分析速算、申论闯关、错题间隔复习与模考报告，公考练习与学习数据放在同一个闭环里。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f7f8",
+  "theme_color": "#17324d",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日计划",
+      "short_name": "今日计划",
+      "url": "/#/plan"
+    },
+    {
+      "name": "今日待复习",
+      "short_name": "错题复习",
+      "url": "/#/mistakes?due=1"
+    },
+    {
+      "name": "30 分钟模考",
+      "short_name": "模考",
+      "url": "/#/mock"
+    }
+  ]
+}

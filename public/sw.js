@@ -1,5 +1,12 @@
-const CACHE = 'civil-exam-shell-v1'
-const SHELL = ['/', '/index.html']
+const CACHE = 'civil-exam-shell-v2'
+const SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)))
@@ -18,4 +25,16 @@ self.addEventListener('fetch', (event) => {
     if (response.ok) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()))
     return response
   }).catch(() => caches.match(event.request).then((cached) => cached || caches.match('/index.html'))))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) return client.focus()
+      }
+      return self.clients.openWindow('/#/plan')
+    }),
+  )
 })

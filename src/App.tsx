@@ -4,24 +4,38 @@ import {
   Navigate,
   Route,
   Routes,
-  useLocation,
   useNavigate,
 } from "react-router-dom";
 import {
   BookOpen,
   Brain,
   Calculator,
+  CalendarCheck,
   ChartNoAxesColumn,
   FileText,
   ListChecks,
+  Timer,
+  Users,
 } from "lucide-react";
 import { Layout } from "@shared/core/components/Layout";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { ToastContainer } from "@shared/core/components/Toast";
 import { api } from "./api/client";
+import { PublicLayout } from "./components/PublicLayout";
+import { InstallPrompt } from "./components/InstallPrompt";
+import { CommunityPage } from "./pages/CommunityPage";
+import { FreeDemoPage } from "./pages/FreeDemoPage";
 import { EssayPage, KnowledgeDocPage, KnowledgePage } from "./pages/KnowledgePage";
+import { LandingPage } from "./pages/LandingPage";
 import { MistakesPage } from "./pages/MistakesPage";
+import { PlanPage } from "./pages/PlanPage";
+import {
+  MockPage,
+  MockReportPage,
+  MockRunPage,
+  MockSharedReportPage,
+} from "./pages/MockPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QuizPage } from "./pages/QuizPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
@@ -32,14 +46,22 @@ type AuthMode = "login" | "register";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-function Login({ onLogin }: { onLogin: (user: User) => void }) {
-  const [mode, setMode] = useState<AuthMode>("login"),
+function Login({
+  onLogin,
+  initialMode = "login",
+}: {
+  onLogin: (user: User) => void;
+  initialMode?: AuthMode;
+}) {
+  const [mode, setMode] = useState<AuthMode>(initialMode),
     [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [confirm, setConfirm] = useState(""),
     [nickname, setNickname] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+
+  useEffect(() => setMode(initialMode), [initialMode]);
 
   const switchMode = (next: AuthMode) => {
     setMode(next);
@@ -92,6 +114,9 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
 
   return (
     <main className="login-shell dvh">
+      <Link className="login-back" to="/">
+        ← 返回首页
+      </Link>
       <section className="login-card auth-card">
         <p className="eyebrow">个人学习工具</p>
         <h1>学习助手</h1>
@@ -210,6 +235,11 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
           <p className="auth-note muted">
             仅支持邮箱登录，密码经加密存储，不会以明文保存。
           </p>
+          <p className="auth-public-links">
+            <Link to="/try">先免费试做 3 题</Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/schulte">玩一局舒尔特</Link>
+          </p>
         </Stack>
       </section>
     </main>
@@ -218,12 +248,15 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
 
 function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
   const nav = [
+    { to: "/plan", icon: CalendarCheck, label: "今日计划" },
     { to: "/knowledge", icon: BookOpen, label: "知识库" },
     { to: "/essay", icon: FileText, label: "写作" },
     { to: "/quiz", icon: Calculator, label: "专项训练" },
+    { to: "/mock", icon: Timer, label: "模考" },
     { to: "/mistakes", icon: ListChecks, label: "错题本" },
     { to: "/schulte", icon: Brain, label: "舒尔特方格" },
     { to: "/profile", icon: ChartNoAxesColumn, label: "数据分析" },
+    { to: "/community", icon: Users, label: "学习社群" },
   ];
   return (
     <Layout
@@ -234,16 +267,66 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
       onLogout={onLogout}
     >
       <Routes>
+        <Route path="/plan" element={<PlanPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/:id" element={<KnowledgeDocPage />} />
         <Route path="/essay" element={<EssayPage />} />
         <Route path="/quiz" element={<QuizPage />} />
+        <Route path="/mock" element={<MockPage />} />
+        <Route path="/mock/report/:token" element={<MockSharedReportPage />} />
+        <Route path="/mock/:examId" element={<MockRunPage />} />
+        <Route path="/mock/:examId/report" element={<MockReportPage />} />
         <Route path="/mistakes" element={<MistakesPage />} />
         <Route path="/schulte" element={<SchultePage />} />
         <Route path="/profile" element={<ProfilePage user={user} />} />
-        <Route path="*" element={<Navigate to="/knowledge" replace />} />
+        <Route path="/community" element={<CommunityPage />} />
+        <Route path="*" element={<Navigate to="/plan" replace />} />
       </Routes>
     </Layout>
+  );
+}
+
+function PublicRoutes({
+  onLogin,
+}: {
+  onLogin: (user: User) => void;
+}) {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/try" element={<FreeDemoPage />} />
+      <Route
+        path="/schulte"
+        element={
+          <PublicLayout>
+            <main className="public-tool-page">
+              <SchultePage standalone />
+            </main>
+          </PublicLayout>
+        }
+      />
+      <Route
+        path="/community"
+        element={
+          <PublicLayout>
+            <main className="public-tool-page">
+              <CommunityPage publicView />
+            </main>
+          </PublicLayout>
+        }
+      />
+      <Route path="/mock/report/:token" element={<MockSharedReportPage />} />
+      <Route
+        path="/login"
+        element={<Login initialMode="login" onLogin={onLogin} />}
+      />
+      <Route
+        path="/register"
+        element={<Login initialMode="register" onLogin={onLogin} />}
+      />
+      <Route path="/reset" element={<ResetPasswordPage onLogin={onLogin} />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
@@ -251,7 +334,6 @@ export function App() {
   const [user, setUser] = useState<User | null>(null),
     [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const location = useLocation();
   useEffect(() => {
     api<{ user: User }>("/auth/me")
       .then((data) => setUser(data.user))
@@ -269,17 +351,16 @@ export function App() {
   if (loading) return <LoadingSpinner message="恢复登录状态…" />;
   const completeLogin = (next: User) => {
     setUser(next);
-    navigate("/knowledge");
+    navigate("/plan");
   };
-  if (location.pathname === "/reset")
-    return <ResetPasswordPage onLogin={completeLogin} />;
   return (
     <>
       <ToastContainer />
+      <InstallPrompt />
       {user ? (
         <SignedIn user={user} onLogout={logout} />
       ) : (
-        <Login onLogin={completeLogin} />
+        <PublicRoutes onLogin={completeLogin} />
       )}
     </>
   );

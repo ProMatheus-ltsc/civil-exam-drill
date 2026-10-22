@@ -32,6 +32,12 @@ import {
 } from "../../src/essay/training";
 import { essayQuizIssue, essayQuizOf, gradeEssayQuiz } from "../../src/essay/bank";
 import { essayStars } from "../../src/essay/rules";
+import {
+  WRITING_PROMPTS,
+  gradeWriting,
+  writingPromptById,
+} from "../../src/essay/writing";
+import { MISTAKE_CAUSE_IDS } from "../../src/mistakes";
 
 interface Statement {
   bind(...values: unknown[]): Statement;
@@ -563,7 +569,8 @@ app.use("*", async (c, next) => {
     c.req.path === "/api/auth/login" ||
     c.req.path === "/api/auth/register" ||
     c.req.path === "/api/auth/password/forgot" ||
-    c.req.path === "/api/auth/password/reset"
+    c.req.path === "/api/auth/password/reset" ||
+    c.req.path.startsWith("/api/mock/reports/")
   )
     return next();
   const token = getCookie(c, SESSION_COOKIE) ?? "";
@@ -939,6 +946,157 @@ function essayCards(entries: KnowledgeEntry[]): EssayCard[] {
   }
   return cards;
 }
+
+interface EssaySubmissionRow {
+  id: string;
+  promptId: string;
+  promptTitle: string;
+  title: string;
+  content: string;
+  wordCount: number;
+  score: number;
+  grade: string;
+  dimensionsJson: string;
+  feedbackJson: string;
+  createdAt: string;
+}
+
+app.get("/essay/writing/prompts", (c) =>
+  c.json(
+    ok({
+      prompts: WRITING_PROMPTS.map((prompt) => ({
+        id: prompt.id,
+        type: prompt.type,
+        title: prompt.title,
+        material: prompt.material,
+        question: prompt.question,
+        requirements: prompt.requirements,
+        keywords: prompt.keywords,
+        targetWords: prompt.targetWords,
+        suggestedMinutes: prompt.suggestedMinutes,
+      })),
+    }),
+  ),
+);
+
+app.post("/essay/writing/submissions", async (c) => {
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({
+      promptId: z.string().min(1).max(40),
+      title: z.string().trim().min(1, "请填写标题").max(60, "标题请控制在 60 字以内"),
+      content: z
+        .string()
+        .trim()
+        .min(200, "正文至少 200 字")
+        .max(5000, "正文请控制在 5000 字以内"),
+    }),
+  );
+  const prompt = writingPromptById.get(body.promptId);
+  if (!prompt) return c.json(fail("NOT_FOUND", "练习题目不存在"), 404);
+  const grade = gradeWriting(prompt, body.title, body.content);
+  const id = uuid("essay");
+  const createdAt = iso();
+  await c.env.DB.prepare(
+    "INSERT INTO essay_submissions(id,user_id,prompt_id,prompt_title,title,content,word_count,score,grade,dimensions_json,feedback_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+  )
+    .bind(
+      id,
+      c.get("userId"),
+      prompt.id,
+      prompt.title,
+      body.title,
+      body.content,
+      grade.wordCount,
+      grade.score,
+      grade.grade,
+      JSON.stringify(grade.dimensions),
+      JSON.stringify({
+        paragraphs: grade.paragraphs,
+        matchedKeywords: grade.matchedKeywords,
+        missingKeywords: grade.missingKeywords,
+        issues: grade.issues,
+        suggestions: grade.suggestions,
+        summary: grade.summary,
+      }),
+      createdAt,
+    )
+    .run();
+  return c.json(
+    ok({
+      id,
+      promptId: prompt.id,
+      promptTitle: prompt.title,
+      title: body.title,
+      content: body.content,
+      createdAt,
+      ...grade,
+    }),
+  );
+});
+
+app.get("/essay/writing/submissions", async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT id,prompt_id AS promptId,prompt_title AS promptTitle,title,word_count AS wordCount,
+            score,grade,created_at AS createdAt
+     FROM essay_submissions WHERE user_id=? ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(c.get("userId"))
+    .all<{
+      id: string;
+      promptId: string;
+      promptTitle: string;
+      title: string;
+      wordCount: number;
+      score: number;
+      grade: string;
+      createdAt: string;
+    }>();
+  return c.json(
+    ok({
+      items: rows.results.map((row) => ({
+        ...row,
+        wordCount: Number(row.wordCount),
+        score: Number(row.score),
+      })),
+    }),
+  );
+});
+
+app.get("/essay/writing/submissions/:id", async (c) => {
+  const row = await c.env.DB.prepare(
+    `SELECT id,prompt_id AS promptId,prompt_title AS promptTitle,title,content,
+            word_count AS wordCount,score,grade,dimensions_json AS dimensionsJson,
+            feedback_json AS feedbackJson,created_at AS createdAt
+     FROM essay_submissions WHERE id=? AND user_id=?`,
+  )
+    .bind(c.req.param("id"), c.get("userId"))
+    .first<EssaySubmissionRow>();
+  if (!row) return c.json(fail("NOT_FOUND", "批改记录不存在或无权访问"), 404);
+  const feedback = JSON.parse(row.feedbackJson) as {
+    paragraphs: unknown[];
+    matchedKeywords: string[];
+    missingKeywords: string[];
+    issues: string[];
+    suggestions: string[];
+    summary: string;
+  };
+  return c.json(
+    ok({
+      id: row.id,
+      promptId: row.promptId,
+      promptTitle: row.promptTitle,
+      title: row.title,
+      content: row.content,
+      wordCount: Number(row.wordCount),
+      score: Number(row.score),
+      grade: row.grade,
+      dimensions: JSON.parse(row.dimensionsJson) as unknown[],
+      createdAt: row.createdAt,
+      ...feedback,
+    }),
+  );
+});
 
 app.get("/essay/cards", async (c) => {
   const category = z
@@ -1734,16 +1892,24 @@ app.get("/quiz/stats", async (c) => {
 
 /**
  * 错题本列表：只返回「未掌握」的错题。
- * 重做正确会把 quiz_attempts.mastered 置 1，该题即从错题本出清（不再返回），
- * 错题数量随之减少；原始作答记录保留，所以累计答题/正确率等统计不受影响。
+ * 间隔复习口径：连续重做正确 2 次才 mastered（出清），第一次正确只推进到阶段 1 并安排次日再复习；
+ * 重做错误则回到阶段 0、10 分钟后重新到期。due=1 只返回已到期的题，用于「今日复习」。
  */
 app.get("/quiz/mistakes", async (c) => {
   const limit = integerQuery(c.req.query("limit"), 20, 1, 100);
+  const dueOnly = c.req.query("due") === "1";
+  const userId = c.get("userId");
+  const now = iso();
   const rows = await c.env.DB.prepare(
-    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.material_json AS materialJson,q.answer_index AS answerIndex,q.explanation,a.mastered,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 AND a.mastered=0 ORDER BY lastWrongAt DESC LIMIT ?`,
+    `SELECT q.id AS questionId,q.topic_id AS topicId,q.difficulty,q.stem,q.options_json AS optionsJson,q.material_json AS materialJson,q.answer_index AS answerIndex,q.explanation,a.mastered,a.cause_tag AS causeTag,a.review_stage AS reviewStage,a.next_review_at AS nextReviewAt,a.last_reviewed_at AS lastReviewedAt,COALESCE((SELECT MAX(r.created_at) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0),a.created_at) AS lastWrongAt,1+(SELECT COUNT(*) FROM quiz_retry_attempts r WHERE r.user_id=a.user_id AND r.question_id=a.question_id AND r.correct=0) AS wrongCount FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.correct=0 AND a.mastered=0${dueOnly ? " AND (a.next_review_at IS NULL OR a.next_review_at<=?)" : ""} ORDER BY ${dueOnly ? "a.next_review_at IS NULL DESC,a.next_review_at ASC" : "lastWrongAt DESC"} LIMIT ?`,
   )
-    .bind(c.get("userId"), limit)
+    .bind(...(dueOnly ? [userId, now, limit] : [userId, limit]))
     .all<Record<string, unknown>>();
+  const counts = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS openCount,COALESCE(SUM(CASE WHEN next_review_at IS NULL OR next_review_at<=? THEN 1 ELSE 0 END),0) AS dueCount FROM quiz_attempts WHERE user_id=? AND correct=0 AND mastered=0",
+  )
+    .bind(now, userId)
+    .first<{ openCount: number; dueCount: number }>();
   return c.json(
     ok({
       items: rows.results.map((row) => {
@@ -1757,6 +1923,10 @@ app.get("/quiz/mistakes", async (c) => {
           mastered: Boolean(row.mastered),
         };
       }),
+      counts: {
+        open: Number(counts?.openCount ?? 0),
+        due: Number(counts?.dueCount ?? 0),
+      },
       nextCursor: null,
     }),
   );
@@ -1778,14 +1948,25 @@ app.post("/quiz/mistakes/:questionId/retry", async (c) => {
     .first<Record<string, unknown>>();
   if (previous) return c.json(ok(previous));
   const mistake = await c.env.DB.prepare(
-    "SELECT q.answer_index AS answerIndex,q.explanation,a.id AS attemptId FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.question_id=? AND a.correct=0",
+    "SELECT q.answer_index AS answerIndex,q.explanation,a.id AS attemptId,a.review_stage AS reviewStage FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.question_id=? AND a.correct=0",
   )
     .bind(c.get("userId"), c.req.param("questionId"))
-    .first<{ answerIndex: number; explanation: string; attemptId: string }>();
+    .first<{
+      answerIndex: number;
+      explanation: string;
+      attemptId: string;
+      reviewStage: number;
+    }>();
   if (!mistake) return c.json(fail("NOT_FOUND", "错题不存在"), 404);
   const retryId = uuid("retry");
   const correct = body.selectedIndex === mistake.answerIndex;
   const savedAt = iso();
+  const reviewStage = correct ? Number(mistake.reviewStage ?? 0) + 1 : 0;
+  const mastered = reviewStage >= 2;
+  // 连续答对两次才出清；中途答错重排，避免「蒙对一次就消失」
+  const nextReviewAt = mastered
+    ? null
+    : iso(new Date(Date.now() + (correct ? 86400000 : 600000)));
   const insert = c.env.DB.prepare(
     "INSERT INTO quiz_retry_attempts(id,user_id,question_id,selected_index,correct,duration_ms,idempotency_key,created_at) VALUES(?,?,?,?,?,?,?,?)",
   ).bind(
@@ -1799,8 +1980,8 @@ app.post("/quiz/mistakes/:questionId/retry", async (c) => {
     savedAt,
   );
   const mastery = c.env.DB.prepare(
-    "UPDATE quiz_attempts SET mastered=? WHERE id=?",
-  ).bind(correct ? 1 : 0, mistake.attemptId);
+    "UPDATE quiz_attempts SET mastered=?,review_stage=?,next_review_at=?,last_reviewed_at=? WHERE id=?",
+  ).bind(mastered ? 1 : 0, reviewStage, nextReviewAt, savedAt, mistake.attemptId);
   try {
     await c.env.DB.batch([insert, mastery]);
   } catch (error) {
@@ -1818,7 +1999,9 @@ app.post("/quiz/mistakes/:questionId/retry", async (c) => {
       correct,
       answerIndex: mistake.answerIndex,
       explanation: mistake.explanation,
-      mastered: correct,
+      mastered,
+      reviewStage,
+      nextReviewAt,
       savedAt,
     }),
   );
@@ -1832,11 +2015,38 @@ app.patch("/quiz/mistakes/:questionId/mastery", async (c) => {
     .bind(c.get("userId"), c.req.param("questionId"))
     .first();
   if (!attempt) return c.json(fail("NOT_FOUND", "错题不存在"), 404);
-  await c.env.DB.prepare("UPDATE quiz_attempts SET mastered=? WHERE id=?")
-    .bind(body.mastered ? 1 : 0, (attempt as { id: string }).id)
+  const nextReviewAt = body.mastered ? null : iso();
+  await c.env.DB.prepare(
+    "UPDATE quiz_attempts SET mastered=?,review_stage=?,next_review_at=? WHERE id=?",
+  )
+    .bind(body.mastered ? 1 : 0, body.mastered ? 2 : 0, nextReviewAt, (attempt as { id: string }).id)
     .run();
   return c.json(
-    ok({ questionId: c.req.param("questionId"), mastered: body.mastered }),
+    ok({
+      questionId: c.req.param("questionId"),
+      mastered: body.mastered,
+      reviewStage: body.mastered ? 2 : 0,
+      nextReviewAt,
+    }),
+  );
+});
+
+app.patch("/quiz/mistakes/:questionId/cause", async (c) => {
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({ cause: z.enum(MISTAKE_CAUSE_IDS).nullable() }),
+  );
+  const attempt = await c.env.DB.prepare(
+    "SELECT id FROM quiz_attempts WHERE user_id=? AND question_id=? AND correct=0",
+  )
+    .bind(c.get("userId"), c.req.param("questionId"))
+    .first();
+  if (!attempt) return c.json(fail("NOT_FOUND", "错题不存在"), 404);
+  await c.env.DB.prepare("UPDATE quiz_attempts SET cause_tag=? WHERE id=?")
+    .bind(body.cause, (attempt as { id: string }).id)
+    .run();
+  return c.json(
+    ok({ questionId: c.req.param("questionId"), cause: body.cause }),
   );
 });
 
@@ -2132,6 +2342,486 @@ app.get("/profile/summary", async (c) => {
       },
     }),
   );
+});
+
+// ==================== 资料分析小模考（20 题 / 30 分钟 / 可分享报告） ====================
+const MOCK_QUESTION_COUNT = 20;
+const MOCK_DURATION_MS = 30 * 60 * 1000;
+/** 模考只取「资料实战」轨道的列式题：固定五类核心题型，各 4 题，中/高难度交替 */
+const MOCK_TOPICS = [
+  "formula-growth-rate",
+  "formula-growth-amount",
+  "formula-base-amount",
+  "formula-base-ratio",
+  "formula-average-basic",
+] as const satisfies readonly TopicId[];
+
+type MockGeneratedQuestion = {
+  topicId: TopicId;
+  difficulty: RunDifficulty;
+  generated: GeneratedQuestion;
+};
+
+function generateMockQuestionSet(): MockGeneratedQuestion[] | null {
+  const used = new Set<string>();
+  const result: MockGeneratedQuestion[] = [];
+  for (let position = 0; position < MOCK_QUESTION_COUNT; position += 1) {
+    const topicId = MOCK_TOPICS[position % MOCK_TOPICS.length];
+    const difficulties: RunDifficulty[] =
+      position % 2 === 0 ? ["hard", "medium"] : ["medium", "hard"];
+    let picked: MockGeneratedQuestion | null = null;
+    for (const difficulty of difficulties) {
+      for (let attempt = 0; attempt < 5 && !picked; attempt += 1) {
+        try {
+          const generated = generateQuestion({
+            topicId,
+            difficulty,
+            excludedFingerprints: [...used],
+            randomSeed: crypto.randomUUID(),
+          });
+          if (used.has(generated.fingerprint)) continue;
+          picked = { topicId, difficulty, generated };
+        } catch {
+          // 题池较小时换难度或换随机种子继续试
+        }
+      }
+      if (picked) break;
+    }
+    if (!picked) return null;
+    used.add(picked.generated.fingerprint);
+    result.push(picked);
+  }
+  return result;
+}
+
+interface MockExamRow {
+  id: string;
+  userId: string;
+  questionCount: number;
+  limitMs: number;
+  startedAt: string;
+  submittedAt: string | null;
+  durationMs: number | null;
+  correctCount: number | null;
+  score: number | null;
+  shareToken: string;
+  nickname: string;
+}
+
+interface MockQuestionRow {
+  id: string;
+  position: number;
+  topicId: string;
+  topicTitle: string;
+  difficulty: RunDifficulty;
+  stem: string;
+  optionsJson: string;
+  materialJson: string | null;
+  answerIndex: number;
+  explanation: string;
+  selectedIndex: number | null;
+  elapsedMs: number;
+}
+
+async function loadMockReport(
+  c: AppContext,
+  lookup:
+    | { examId: string; userId: string }
+    | { token: string },
+) {
+  const publicView = "token" in lookup;
+  const exam = await c.env.DB.prepare(
+    `SELECT e.id,e.user_id AS userId,e.question_count AS questionCount,e.duration_limit_ms AS limitMs,
+            e.started_at AS startedAt,e.submitted_at AS submittedAt,e.duration_ms AS durationMs,
+            e.correct_count AS correctCount,e.score,e.share_token AS shareToken,u.nickname
+     FROM mock_exams e JOIN users u ON u.id=e.user_id
+     WHERE ${publicView ? "e.share_token=?" : "e.id=? AND e.user_id=?"} AND e.status='submitted'`,
+  )
+    .bind(...(publicView ? [lookup.token] : [lookup.examId, lookup.userId]))
+    .first<MockExamRow>();
+  if (!exam) return null;
+  const rows = await c.env.DB.prepare(
+    `SELECT id,position,topic_id AS topicId,topic_title AS topicTitle,difficulty,stem,
+            options_json AS optionsJson,material_json AS materialJson,answer_index AS answerIndex,
+            explanation,selected_index AS selectedIndex,elapsed_ms AS elapsedMs
+     FROM mock_exam_questions WHERE exam_id=? ORDER BY position`,
+  )
+    .bind(exam.id)
+    .all<MockQuestionRow>();
+  const questionCount = Number(exam.questionCount) || rows.results.length;
+  const correctCount =
+    exam.correctCount === null
+      ? rows.results.filter((row) => row.selectedIndex === row.answerIndex).length
+      : Number(exam.correctCount);
+  const score = exam.score === null ? Math.round((correctCount / Math.max(1, questionCount)) * 100) : Number(exam.score);
+  const byTopic = MOCK_TOPICS.map((topicId) => {
+    const topicRows = rows.results.filter((row) => row.topicId === topicId);
+    const total = topicRows.length;
+    const correct = topicRows.filter(
+      (row) => row.selectedIndex === row.answerIndex,
+    ).length;
+    const answered = topicRows.filter((row) => row.selectedIndex !== null);
+    return {
+      topicId,
+      title: titleOf(topicId),
+      total,
+      correct,
+      accuracy: total ? correct / total : 0,
+      averageMs: answered.length
+        ? Math.round(
+            answered.reduce((sum, row) => sum + Number(row.elapsedMs), 0) /
+              answered.length,
+          )
+        : 0,
+    };
+  }).filter((item) => item.total > 0);
+  const ranked = [...byTopic].sort((a, b) => a.accuracy - b.accuracy);
+  const weakTopics = ranked.filter((item) => item.accuracy < 0.6);
+  const slowestTopic = [...byTopic].sort(
+    (a, b) => b.averageMs - a.averageMs,
+  )[0] ?? null;
+  const [historyStats, previous] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS attemptCount,MAX(score) AS bestScore FROM mock_exams WHERE user_id=? AND status='submitted' AND id<>?",
+    )
+      .bind(exam.userId, exam.id)
+      .first<{ attemptCount: number; bestScore: number | null }>(),
+    c.env.DB.prepare(
+      "SELECT score FROM mock_exams WHERE user_id=? AND status='submitted' AND id<>? AND submitted_at<? ORDER BY submitted_at DESC LIMIT 1",
+    )
+      .bind(exam.userId, exam.id, exam.submittedAt ?? exam.startedAt)
+      .first<{ score: number }>(),
+  ]);
+  const previousScore = previous?.score === undefined ? null : Number(previous.score);
+  return {
+    id: exam.id,
+    status: "submitted" as const,
+    nickname: publicView
+      ? `${Array.from(exam.nickname)[0] ?? "学"}同学`
+      : exam.nickname,
+    score,
+    correctCount,
+    questionCount,
+    accuracy: questionCount ? correctCount / questionCount : 0,
+    durationMs: Number(exam.durationMs) || 0,
+    limitMs: Number(exam.limitMs),
+    startedAt: exam.startedAt,
+    submittedAt: exam.submittedAt,
+    shareToken: publicView ? null : exam.shareToken,
+    byTopic,
+    weakTopics,
+    focusTopics: ranked.slice(0, 2),
+    slowestTopic,
+    comparison: {
+      attemptCount: (Number(historyStats?.attemptCount) || 0) + 1,
+      bestScore: Math.max(Number(historyStats?.bestScore) || 0, score),
+      previousScore,
+      deltaScore: previousScore === null ? null : score - previousScore,
+    },
+    questions: publicView
+      ? null
+      : rows.results.map((row) => ({
+          id: row.id,
+          position: row.position,
+          topicId: row.topicId,
+          topicTitle: row.topicTitle,
+          difficulty: row.difficulty,
+          stem: row.stem,
+          options: JSON.parse(row.optionsJson) as string[],
+          material: row.materialJson
+            ? (JSON.parse(row.materialJson) as MaterialSpec)
+            : null,
+          answerIndex: row.answerIndex,
+          explanation: row.explanation,
+          selectedIndex: row.selectedIndex,
+          correct: row.selectedIndex === row.answerIndex,
+          elapsedMs: Number(row.elapsedMs),
+        })),
+  };
+}
+
+app.post("/mock/exams", async (c) => {
+  if (!allowGeneration(`mock:${c.get("userId")}`))
+    return c.json(fail("RATE_LIMITED", "创建模考过于频繁，请稍后再试"), 429);
+  const questions = generateMockQuestionSet();
+  if (!questions)
+    return c.json(fail("GENERATION_FAILED", "暂时无法生成完整模考，请稍后重试"), 503);
+  const examId = uuid("mock");
+  const startedAt = iso();
+  const statements = [
+    c.env.DB.prepare(
+      "INSERT INTO mock_exams(id,user_id,status,question_count,duration_limit_ms,started_at) VALUES(?,?,'active',?,?,?)",
+    ).bind(
+      examId,
+      c.get("userId"),
+      questions.length,
+      MOCK_DURATION_MS,
+      startedAt,
+    ),
+    ...questions.map((item, position) =>
+      c.env.DB.prepare(
+        "INSERT INTO mock_exam_questions(id,exam_id,position,topic_id,topic_title,difficulty,stem,options_json,material_json,answer_index,explanation) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      ).bind(
+        uuid("mq"),
+        examId,
+        position,
+        item.topicId,
+        titleOf(item.topicId),
+        item.difficulty,
+        item.generated.stem,
+        JSON.stringify(item.generated.options),
+        item.generated.material
+          ? JSON.stringify(item.generated.material)
+          : null,
+        item.generated.answerIndex,
+        item.generated.explanation,
+      ),
+    ),
+  ];
+  await c.env.DB.batch(statements);
+  return c.json(ok({ examId, startedAt, questionCount: questions.length, limitMs: MOCK_DURATION_MS }));
+});
+
+app.get("/mock/exams", async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT id,status,question_count AS questionCount,duration_limit_ms AS limitMs,
+            started_at AS startedAt,submitted_at AS submittedAt,duration_ms AS durationMs,
+            correct_count AS correctCount,score,share_token AS shareToken
+     FROM mock_exams WHERE user_id=? ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(c.get("userId"))
+    .all<{
+      id: string;
+      status: "active" | "submitted";
+      questionCount: number;
+      limitMs: number;
+      startedAt: string;
+      submittedAt: string | null;
+      durationMs: number | null;
+      correctCount: number | null;
+      score: number | null;
+      shareToken: string | null;
+    }>();
+  const items = rows.results.map((row) => ({
+    id: row.id,
+    status: row.status,
+    questionCount: Number(row.questionCount),
+    limitMs: Number(row.limitMs),
+    startedAt: row.startedAt,
+    submittedAt: row.submittedAt,
+    durationMs: Number(row.durationMs) || 0,
+    correctCount: row.correctCount === null ? null : Number(row.correctCount),
+    score: row.score === null ? null : Number(row.score),
+    shareToken: row.status === "submitted" ? row.shareToken : null,
+    remainingMs:
+      row.status === "active"
+        ? Math.max(
+            0,
+            Number(row.limitMs) - (Date.now() - Date.parse(row.startedAt)),
+          )
+        : 0,
+  }));
+  return c.json(
+    ok({
+      items,
+      active: items.find((item) => item.status === "active") ?? null,
+    }),
+  );
+});
+
+app.get("/mock/exams/:id", async (c) => {
+  const exam = await c.env.DB.prepare(
+    `SELECT id,status,question_count AS questionCount,duration_limit_ms AS limitMs,
+            started_at AS startedAt,submitted_at AS submittedAt,duration_ms AS durationMs,
+            correct_count AS correctCount,score,share_token AS shareToken
+     FROM mock_exams WHERE id=? AND user_id=?`,
+  )
+    .bind(c.req.param("id"), c.get("userId"))
+    .first<{
+      id: string;
+      status: "active" | "submitted";
+      questionCount: number;
+      limitMs: number;
+      startedAt: string;
+      submittedAt: string | null;
+      durationMs: number | null;
+      correctCount: number | null;
+      score: number | null;
+      shareToken: string | null;
+    }>();
+  if (!exam) return c.json(fail("NOT_FOUND", "模考不存在或无权访问"), 404);
+  if (exam.status === "submitted")
+    return c.json(
+      ok({
+        id: exam.id,
+        status: exam.status,
+        questionCount: Number(exam.questionCount),
+        limitMs: Number(exam.limitMs),
+        startedAt: exam.startedAt,
+        submittedAt: exam.submittedAt,
+        durationMs: Number(exam.durationMs) || 0,
+        correctCount: exam.correctCount === null ? null : Number(exam.correctCount),
+        score: exam.score === null ? null : Number(exam.score),
+        shareToken: exam.shareToken,
+        remainingMs: 0,
+        questions: [],
+      }),
+    );
+  const rows = await c.env.DB.prepare(
+    `SELECT id,position,topic_id AS topicId,topic_title AS topicTitle,difficulty,stem,
+            options_json AS optionsJson,material_json AS materialJson,selected_index AS selectedIndex
+     FROM mock_exam_questions WHERE exam_id=? ORDER BY position`,
+  )
+    .bind(exam.id)
+    .all<{
+      id: string;
+      position: number;
+      topicId: string;
+      topicTitle: string;
+      difficulty: RunDifficulty;
+      stem: string;
+      optionsJson: string;
+      materialJson: string | null;
+      selectedIndex: number | null;
+    }>();
+  return c.json(
+    ok({
+      id: exam.id,
+      status: exam.status,
+      questionCount: Number(exam.questionCount),
+      limitMs: Number(exam.limitMs),
+      startedAt: exam.startedAt,
+      submittedAt: null,
+      durationMs: 0,
+      correctCount: null,
+      score: null,
+      shareToken: null,
+      remainingMs: Math.max(
+        0,
+        Number(exam.limitMs) - (Date.now() - Date.parse(exam.startedAt)),
+      ),
+      questions: rows.results.map((row) => ({
+        id: row.id,
+        position: row.position,
+        topicId: row.topicId,
+        topicTitle: row.topicTitle,
+        difficulty: row.difficulty,
+        stem: row.stem,
+        options: JSON.parse(row.optionsJson) as string[],
+        material: row.materialJson
+          ? (JSON.parse(row.materialJson) as MaterialSpec)
+          : null,
+        selectedIndex: row.selectedIndex,
+      })),
+    }),
+  );
+});
+
+app.post("/mock/exams/:id/answers", async (c) => {
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({
+      questionId: z.string().min(1),
+      selectedIndex: z.number().int().min(-1).max(3),
+      elapsedMs: z.number().int().min(0).max(MOCK_DURATION_MS),
+    }),
+  );
+  const exam = await c.env.DB.prepare(
+    "SELECT status FROM mock_exams WHERE id=? AND user_id=?",
+  )
+    .bind(c.req.param("id"), c.get("userId"))
+    .first<{ status: string }>();
+  if (!exam) return c.json(fail("NOT_FOUND", "模考不存在或无权访问"), 404);
+  if (exam.status === "submitted")
+    return c.json(fail("MOCK_SUBMITTED", "本场模考已交卷"), 409);
+  await c.env.DB.prepare(
+    "UPDATE mock_exam_questions SET selected_index=?,elapsed_ms=?,answered_at=? WHERE id=? AND exam_id=?",
+  )
+    .bind(
+      body.selectedIndex,
+      body.elapsedMs,
+      iso(),
+      body.questionId,
+      c.req.param("id"),
+    )
+    .run();
+  return c.json(ok({ saved: true }));
+});
+
+app.post("/mock/exams/:id/submit", async (c) => {
+  const exam = await c.env.DB.prepare(
+    "SELECT status,question_count AS questionCount,duration_limit_ms AS limitMs,started_at AS startedAt FROM mock_exams WHERE id=? AND user_id=?",
+  )
+    .bind(c.req.param("id"), c.get("userId"))
+    .first<{
+      status: string;
+      questionCount: number;
+      limitMs: number;
+      startedAt: string;
+    }>();
+  if (!exam) return c.json(fail("NOT_FOUND", "模考不存在或无权访问"), 404);
+  if (exam.status === "submitted") {
+    const report = await loadMockReport(c, {
+      examId: c.req.param("id"),
+      userId: c.get("userId"),
+    });
+    if (!report) return c.json(fail("NOT_FOUND", "成绩报告不存在"), 404);
+    return c.json(ok(report));
+  }
+  const questions = await c.env.DB.prepare(
+    "SELECT answer_index AS answerIndex,selected_index AS selectedIndex FROM mock_exam_questions WHERE exam_id=?",
+  )
+    .bind(c.req.param("id"))
+    .all<{ answerIndex: number; selectedIndex: number | null }>();
+  const correctCount = questions.results.filter(
+    (row) => row.selectedIndex !== null && row.selectedIndex === row.answerIndex,
+  ).length;
+  const questionCount = questions.results.length || Number(exam.questionCount);
+  const durationMs = Math.min(
+    Number(exam.limitMs),
+    Math.max(0, Date.now() - Date.parse(exam.startedAt)),
+  );
+  const score = Math.round((correctCount / Math.max(1, questionCount)) * 100);
+  const shareToken = crypto.randomUUID().replaceAll("-", "");
+  const submittedAt = iso();
+  await c.env.DB.prepare(
+    "UPDATE mock_exams SET status='submitted',submitted_at=?,duration_ms=?,correct_count=?,score=?,share_token=? WHERE id=? AND user_id=?",
+  )
+    .bind(
+      submittedAt,
+      durationMs,
+      correctCount,
+      score,
+      shareToken,
+      c.req.param("id"),
+      c.get("userId"),
+    )
+    .run();
+  const report = await loadMockReport(c, {
+    examId: c.req.param("id"),
+    userId: c.get("userId"),
+  });
+  if (!report) return c.json(fail("INTERNAL_ERROR", "成绩报告生成失败"), 500);
+  return c.json(ok(report));
+});
+
+app.get("/mock/exams/:id/report", async (c) => {
+  const report = await loadMockReport(c, {
+    examId: c.req.param("id"),
+    userId: c.get("userId"),
+  });
+  if (!report) return c.json(fail("NOT_FOUND", "交卷后才能查看成绩报告"), 404);
+  return c.json(ok(report));
+});
+
+app.get("/mock/reports/:token", async (c) => {
+  const token = c.req.param("token");
+  if (!/^[a-f0-9]{32}$/.test(token))
+    return c.json(fail("NOT_FOUND", "分享链接无效或已失效"), 404);
+  const report = await loadMockReport(c, { token });
+  if (!report)
+    return c.json(fail("NOT_FOUND", "分享链接无效或已失效"), 404);
+  return c.json(ok(report));
 });
 
 app.post("/schulte/results", async (c) => {

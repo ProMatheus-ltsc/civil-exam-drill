@@ -158,6 +158,14 @@ const essayBankUrl = new URL('../src/essay/bank.ts', import.meta.url).href
 const essayRulesUrl = new URL('../src/essay/rules.ts', import.meta.url).href
 const { essayStars } = await import(essayRulesUrl)
 const { essayQuizIssue, essayQuizOf, gradeEssayQuiz } = await import(essayBankUrl)
+// 整篇批改：题目与规则评分同源 src/essay/writing.ts
+const essayWritingUrl = new URL('../src/essay/writing.ts', import.meta.url).href
+const { WRITING_PROMPTS, writingPromptById, gradeWriting } = await import(essayWritingUrl)
+// 错因标签同源 src/mistakes.ts，避免本地与线上的可选值不一致
+const mistakesUrl = new URL('../src/mistakes.ts', import.meta.url).href
+const { MISTAKE_CAUSE_IDS } = await import(mistakesUrl)
+/** id -> 批改记录（本地重启即失效） */
+const essaySubmissions = new Map()
 /** levelId -> { checked: number[], quiz: [{id,key}], notes: string, stars: number } */
 const essayTrainingState = new Map()
 
@@ -167,6 +175,51 @@ const quizState = {
   questions: new Map(),
   runs: new Map(), // runId -> { topicId, difficulty, answered: [] }
 }
+/** 本地错题本：questionId -> 题目 + 复习状态（连续答对 2 次出清） */
+const mistakeState = {
+  items: new Map([
+    [
+      'q_demo_addition',
+      {
+        questionId: 'q_demo_addition',
+        topicId: 'addition',
+        difficulty: 'easy',
+        stem: '模拟加法题：486 + 397 =（ ）',
+        options: ['873', '883', '893', '783'],
+        material: null,
+        answerIndex: 1,
+        explanation: '486 + 400 - 3 = 886 - 3 = 883。',
+        mastered: false,
+        wrongCount: 2,
+        causeTag: null,
+        reviewStage: 0,
+        nextReviewAt: new Date(Date.now() - 60_000).toISOString(),
+        lastReviewedAt: null,
+      },
+    ],
+    [
+      'q_demo_growth',
+      {
+        questionId: 'q_demo_growth',
+        topicId: 'growth-rate',
+        difficulty: 'medium',
+        stem: '模拟增长率题：基期 800，现期 920，同比增长率为（ ）',
+        options: ['12%', '13%', '15%', '18%'],
+        material: null,
+        answerIndex: 2,
+        explanation: '(920 - 800) ÷ 800 = 120 ÷ 800 = 15%。',
+        mastered: false,
+        wrongCount: 1,
+        causeTag: 'calculation',
+        reviewStage: 1,
+        nextReviewAt: new Date(Date.now() + 86400_000).toISOString(),
+        lastReviewedAt: new Date().toISOString(),
+      },
+    ],
+  ]),
+}
+/** 本地模考：examId -> 考试（含题目与作答），重启即失效 */
+const mockExams = new Map()
 const topicOfId = (id) => CATALOG.find((t) => t.id === id)
 /** 各难度局是否通过（stars ≥1）；模块解锁看前置模块 high 局 */
 const passedRuns = () => {
@@ -510,6 +563,96 @@ const server = http.createServer(async (req, res) => {
   }
 
   // === Essay API（返回空数据，避免卡死）===
+  if (pathname === '/api/essay/writing/prompts' && req.method === 'GET') {
+    sendJson(res, 200, { success: true, data: { prompts: WRITING_PROMPTS }, error: null })
+    return
+  }
+
+  if (pathname === '/api/essay/writing/submissions' && req.method === 'GET') {
+    const user = currentMockUser(req)
+    const items = [...essaySubmissions.values()]
+      .filter((item) => item.userId === (user?.id ?? 'dev-user'))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 20)
+      .map((item) => ({
+        id: item.id,
+        promptId: item.promptId,
+        promptTitle: item.promptTitle,
+        title: item.title,
+        wordCount: item.grade.wordCount,
+        score: item.grade.score,
+        grade: item.grade.grade,
+        createdAt: item.createdAt,
+      }))
+    sendJson(res, 200, { success: true, data: { items }, error: null })
+    return
+  }
+
+  const writingDetailMatch = pathname.match(/^\/api\/essay\/writing\/submissions\/([^/]+)$/)
+  if (writingDetailMatch && req.method === 'GET') {
+    const user = currentMockUser(req)
+    const record = essaySubmissions.get(decodeURIComponent(writingDetailMatch[1]))
+    if (!record || record.userId !== (user?.id ?? 'dev-user')) {
+      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '批改记录不存在或无权访问' } })
+      return
+    }
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        id: record.id,
+        promptId: record.promptId,
+        promptTitle: record.promptTitle,
+        title: record.title,
+        content: record.content,
+        createdAt: record.createdAt,
+        ...record.grade,
+      },
+      error: null,
+    })
+    return
+  }
+
+  if (pathname === '/api/essay/writing/submissions' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req))
+    const prompt = writingPromptById.get(String(body.promptId ?? ''))
+    const title = String(body.title ?? '').trim()
+    const content = String(body.content ?? '').trim()
+    if (!prompt) {
+      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '练习题目不存在' } })
+      return
+    }
+    if (!title || content.length < 200) {
+      sendJson(res, 400, { success: false, data: null, error: { code: 'INVALID_PARAM', message: '标题不能为空，正文至少 200 字' } })
+      return
+    }
+    const user = currentMockUser(req)
+    const record = {
+      id: `essay-${crypto.randomUUID()}`,
+      userId: user?.id ?? 'dev-user',
+      promptId: prompt.id,
+      promptTitle: prompt.title,
+      title,
+      content,
+      createdAt: new Date().toISOString(),
+      grade: gradeWriting(prompt, title, content),
+    }
+    essaySubmissions.set(record.id, record)
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        id: record.id,
+        promptId: record.promptId,
+        promptTitle: record.promptTitle,
+        title: record.title,
+        content: record.content,
+        createdAt: record.createdAt,
+        ...record.grade,
+      },
+      error: null,
+    })
+    return
+  }
+
   if (pathname === '/api/essay/cards' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
@@ -692,6 +835,32 @@ const server = http.createServer(async (req, res) => {
         return
       }
       const correct = selectedIndex === question.answerIndex
+      if (!correct) {
+        const existing = mistakeState.items.get(questionId)
+        if (existing) {
+          existing.wrongCount += 1
+          existing.mastered = false
+          existing.reviewStage = 0
+          existing.nextReviewAt = new Date().toISOString()
+        } else {
+          mistakeState.items.set(questionId, {
+            questionId,
+            topicId: question.topicId,
+            difficulty: question.difficulty,
+            stem: question.stem,
+            options: question.options,
+            material: question.material ?? null,
+            answerIndex: question.answerIndex,
+            explanation: question.explanation,
+            mastered: false,
+            wrongCount: 1,
+            causeTag: null,
+            reviewStage: 0,
+            nextReviewAt: new Date().toISOString(),
+            lastReviewedAt: null,
+          })
+        }
+      }
       let run = null
       if (question.runId && quizState.runs.has(question.runId)) {
         const runData = quizState.runs.get(question.runId)
@@ -717,6 +886,103 @@ const server = http.createServer(async (req, res) => {
     return
   }
   
+  // === 错题本：列表 / 重做（连续答对 2 次出清）/ 错因标签 / 手动掌握 ===
+  if (pathname === '/api/quiz/mistakes' && req.method === 'GET') {
+    const dueOnly = query.due === '1'
+    const now = Date.now()
+    const open = [...mistakeState.items.values()].filter((item) => !item.mastered)
+    const due = open.filter((item) => !item.nextReviewAt || new Date(item.nextReviewAt).getTime() <= now)
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20))
+    const list = (dueOnly ? due : open)
+      .slice()
+      .sort((a, b) =>
+        dueOnly
+          ? new Date(a.nextReviewAt ?? 0).getTime() - new Date(b.nextReviewAt ?? 0).getTime()
+          : new Date(b.lastReviewedAt ?? 0).getTime() - new Date(a.lastReviewedAt ?? 0).getTime(),
+      )
+      .slice(0, limit)
+    sendJson(res, 200, {
+      success: true,
+      data: { items: list, counts: { open: open.length, due: due.length }, nextCursor: null },
+      error: null,
+    })
+    return
+  }
+
+  const mistakeRetryMatch = pathname.match(/^\/api\/quiz\/mistakes\/([^/]+)\/retry$/)
+  if (mistakeRetryMatch && req.method === 'POST') {
+    const questionId = decodeURIComponent(mistakeRetryMatch[1])
+    const item = mistakeState.items.get(questionId)
+    if (!item) {
+      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '错题不存在' } })
+      return
+    }
+    const body = JSON.parse(await readBody(req))
+    const correct = Number(body.selectedIndex) === item.answerIndex
+    item.reviewStage = correct ? item.reviewStage + 1 : 0
+    item.mastered = item.reviewStage >= 2
+    item.lastReviewedAt = new Date().toISOString()
+    item.nextReviewAt = item.mastered
+      ? null
+      : new Date(Date.now() + (correct ? 86400_000 : 600_000)).toISOString()
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        retryId: `retry_${crypto.randomUUID()}`,
+        correct,
+        answerIndex: item.answerIndex,
+        explanation: item.explanation,
+        mastered: item.mastered,
+        reviewStage: item.reviewStage,
+        nextReviewAt: item.nextReviewAt,
+        savedAt: new Date().toISOString(),
+      },
+      error: null,
+    })
+    return
+  }
+
+  const mistakeCauseMatch = pathname.match(/^\/api\/quiz\/mistakes\/([^/]+)\/cause$/)
+  if (mistakeCauseMatch && req.method === 'PATCH') {
+    const item = mistakeState.items.get(decodeURIComponent(mistakeCauseMatch[1]))
+    const body = JSON.parse(await readBody(req))
+    if (!item) {
+      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '错题不存在' } })
+      return
+    }
+    if (body.cause !== null && !MISTAKE_CAUSE_IDS.includes(body.cause)) {
+      sendJson(res, 400, { success: false, data: null, error: { code: 'INVALID_PARAM', message: '错因标签不合法' } })
+      return
+    }
+    item.causeTag = body.cause
+    sendJson(res, 200, { success: true, data: { questionId: item.questionId, cause: item.causeTag }, error: null })
+    return
+  }
+
+  const mistakeMasteryMatch = pathname.match(/^\/api\/quiz\/mistakes\/([^/]+)\/mastery$/)
+  if (mistakeMasteryMatch && req.method === 'PATCH') {
+    const item = mistakeState.items.get(decodeURIComponent(mistakeMasteryMatch[1]))
+    const body = JSON.parse(await readBody(req))
+    if (!item) {
+      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '错题不存在' } })
+      return
+    }
+    item.mastered = Boolean(body.mastered)
+    item.reviewStage = item.mastered ? 2 : 0
+    item.nextReviewAt = item.mastered ? null : new Date().toISOString()
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        questionId: item.questionId,
+        mastered: item.mastered,
+        reviewStage: item.reviewStage,
+        nextReviewAt: item.nextReviewAt,
+      },
+      error: null,
+    })
+    return
+  }
+
   const quizStatsMatch = pathname === '/api/quiz/stats' && req.method === 'GET'
   if (quizStatsMatch) {
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -908,6 +1174,306 @@ const server = http.createServer(async (req, res) => {
       },
       error: null,
     })
+    return
+  }
+
+  // ==================== 资料分析小模考（本地 mock，与线上同响应形状） ====================
+  const mockTopicIds = [
+    'formula-growth-rate',
+    'formula-growth-amount',
+    'formula-base-amount',
+    'formula-base-ratio',
+    'formula-average-basic',
+  ]
+  const mockLimitMs = 30 * 60 * 1000
+  const mockReport = (exam, publicView = false) => {
+    const correctCount = exam.questions.filter(
+      (q) => q.selectedIndex !== null && q.selectedIndex === q.answerIndex,
+    ).length
+    const byTopic = mockTopicIds
+      .map((topicId) => {
+        const rows = exam.questions.filter((q) => q.topicId === topicId)
+        const correct = rows.filter((q) => q.selectedIndex === q.answerIndex).length
+        const answered = rows.filter((q) => q.selectedIndex !== null)
+        return {
+          topicId,
+          title: titleOf(topicId),
+          total: rows.length,
+          correct,
+          accuracy: rows.length ? correct / rows.length : 0,
+          averageMs: answered.length
+            ? Math.round(answered.reduce((sum, q) => sum + q.elapsedMs, 0) / answered.length)
+            : 0,
+        }
+      })
+      .filter((item) => item.total)
+    const ranked = [...byTopic].sort((a, b) => a.accuracy - b.accuracy)
+    const others = [...mockExams.values()].filter(
+      (item) =>
+        item.userId === exam.userId &&
+        item.status === 'submitted' &&
+        item.id !== exam.id,
+    )
+    const previous = others
+      .filter((item) => (item.submittedAt ?? '') < (exam.submittedAt ?? ''))
+      .sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''))[0]
+    const previousScore = previous ? previous.score : null
+    return {
+      id: exam.id,
+      status: 'submitted',
+      nickname: publicView
+        ? `${Array.from(exam.nickname)[0] ?? '学'}同学`
+        : exam.nickname,
+      score: exam.score,
+      correctCount: exam.correctCount,
+      questionCount: exam.questionCount,
+      accuracy: exam.correctCount / Math.max(1, exam.questionCount),
+      durationMs: exam.durationMs,
+      limitMs: exam.limitMs,
+      startedAt: exam.startedAt,
+      submittedAt: exam.submittedAt,
+      shareToken: publicView ? null : exam.shareToken,
+      byTopic,
+      weakTopics: ranked.filter((item) => item.accuracy < 0.6),
+      focusTopics: ranked.slice(0, 2),
+      slowestTopic:
+        [...byTopic].sort((a, b) => b.averageMs - a.averageMs)[0] ?? null,
+      comparison: {
+        attemptCount: others.length + 1,
+        bestScore: Math.max(exam.score, ...others.map((item) => item.score ?? 0)),
+        previousScore,
+        deltaScore: previousScore === null ? null : exam.score - previousScore,
+      },
+      questions: publicView
+        ? null
+        : exam.questions.map((q) => ({
+            ...q,
+            correct: q.selectedIndex === q.answerIndex,
+          })),
+    }
+  }
+
+  const sharedMockMatch = pathname.match(/^\/api\/mock\/reports\/([a-f0-9]{32})$/)
+  if (sharedMockMatch && req.method === 'GET') {
+    const exam = [...mockExams.values()].find(
+      (item) => item.shareToken === sharedMockMatch[1] && item.status === 'submitted',
+    )
+    if (!exam) {
+      sendJson(res, 404, {
+        success: false,
+        data: null,
+        error: { code: 'NOT_FOUND', message: '分享链接无效或已失效' },
+      })
+      return
+    }
+    sendJson(res, 200, { success: true, data: mockReport(exam, true), error: null })
+    return
+  }
+
+  if (pathname === '/api/mock/exams' && req.method === 'POST') {
+    const user = currentMockUser(req)
+    const questions = Array.from({ length: 20 }, (_, position) => {
+      const topicId = mockTopicIds[position % mockTopicIds.length]
+      const difficulty = position % 2 === 0 ? 'hard' : 'medium'
+      return {
+        id: `mq_${crypto.randomUUID()}`,
+        position,
+        topicId,
+        topicTitle: titleOf(topicId),
+        difficulty,
+        stem: `【本地模考】第 ${position + 1} 题（${titleOf(topicId)} · ${difficulty === 'hard' ? '高难度' : '中难度'}）：根据材料选择正确列式。`,
+        options: ['列式 A', '列式 B', '列式 C', '列式 D'],
+        material: null,
+        answerIndex: (position * 3 + 1) % 4,
+        explanation: '这是本地开发环境的模拟解析：先定位数据，再按对应公式列式。',
+        selectedIndex: null,
+        elapsedMs: 0,
+      }
+    })
+    const exam = {
+      id: `mock_${crypto.randomUUID()}`,
+      userId: user?.id ?? 'dev-guest',
+      nickname: user?.nickname ?? '开发用户',
+      status: 'active',
+      questionCount: questions.length,
+      limitMs: mockLimitMs,
+      startedAt: new Date().toISOString(),
+      submittedAt: null,
+      durationMs: null,
+      correctCount: null,
+      score: null,
+      shareToken: null,
+      questions,
+    }
+    mockExams.set(exam.id, exam)
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        examId: exam.id,
+        startedAt: exam.startedAt,
+        questionCount: exam.questionCount,
+        limitMs: exam.limitMs,
+      },
+      error: null,
+    })
+    return
+  }
+
+  if (pathname === '/api/mock/exams' && req.method === 'GET') {
+    const user = currentMockUser(req)
+    const items = [...mockExams.values()]
+      .filter((item) => item.userId === (user?.id ?? 'dev-guest'))
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      .map((exam) => ({
+        id: exam.id,
+        status: exam.status,
+        questionCount: exam.questionCount,
+        limitMs: exam.limitMs,
+        startedAt: exam.startedAt,
+        submittedAt: exam.submittedAt,
+        durationMs: exam.durationMs ?? 0,
+        correctCount: exam.correctCount,
+        score: exam.score,
+        shareToken: exam.status === 'submitted' ? exam.shareToken : null,
+        remainingMs:
+          exam.status === 'active'
+            ? Math.max(0, exam.limitMs - (Date.now() - Date.parse(exam.startedAt)))
+            : 0,
+      }))
+    sendJson(res, 200, {
+      success: true,
+      data: { items, active: items.find((item) => item.status === 'active') ?? null },
+      error: null,
+    })
+    return
+  }
+
+  const mockExamMatch = pathname.match(/^\/api\/mock\/exams\/([^/]+)$/)
+  if (mockExamMatch && req.method === 'GET') {
+    const user = currentMockUser(req)
+    const exam = mockExams.get(mockExamMatch[1])
+    if (!exam || exam.userId !== (user?.id ?? 'dev-guest')) {
+      sendJson(res, 404, {
+        success: false,
+        data: null,
+        error: { code: 'NOT_FOUND', message: '模考不存在或无权访问' },
+      })
+      return
+    }
+    if (exam.status === 'submitted') {
+      sendJson(res, 200, {
+        success: true,
+        data: {
+          id: exam.id,
+          status: exam.status,
+          questionCount: exam.questionCount,
+          limitMs: exam.limitMs,
+          startedAt: exam.startedAt,
+          submittedAt: exam.submittedAt,
+          durationMs: exam.durationMs,
+          correctCount: exam.correctCount,
+          score: exam.score,
+          shareToken: exam.shareToken,
+          remainingMs: 0,
+          questions: [],
+        },
+        error: null,
+      })
+      return
+    }
+    sendJson(res, 200, {
+      success: true,
+      data: {
+        id: exam.id,
+        status: exam.status,
+        questionCount: exam.questionCount,
+        limitMs: exam.limitMs,
+        startedAt: exam.startedAt,
+        submittedAt: null,
+        durationMs: 0,
+        correctCount: null,
+        score: null,
+        shareToken: null,
+        remainingMs: Math.max(
+          0,
+          exam.limitMs - (Date.now() - Date.parse(exam.startedAt)),
+        ),
+        questions: exam.questions.map(({ answerIndex, explanation, ...question }) => question),
+      },
+      error: null,
+    })
+    return
+  }
+
+  const mockAnswerMatch = pathname.match(/^\/api\/mock\/exams\/([^/]+)\/answers$/)
+  if (mockAnswerMatch && req.method === 'POST') {
+    const exam = mockExams.get(mockAnswerMatch[1])
+    if (!exam) {
+      sendJson(res, 404, {
+        success: false,
+        data: null,
+        error: { code: 'NOT_FOUND', message: '模考不存在或无权访问' },
+      })
+      return
+    }
+    if (exam.status === 'submitted') {
+      sendJson(res, 409, {
+        success: false,
+        data: null,
+        error: { code: 'MOCK_SUBMITTED', message: '本场模考已交卷' },
+      })
+      return
+    }
+    const body = JSON.parse(await readBody(req))
+    const question = exam.questions.find((item) => item.id === body.questionId)
+    if (question) {
+      question.selectedIndex = body.selectedIndex
+      question.elapsedMs = body.elapsedMs
+    }
+    sendJson(res, 200, { success: true, data: { saved: true }, error: null })
+    return
+  }
+
+  const mockSubmitMatch = pathname.match(/^\/api\/mock\/exams\/([^/]+)\/submit$/)
+  if (mockSubmitMatch && req.method === 'POST') {
+    const exam = mockExams.get(mockSubmitMatch[1])
+    if (!exam) {
+      sendJson(res, 404, {
+        success: false,
+        data: null,
+        error: { code: 'NOT_FOUND', message: '模考不存在或无权访问' },
+      })
+      return
+    }
+    if (exam.status === 'active') {
+      exam.correctCount = exam.questions.filter(
+        (q) => q.selectedIndex !== null && q.selectedIndex === q.answerIndex,
+      ).length
+      exam.durationMs = Math.min(
+        exam.limitMs,
+        Math.max(0, Date.now() - Date.parse(exam.startedAt)),
+      )
+      exam.score = Math.round((exam.correctCount / exam.questionCount) * 100)
+      exam.submittedAt = new Date().toISOString()
+      exam.shareToken = crypto.randomUUID().replaceAll('-', '')
+      exam.status = 'submitted'
+    }
+    sendJson(res, 200, { success: true, data: mockReport(exam), error: null })
+    return
+  }
+
+  const mockReportMatch = pathname.match(/^\/api\/mock\/exams\/([^/]+)\/report$/)
+  if (mockReportMatch && req.method === 'GET') {
+    const exam = mockExams.get(mockReportMatch[1])
+    if (!exam || exam.status !== 'submitted') {
+      sendJson(res, 404, {
+        success: false,
+        data: null,
+        error: { code: 'NOT_FOUND', message: '交卷后才能查看成绩报告' },
+      })
+      return
+    }
+    sendJson(res, 200, { success: true, data: mockReport(exam), error: null })
     return
   }
 

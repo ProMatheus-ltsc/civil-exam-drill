@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   BookOpen,
   Brain,
@@ -19,7 +19,10 @@ import { StatCard } from "@shared/core/components/stats/StatCard";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api } from "../api/client";
 import { knowledgeDocHref, openKnowledgeDoc } from "../lib/doc-link";
+import { topics } from "../generator";
+import { DocPractice } from "../components/DocPractice";
 import { EssayTraining } from "./EssayTrainingPage";
+import { EssayWritingPage } from "./EssayWritingPage";
 import { useAsync } from "../hooks/useAsync";
 import { isReviewDue } from "../essay/queue";
 import { initialProgress, scheduleReview } from "../essay/scheduler";
@@ -37,6 +40,14 @@ type KnowledgeDetail = {
   module: string;
   category: string;
 };
+type QuizProgressItem = {
+  topicId: string;
+  difficulty: "easy" | "medium" | "hard";
+  stars: number;
+  total: number;
+  accuracy: number;
+};
+type DocMastery = { stars: number; total: number; accuracy: number };
 type CardProgress = {
   repetitions: number;
   intervalDays: number;
@@ -191,6 +202,33 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
     for (const item of filtered) (groups[item.category] ??= []).push(item);
     return Object.entries(groups);
   }, [filtered]);
+  const [quizProgress, setQuizProgress] = useState<QuizProgressItem[]>([]);
+  useEffect(() => {
+    if (essay) return;
+    void api<QuizProgressItem[]>("/quiz/progress")
+      .then(setQuizProgress)
+      .catch(() => undefined);
+  }, [essay]);
+  // 文档 → 关联关卡 → 最佳星级/正确率；没有关联训练的文档不显示掌握度
+  const masteryByDoc = useMemo(() => {
+    const map = new Map<string, DocMastery>();
+    if (essay) return map;
+    for (const topic of topics) {
+      if (!topic.docId) continue;
+      const rows = quizProgress.filter((row) => row.topicId === topic.id);
+      const current = map.get(topic.docId) ?? { stars: 0, total: 0, accuracy: 0 };
+      const total = current.total + rows.reduce((sum, row) => sum + row.total, 0);
+      const correct =
+        current.accuracy * current.total +
+        rows.reduce((sum, row) => sum + row.accuracy * row.total, 0);
+      map.set(topic.docId, {
+        stars: Math.max(current.stars, ...rows.map((row) => row.stars)),
+        total,
+        accuracy: total ? correct / total : 0,
+      });
+    }
+    return map;
+  }, [quizProgress, essay]);
   if (busy && !items.length) return <LoadingSpinner message="知识库加载中…" />;
   return (
     <section className="panel">
@@ -235,23 +273,43 @@ export function KnowledgePage({ essay = false }: { essay?: boolean }) {
                 <span>{categoryItems.length} 篇</span>
               </div>
               <ResponsiveGrid minItemWidth="230px" gap="0.875rem">
-                {categoryItems.map((item) => (
-                  <a
-                    key={item.id}
-                    className="entry"
-                    href={knowledgeDocHref(item.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <small>
-                      {essay
-                        ? "申论"
-                        : modules.find((moduleItem) => moduleItem[0] === item.module)?.[1]}
-                    </small>
-                    <strong>{item.title}</strong>
-                    <span className="entry-summary">{item.summary}</span>
-                  </a>
-                ))}
+                {categoryItems.map((item) => {
+                  const mastery = masteryByDoc.get(item.id);
+                  return (
+                    <a
+                      key={item.id}
+                      className="entry"
+                      href={knowledgeDocHref(item.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <small>
+                        {essay
+                          ? "申论"
+                          : modules.find((moduleItem) => moduleItem[0] === item.module)?.[1]}
+                      </small>
+                      <strong>{item.title}</strong>
+                      <span className="entry-summary">{item.summary}</span>
+                      {mastery && (
+                        <span
+                          className={`entry-mastery ${
+                            mastery.stars > 0
+                              ? "passed"
+                              : mastery.total > 0
+                                ? "practicing"
+                                : ""
+                          }`}
+                        >
+                          {mastery.stars > 0
+                            ? `已通关 ${"★".repeat(mastery.stars)}`
+                            : mastery.total > 0
+                              ? `正确率 ${Math.round(mastery.accuracy * 100)}%`
+                              : "待练习"}
+                        </span>
+                      )}
+                    </a>
+                  );
+                })}
               </ResponsiveGrid>
             </section>
           ))}
@@ -410,6 +468,7 @@ function ArticleDetail({
           </aside>
         )}
       </div>
+      <DocPractice docId={docId} />
       {toc.length >= 2 && (
         <>
           <button
@@ -691,7 +750,15 @@ function EssayCards() {
 }
 
 export function EssayPage() {
-  const [tab, setTab] = useState<"knowledge" | "cards" | "training">("training");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const tab =
+    tabParam === "cards" || tabParam === "knowledge" || tabParam === "writing"
+      ? tabParam
+      : "training";
+  const setTab = (next: "knowledge" | "cards" | "training" | "writing") => {
+    setSearchParams(next === "training" ? {} : { tab: next }, { replace: true });
+  };
   return (
     <>
       <div className="essay-tabs">
@@ -713,6 +780,12 @@ export function EssayPage() {
         >
           规范词卡片
         </button>
+        <button
+          className={tab === "writing" ? "active" : ""}
+          onClick={() => setTab("writing")}
+        >
+          整篇批改
+        </button>
       </div>
       {tab === "training" && (
         // 延伸讲解开新标签页（与专项训练的 📖 同口径）：讲解是「查资料」的旁支动作，
@@ -720,6 +793,7 @@ export function EssayPage() {
         <EssayTraining onDoc={openKnowledgeDoc} />
       )}
       {tab === "knowledge" && <KnowledgePage essay />}
+      {tab === "writing" && <EssayWritingPage />}
       {tab === "cards" && (
         <section className="panel">
           <p className="eyebrow">按记忆计划复习</p>

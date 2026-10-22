@@ -40,6 +40,58 @@ class FakeStatement {
       } as T;
     if (this.sql === "SELECT 1") return { ok: 1 } as T;
     if (this.sql.includes("FROM auth_attempts")) return { count: 0 } as T;
+    if (this.sql.includes("FROM mock_exams e JOIN users")) {
+      const key = String(this.values[0]);
+      const shared = this.sql.includes("e.share_token=?");
+      const exam = shared
+        ? [...this.db.mockExams.values()].find(
+            (item) => item.shareToken === key && item.status === "submitted",
+          )
+        : this.db.mockExams.get(key);
+      if (!exam) return null;
+      if (!shared && exam.userId !== String(this.values[1])) return null;
+      return { ...exam, nickname: "测试用户" } as T;
+    }
+    if (this.sql.includes("FROM mock_exams WHERE id=? AND user_id=?")) {
+      const exam = this.db.mockExams.get(String(this.values[0]));
+      if (!exam || exam.userId !== String(this.values[1])) return null;
+      return { ...exam } as T;
+    }
+    if (this.sql.includes("COUNT(*) AS attemptCount,MAX(score) AS bestScore")) {
+      const submitted = [...this.db.mockExams.values()].filter(
+        (item) =>
+          item.userId === String(this.values[0]) &&
+          item.status === "submitted" &&
+          item.id !== String(this.values[1]),
+      );
+      return {
+        attemptCount: submitted.length,
+        bestScore: submitted.length
+          ? Math.max(...submitted.map((item) => item.score ?? 0))
+          : null,
+      } as T;
+    }
+    if (this.sql.includes("SELECT score FROM mock_exams")) {
+      const [userId, examId, before] = this.values.map(String);
+      const previous = [...this.db.mockExams.values()]
+        .filter(
+          (item) =>
+            item.userId === userId &&
+            item.status === "submitted" &&
+            item.id !== examId &&
+            (item.submittedAt ?? item.startedAt) < before,
+        )
+        .sort((a, b) =>
+          String(b.submittedAt ?? b.startedAt).localeCompare(
+            String(a.submittedAt ?? a.startedAt),
+          ),
+        )[0];
+      return (previous ? { score: previous.score } : null) as T | null;
+    }
+    if (this.sql.includes("FROM essay_submissions WHERE id=? AND user_id=?")) {
+      const row = this.db.essaySubmissions.get(String(this.values[0]));
+      return (row && row.userId === String(this.values[1]) ? row : null) as T | null;
+    }
     if (this.sql.includes("FROM password_resets pr JOIN users")) {
       const reset = this.db.passwordResets.get(String(this.values[0]));
       if (!reset) return null;
@@ -69,7 +121,10 @@ class FakeStatement {
         answerIndex: 2,
         explanation: "测试讲解",
         attemptId: "att_test",
+        reviewStage: this.db.mistakeStage,
       } as T;
+    if (this.sql.includes("COUNT(*) AS openCount"))
+      return { openCount: this.db.mistakeStage >= 2 ? 0 : 1, dueCount: 1 } as T;
     if (this.sql.includes("SELECT answer_index AS answerIndex"))
       return {
         answerIndex: 1,
@@ -100,6 +155,73 @@ class FakeStatement {
     return null;
   }
   async all<T>() {
+    // 错题本列表：一条已到期 + 一条未到期，due=1 时只返回到期的那条
+    if (this.sql.includes("q.options_json AS optionsJson")) {
+      const now = this.sql.includes("a.next_review_at<=?")
+        ? String(this.values[1])
+        : null;
+      const rows = [
+        {
+          questionId: "q_due",
+          topicId: "addition",
+          difficulty: "easy",
+          stem: "1+1=?",
+          optionsJson: '["1","2","3","4"]',
+          materialJson: null,
+          answerIndex: 1,
+          explanation: "讲解",
+          mastered: 0,
+          causeTag: this.db.mistakeCause,
+          reviewStage: this.db.mistakeStage,
+          nextReviewAt: "2026-01-01T00:00:00.000Z",
+          lastReviewedAt: null,
+          lastWrongAt: "2026-10-01T00:00:00.000Z",
+          wrongCount: 2,
+        },
+        {
+          questionId: "q_later",
+          topicId: "percentage",
+          difficulty: "medium",
+          stem: "第二题",
+          optionsJson: '["A","B","C","D"]',
+          materialJson: null,
+          answerIndex: 0,
+          explanation: "讲解",
+          mastered: 0,
+          causeTag: null,
+          reviewStage: 1,
+          nextReviewAt: "2099-01-01T00:00:00.000Z",
+          lastReviewedAt: "2026-10-20T00:00:00.000Z",
+          lastWrongAt: "2026-09-01T00:00:00.000Z",
+          wrongCount: 1,
+        },
+      ];
+      return {
+        results: (now
+          ? rows.filter((row) => !row.nextReviewAt || row.nextReviewAt <= now)
+          : rows) as T[],
+      };
+    }
+    if (this.sql.includes("FROM essay_submissions")) {
+      return {
+        results: [...this.db.essaySubmissions.values()]
+          .filter((row) => row.userId === String(this.values[0]))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as T[],
+      };
+    }
+    if (this.sql.includes("FROM mock_exam_questions")) {
+      const rows = [...(this.db.mockQuestions.get(String(this.values[0])) ?? [])].sort(
+        (a, b) => a.position - b.position,
+      );
+      if (this.sql.includes("SELECT answer_index AS answerIndex"))
+        return {
+          results: rows.map((row) => ({
+            answerIndex: row.answerIndex,
+            selectedIndex: row.selectedIndex,
+          })) as T[],
+        };
+      return { results: rows as T[] };
+    }
     // 出题接口的合并查询：一次取回「本局已生成的题」+「去重池」
     if (
       this.sql.includes("FROM generated_questions") &&
@@ -131,6 +253,81 @@ class FakeStatement {
   }
   async run() {
     this.db.writes.push(this.sql);
+    if (this.sql.startsWith("UPDATE quiz_attempts SET mastered=?")) {
+      const [mastered, reviewStage] = this.values as [number, number];
+      this.db.mistakeStage = Number(reviewStage);
+      this.db.mistakeMastered = Boolean(mastered);
+    }
+    if (this.sql.startsWith("UPDATE quiz_attempts SET cause_tag=?")) {
+      this.db.mistakeCause = this.values[0] as string | null;
+    }
+    if (this.sql.startsWith("INSERT INTO essay_submissions")) {
+      const [
+        id,
+        userId,
+        promptId,
+        promptTitle,
+        title,
+        content,
+        wordCount,
+        score,
+        grade,
+        dimensionsJson,
+        feedbackJson,
+        createdAt,
+      ] = this.values as [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        string,
+        string,
+        string,
+        string,
+      ];
+      this.db.essaySubmissions.set(id, {
+        id,
+        userId,
+        promptId,
+        promptTitle,
+        title,
+        content,
+        wordCount,
+        score,
+        grade,
+        dimensionsJson,
+        feedbackJson,
+        createdAt,
+      });
+    }
+    if (this.sql.startsWith("UPDATE mock_exam_questions SET selected_index")) {
+      const [selectedIndex, elapsedMs, , questionId, examId] =
+        this.values as [number, number, string, string, string];
+      const row = (this.db.mockQuestions.get(examId) ?? []).find(
+        (item) => item.id === questionId,
+      );
+      if (row) {
+        row.selectedIndex = selectedIndex;
+        row.elapsedMs = elapsedMs;
+      }
+    }
+    if (this.sql.startsWith("UPDATE mock_exams SET status='submitted'")) {
+      const [submittedAt, durationMs, correctCount, score, shareToken, examId] =
+        this.values as [string, number, number, number, string, string];
+      const exam = this.db.mockExams.get(examId);
+      if (exam) {
+        exam.status = "submitted";
+        exam.submittedAt = submittedAt;
+        exam.durationMs = durationMs;
+        exam.correctCount = correctCount;
+        exam.score = score;
+        exam.shareToken = shareToken;
+      }
+    }
     if (
       this.sql.startsWith("INSERT INTO users(") &&
       this.sql.includes("email_normalized")
@@ -213,11 +410,135 @@ class FakeDb {
   >();
   /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
   writes: string[] = [];
+  /** 错题复习状态（单题模拟）：当前阶段 / 是否出清 / 错因 */
+  mistakeStage = 0;
+  mistakeMastered = false;
+  mistakeCause: string | null = null;
+  /** 模考：examId → 记录；examId → 题目行 */
+  mockExams = new Map<
+    string,
+    {
+      id: string;
+      userId: string;
+      status: "active" | "submitted";
+      questionCount: number;
+      limitMs: number;
+      startedAt: string;
+      submittedAt: string | null;
+      durationMs: number | null;
+      correctCount: number | null;
+      score: number | null;
+      shareToken: string | null;
+    }
+  >();
+  mockQuestions = new Map<
+    string,
+    Array<{
+      id: string;
+      examId: string;
+      position: number;
+      topicId: string;
+      topicTitle: string;
+      difficulty: string;
+      stem: string;
+      optionsJson: string;
+      materialJson: string | null;
+      answerIndex: number;
+      explanation: string;
+      selectedIndex: number | null;
+      elapsedMs: number;
+    }>
+  >();
+  essaySubmissions = new Map<
+    string,
+    {
+      id: string;
+      userId: string;
+      promptId: string;
+      promptTitle: string;
+      title: string;
+      content: string;
+      wordCount: number;
+      score: number;
+      grade: string;
+      dimensionsJson: string;
+      feedbackJson: string;
+      createdAt: string;
+    }
+  >();
   prepare(sql: string) {
     return new FakeStatement(this, sql);
   }
   async batch(statements: FakeStatement[]) {
     this.batches.push(statements);
+    for (const statement of statements) {
+      if (statement.sql.startsWith("UPDATE quiz_attempts SET mastered=?")) {
+        const [mastered, reviewStage] = statement.values as [number, number];
+        this.mistakeStage = Number(reviewStage);
+        this.mistakeMastered = Boolean(mastered);
+      }
+      if (statement.sql.startsWith("INSERT INTO mock_exams")) {
+        const [id, userId, , questionCount, limitMs, startedAt] =
+          statement.values as [string, string, string, number, number, string];
+        this.mockExams.set(id, {
+          id,
+          userId,
+          status: "active",
+          questionCount,
+          limitMs,
+          startedAt,
+          submittedAt: null,
+          durationMs: null,
+          correctCount: null,
+          score: null,
+          shareToken: null,
+        });
+      }
+      if (statement.sql.startsWith("INSERT INTO mock_exam_questions")) {
+        const [
+          id,
+          examId,
+          position,
+          topicId,
+          topicTitle,
+          difficulty,
+          stem,
+          optionsJson,
+          materialJson,
+          answerIndex,
+          explanation,
+        ] = statement.values as [
+          string,
+          string,
+          number,
+          string,
+          string,
+          string,
+          string,
+          string,
+          string | null,
+          number,
+          string,
+        ];
+        const rows = this.mockQuestions.get(examId) ?? [];
+        rows.push({
+          id,
+          examId,
+          position,
+          topicId,
+          topicTitle,
+          difficulty,
+          stem,
+          optionsJson,
+          materialJson,
+          answerIndex,
+          explanation,
+          selectedIndex: null,
+          elapsedMs: 0,
+        });
+        this.mockQuestions.set(examId, rows);
+      }
+    }
     return statements.map(() => ({ success: true }));
   }
 }
@@ -472,28 +793,106 @@ describe("API contract guards", () => {
     expect(response.status).toBe(403);
   });
 
+  it("lists open mistakes with due counts and a due filter", async () => {
+    const all = await app.request(
+      "/api/quiz/mistakes?limit=100",
+      { headers: auth },
+      env,
+    );
+    const allPayload = await all.json();
+    expect(allPayload.data.items).toHaveLength(2);
+    expect(allPayload.data.counts).toEqual({ open: 1, due: 1 });
+    expect(allPayload.data.items[0]).toMatchObject({
+      questionId: "q_due",
+      options: ["1", "2", "3", "4"],
+      reviewStage: 0,
+      wrongCount: 2,
+    });
+    const due = await app.request(
+      "/api/quiz/mistakes?due=1",
+      { headers: auth },
+      env,
+    );
+    const duePayload = await due.json();
+    expect(duePayload.data.items).toHaveLength(1);
+    expect(duePayload.data.items[0].questionId).toBe("q_due");
+  });
+
   it("supports an atomic mistake retry", async () => {
+    const retry = (selectedIndex: number) =>
+      app.request(
+        "/api/quiz/mistakes/q_test/retry",
+        {
+          method: "POST",
+          headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify({
+            selectedIndex,
+            elapsedMs: 1200,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        },
+        env,
+      );
+    const first = await retry(2);
+    const firstPayload = await first.json();
+    expect(first.status).toBe(200);
+    // 第一次答对只推进到复习阶段 1，次日再考一次
+    expect(firstPayload.data).toMatchObject({
+      correct: true,
+      mastered: false,
+      reviewStage: 1,
+      answerIndex: 2,
+    });
+    expect(firstPayload.data.nextReviewAt).toBeTruthy();
+    expect(env.DB.batches.at(-1)).toHaveLength(2);
+    const second = await retry(2);
+    const secondPayload = await second.json();
+    // 连续两次答对才出清
+    expect(secondPayload.data).toMatchObject({
+      correct: true,
+      mastered: true,
+      reviewStage: 2,
+      nextReviewAt: null,
+    });
+    expect(env.DB.mistakeMastered).toBe(true);
+  });
+
+  it("answers a wrong retry by resetting the review stage", async () => {
     const response = await app.request(
       "/api/quiz/mistakes/q_test/retry",
       {
         method: "POST",
         headers: { ...auth, "content-type": "application/json" },
         body: JSON.stringify({
-          selectedIndex: 2,
-          elapsedMs: 1200,
+          selectedIndex: 0,
+          elapsedMs: 900,
           idempotencyKey: crypto.randomUUID(),
         }),
       },
       env,
     );
     const payload = await response.json();
-    expect(response.status).toBe(200);
     expect(payload.data).toMatchObject({
-      correct: true,
-      mastered: true,
-      answerIndex: 2,
+      correct: false,
+      mastered: false,
+      reviewStage: 0,
     });
-    expect(env.DB.batches.at(-1)).toHaveLength(2);
+    expect(env.DB.mistakeStage).toBe(0);
+  });
+
+  it("tags a mistake with an error cause", async () => {
+    const response = await app.request(
+      "/api/quiz/mistakes/q_test/cause",
+      {
+        method: "PATCH",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ cause: "formula" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.cause).toBe("formula");
+    expect(env.DB.mistakeCause).toBe("formula");
   });
 
   it("scores a generated question server-side", async () => {
@@ -526,7 +925,12 @@ describe("API contract guards", () => {
       env,
     );
     expect(response.status).toBe(200);
-    expect((await response.json()).data.mastered).toBe(true);
+    expect((await response.json()).data).toMatchObject({
+      mastered: true,
+      reviewStage: 2,
+      nextReviewAt: null,
+    });
+    expect(env.DB.mistakeMastered).toBe(true);
   });
 
   it("stores a Schulte result idempotently", async () => {
@@ -547,6 +951,170 @@ describe("API contract guards", () => {
     );
     expect(response.status).toBe(200);
     expect((await response.json()).data.personalBestMs).toBe(22000);
+  });
+
+  it("creates a 20-question timed mock exam and hides answers before submission", async () => {
+    const db = new FakeDb();
+    const created = await app.request(
+      "/api/mock/exams",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      { ...env, DB: db },
+    );
+    expect(created.status).toBe(200);
+    const payload = (await created.json()).data as {
+      examId: string;
+      questionCount: number;
+      limitMs: number;
+    };
+    expect(payload.questionCount).toBe(20);
+    expect(payload.limitMs).toBe(30 * 60 * 1000);
+    expect(db.mockExams.get(payload.examId)?.status).toBe("active");
+    expect(db.mockQuestions.get(payload.examId)).toHaveLength(20);
+
+    const detail = await app.request(
+      `/api/mock/exams/${payload.examId}`,
+      { headers: auth },
+      { ...env, DB: db },
+    );
+    expect(detail.status).toBe(200);
+    const exam = (await detail.json()).data;
+    expect(exam.questions).toHaveLength(20);
+    expect(new Set(exam.questions.map((q: { topicId: string }) => q.topicId)).size).toBe(5);
+    for (const question of exam.questions) {
+      expect(question.options).toHaveLength(4);
+      expect(question).not.toHaveProperty("answerIndex");
+      expect(question).not.toHaveProperty("explanation");
+    }
+  });
+
+  it("grades a mock exam and publishes an anonymous shared report", async () => {
+    const db = new FakeDb();
+    const created = await app.request(
+      "/api/mock/exams",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      { ...env, DB: db },
+    );
+    const { examId } = (await created.json()).data as { examId: string };
+    const rows = db.mockQuestions.get(examId) ?? [];
+    for (const [index, row] of rows.entries()) {
+      const selectedIndex =
+        index < 12 ? row.answerIndex : (row.answerIndex + 1) % 4;
+      const saved = await app.request(
+        `/api/mock/exams/${examId}/answers`,
+        {
+          method: "POST",
+          headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify({
+            questionId: row.id,
+            selectedIndex,
+            elapsedMs: 1000 + index * 100,
+          }),
+        },
+        { ...env, DB: db },
+      );
+      expect(saved.status).toBe(200);
+    }
+    const submitted = await app.request(
+      `/api/mock/exams/${examId}/submit`,
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+      { ...env, DB: db },
+    );
+    expect(submitted.status).toBe(200);
+    const report = (await submitted.json()).data;
+    expect(report.correctCount).toBe(12);
+    expect(report.score).toBe(60);
+    expect(report.byTopic).toHaveLength(5);
+    expect(report.questions).toHaveLength(20);
+    expect(report.shareToken).toMatch(/^[a-f0-9]{32}$/);
+
+    const shared = await app.request(
+      `/api/mock/reports/${report.shareToken}`,
+      {},
+      { ...env, DB: db },
+    );
+    expect(shared.status).toBe(200);
+    const publicReport = (await shared.json()).data;
+    expect(publicReport.nickname).toBe("测同学");
+    expect(publicReport.score).toBe(60);
+    expect(publicReport.questions).toBeNull();
+    expect(publicReport.shareToken).toBeNull();
+
+    const invalid = await app.request(
+      "/api/mock/reports/not-a-valid-token",
+      {},
+      { ...env, DB: db },
+    );
+    expect(invalid.status).toBe(404);
+  });
+
+  it("grades and stores an essay writing submission", async () => {
+    const db = new FakeDb();
+    const content = `本文认为，把群众的小事办实，关键在于站稳群众立场，把每一件具体事落到可执行的行动上。
+
+把小事办实，首先要听懂群众的真实诉求。材料中，有的社区在加装电梯前挨家挨户听意见，再请居民代表共同商定方案。这说明，很多“小事”背后连着不同群体的利益，只有把意见听全，服务才能对得上群众需要。
+
+把小事办实，需要建立闭环落实机制。应当明确责任人、办理时限和反馈方式，做到件件有着落、事事有回音，让群众看到诚意和进度。
+
+总之，群众的“小事”就是治理的“大事”。唯有把群众满意作为出发点和落脚点，才能把一件件小事办到群众心坎上。`;
+    const response = await app.request(
+      "/api/essay/writing/submissions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          promptId: "grassroots",
+          title: "把小事办实 把民心暖热",
+          content,
+        }),
+      },
+      { ...env, DB: db },
+    );
+    expect(response.status).toBe(200);
+    const data = (await response.json()).data;
+    expect(data.dimensions).toHaveLength(4);
+    expect(data.paragraphs.length).toBeGreaterThanOrEqual(3);
+    expect(data.score).toBeGreaterThanOrEqual(0);
+    expect(data.score).toBeLessThanOrEqual(100);
+    expect(db.essaySubmissions.size).toBe(1);
+    const submissionId = data.id as string;
+
+    const list = await app.request(
+      "/api/essay/writing/submissions",
+      { headers: auth },
+      { ...env, DB: db },
+    );
+    expect(list.status).toBe(200);
+    const listPayload = (await list.json()).data;
+    expect(listPayload.items).toHaveLength(1);
+    expect(listPayload.items[0]).toMatchObject({
+      id: submissionId,
+      promptId: "grassroots",
+      title: "把小事办实 把民心暖热",
+      score: data.score,
+    });
+
+    const detail = await app.request(
+      `/api/essay/writing/submissions/${submissionId}`,
+      { headers: auth },
+      { ...env, DB: db },
+    );
+    expect(detail.status).toBe(200);
+    const detailPayload = (await detail.json()).data;
+    expect(detailPayload.content).toBe(content);
+    expect(detailPayload.dimensions).toHaveLength(4);
+    expect(detailPayload.suggestions.length).toBeGreaterThan(0);
   });
 
   it("exposes the dual-track quiz catalog", async () => {

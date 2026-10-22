@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { Link } from "react-router-dom";
 
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
@@ -16,6 +17,46 @@ type History = {
   personalBestMs: number | null;
   trend: Array<{ time: string; valueMs: number }>;
 };
+
+type StoredRun = {
+  id: string;
+  gridSize: number;
+  variant: string;
+  elapsedMs: number;
+  mistakes: number;
+  createdAt: string;
+};
+
+const LOCAL_HISTORY_KEY = "civil-exam-schulte-runs";
+
+function readLocalRuns(): StoredRun[] {
+  try {
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(LOCAL_HISTORY_KEY) ?? "[]",
+    );
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is StoredRun =>
+        Boolean(item) &&
+        typeof item === "object" &&
+        typeof (item as StoredRun).gridSize === "number" &&
+        typeof (item as StoredRun).variant === "string" &&
+        typeof (item as StoredRun).elapsedMs === "number" &&
+        typeof (item as StoredRun).mistakes === "number" &&
+        typeof (item as StoredRun).createdAt === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalRuns(runs: StoredRun[]) {
+  try {
+    window.localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(runs.slice(0, 120)));
+  } catch {
+    // 浏览器禁用 localStorage 时退回“不保存”，不影响本次训练
+  }
+}
 const cn = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 const chinese = (n: number) =>
   n < 10
@@ -41,7 +82,7 @@ const colors = [
   "#db2777",
 ];
 
-export function SchultePage() {
+export function SchultePage({ standalone = false }: { standalone?: boolean }) {
   const [size, setSize] = useState(5),
     [variant, setVariant] = useState("standard"),
     [cells, setCells] = useState<number[]>([]),
@@ -53,6 +94,22 @@ export function SchultePage() {
     { showToast } = useToast(),
     { run } = useAsync();
   const loadHistory = async () => {
+    if (standalone) {
+      const runs = readLocalRuns()
+        .filter((item) => item.gridSize === size && item.variant === variant)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 20);
+      setHistory({
+        items: runs,
+        personalBestMs: runs.length
+          ? Math.min(...runs.map((item) => item.elapsedMs))
+          : null,
+        trend: [...runs]
+          .reverse()
+          .map((item) => ({ time: item.createdAt, valueMs: item.elapsedMs })),
+      });
+      return;
+    }
     const requestId = ++historyRequest.current;
     const result = await api<History>(
       `/schulte/results?gridSize=${size}&variant=${variant}&limit=20`,
@@ -61,7 +118,7 @@ export function SchultePage() {
   };
   useEffect(() => {
     void run(loadHistory);
-  }, [size, variant]);
+  }, [size, variant, standalone]);
   const start = () => {
     const values = Array.from({ length: size * size }, (_, index) => index + 1);
     for (let index = values.length - 1; index > 0; index--) {
@@ -86,6 +143,29 @@ export function SchultePage() {
     const elapsedMs = Math.round(performance.now() - started.current);
     started.current = 0;
     void run(async () => {
+      if (standalone) {
+        const record: StoredRun = {
+          id: crypto.randomUUID(),
+          gridSize: size,
+          variant,
+          elapsedMs,
+          mistakes,
+          createdAt: new Date().toISOString(),
+        };
+        const all = [record, ...readLocalRuns()];
+        writeLocalRuns(all);
+        const best = Math.min(
+          ...all
+            .filter((item) => item.gridSize === size && item.variant === variant)
+            .map((item) => item.elapsedMs),
+        );
+        showToast(
+          `完成 ${(elapsedMs / 1000).toFixed(2)} 秒；本机最佳 ${(best / 1000).toFixed(2)} 秒`,
+          "success",
+        );
+        await loadHistory();
+        return;
+      }
       const result = await api<{ personalBestMs: number }>("/schulte/results", {
         method: "POST",
         body: JSON.stringify({
@@ -119,6 +199,17 @@ export function SchultePage() {
     .join(" ");
   return (
     <section className="panel">
+      {standalone && (
+        <div className="public-guest-banner">
+          <p>
+            <strong>免登录体验</strong>
+            ：成绩只保存在当前浏览器。登录后可同步云端历史，并进入学习分析。
+          </p>
+          <Link className="secondary" to="/register">
+            登录后保存成绩
+          </Link>
+        </div>
+      )}
       <p className="eyebrow">专注力训练</p>
       <h2>舒尔特方格</h2>
       <Stack direction="horizontal" wrap gap="0.75rem" align="end">
@@ -182,7 +273,12 @@ export function SchultePage() {
         ))}
       </div>
       <section className="schulte-history">
-        <h3>历史成绩</h3>
+        <h3>
+          历史成绩
+          {history?.personalBestMs
+            ? ` · 最佳 ${(history.personalBestMs / 1000).toFixed(2)} 秒`
+            : ""}
+        </h3>
         {history?.trend && history.trend.length >= 2 && (
           <svg viewBox="0 0 300 90" role="img" aria-label="用时趋势">
             <polyline
