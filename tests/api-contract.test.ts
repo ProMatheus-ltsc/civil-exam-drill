@@ -36,12 +36,19 @@ class FakeStatement {
         userId: "usr_test",
         expiresAt: "2099-01-01T00:00:00Z",
         nickname: "测试用户",
+        email: "test@example.com",
       } as T;
     if (this.sql === "SELECT 1") return { ok: 1 } as T;
     if (this.sql.includes("FROM auth_attempts")) return { count: 0 } as T;
     if (this.sql.includes("FROM invite_codes")) return { id: 1 } as T;
-    if (this.sql.includes("FROM users WHERE"))
-      return { id: "usr_test", nickname: "测试用户" } as T;
+    if (this.sql.includes("FROM users WHERE email_normalized=?")) {
+      const email = String(this.values[0]);
+      return (this.db.users.get(email) ?? null) as T | null;
+    }
+    if (
+      this.sql.includes("FROM users WHERE invite_code_id=? AND nickname_normalized=?")
+    )
+      return null;
     if (this.sql.includes("a.question_id=? AND a.correct=0"))
       return {
         answerIndex: 2,
@@ -109,6 +116,19 @@ class FakeStatement {
   }
   async run() {
     this.db.writes.push(this.sql);
+    if (
+      this.sql.startsWith("INSERT INTO users(") &&
+      this.sql.includes("email_normalized")
+    ) {
+      const [id, , nickname, , email, emailNormalized, passwordHash] =
+        this.values.map(String);
+      this.db.users.set(emailNormalized, {
+        id,
+        nickname,
+        email,
+        passwordHash,
+      });
+    }
     if (this.sql.includes("essay_training_progress")) {
       const [levelId, checkedJson, quizJson, notes, stars] = [
         String(this.values[1]),
@@ -129,6 +149,11 @@ class FakeStatement {
   }
 }
 class FakeDb {
+  /** email_normalized → 用户记录（注册后登录用） */
+  users = new Map<
+    string,
+    { id: string; nickname: string; email: string; passwordHash: string }
+  >();
   batches: FakeStatement[][] = [];
   /** 本局已生成的题（questions 接口按序号回查用），默认空表示「这一序号还没生成」 */
   runQuestionRows: unknown[] = [];
@@ -158,7 +183,6 @@ class FakeDb {
 
 const env = {
   DB: new FakeDb(),
-  INVITE_CODE: "TEST2026",
   // 静态内容（public/generated/knowledge/*.json）mock：读取本地生成文件，等价 Pages ASSETS.fetch
   ASSETS: {
     async fetch(input: string | URL | Request) {
@@ -178,21 +202,83 @@ const env = {
 const auth = { cookie: "civil_exam_session=test-session" };
 
 describe("API contract guards", () => {
-  it("uses an HttpOnly cookie without exposing the session token", async () => {
+  it("registers with email and sets an HttpOnly cookie without exposing the token", async () => {
+    const db = new FakeDb();
     const response = await app.request(
-      "/api/auth/login",
+      "/api/auth/register",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inviteCode: "TEST2026", nickname: "测试用户" }),
+        body: JSON.stringify({
+          email: "New@Example.com",
+          password: "password123",
+          nickname: "新用户",
+        }),
       },
-      env,
+      { ...env, DB: db },
     );
     const payload = await response.json();
+    expect(response.status).toBe(201);
     expect(response.headers.get("set-cookie")).toMatch(
       /HttpOnly.*SameSite=Strict/i,
     );
     expect(payload.data.token).toBeUndefined();
+    expect(payload.data.user).toMatchObject({
+      nickname: "新用户",
+      email: "new@example.com",
+    });
+    const stored = db.users.get("new@example.com");
+    expect(stored?.passwordHash).toMatch(/^pbkdf2-sha256\$/);
+    expect(stored?.passwordHash).not.toContain("password123");
+  });
+
+  it("rejects duplicate email registration and wrong passwords", async () => {
+    const db = new FakeDb();
+    const body = JSON.stringify({
+      email: "dup@example.com",
+      password: "password123",
+    });
+    const first = await app.request(
+      "/api/auth/register",
+      { method: "POST", headers: { "content-type": "application/json" }, body },
+      { ...env, DB: db },
+    );
+    expect(first.status).toBe(201);
+    const duplicate = await app.request(
+      "/api/auth/register",
+      { method: "POST", headers: { "content-type": "application/json" }, body },
+      { ...env, DB: db },
+    );
+    expect(duplicate.status).toBe(409);
+    expect((await duplicate.json()).error.code).toBe("EMAIL_TAKEN");
+
+    const wrong = await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "dup@example.com",
+          password: "wrong-password",
+        }),
+      },
+      { ...env, DB: db },
+    );
+    expect(wrong.status).toBe(401);
+    expect((await wrong.json()).error.code).toBe("INVALID_CREDENTIALS");
+
+    const login = await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      },
+      { ...env, DB: db },
+    );
+    expect(login.status).toBe(200);
+    expect((await login.json()).data.user.email).toBe("dup@example.com");
+    expect(login.headers.get("set-cookie")).toMatch(/HttpOnly/i);
   });
 
   it("rejects unauthenticated access", async () => {
@@ -617,6 +703,15 @@ describe("API contract guards", () => {
     expect(payload.data.cards.summary).toHaveProperty("mastered");
     expect(payload.data.mistakes).toHaveProperty("open");
     expect(payload.data.schulte).toHaveProperty("bests");
+    expect(payload.data.quiz.byDifficulty).toHaveLength(3);
+    expect(payload.data.quiz.weekday).toHaveLength(7);
+    expect(payload.data.progress.totalTopics).toBeGreaterThan(0);
+    expect(payload.data.progress.starsDistribution).toHaveLength(4);
+    expect(payload.data.progress.tracks.map((track: { id: string }) => track.id)).toEqual([
+      "speed",
+      "sequence",
+      "material",
+    ]);
   });
 
   it("申论闯关：下发 21 关与每关 5 道客观题，答案不下发、未答完不能交卷", async () => {

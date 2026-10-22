@@ -6,9 +6,19 @@ import { ResponsiveGrid } from "@shared/core/components/responsive/ResponsiveGri
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { StatCard } from "@shared/core/components/stats/StatCard";
 import { api } from "../api/client";
-import { titleOf, topicById } from "../generator/catalog";
 import type { TrackId } from "../generator/catalog";
+import { titleOf } from "../generator/catalog";
 import { TrendChart } from "../components/TrendChart";
+import {
+  ActivityHeatmap,
+  DifficultyDonut,
+  ModuleAccuracyBars,
+  ProgressRing,
+  StarDistribution,
+  WeekdayBars,
+} from "../components/ProfileCharts";
+
+type Difficulty = "easy" | "medium" | "hard";
 
 type Summary = {
   activity: {
@@ -22,6 +32,7 @@ type Summary = {
     quizCount: number;
     correct: number;
     accuracy: number;
+    durationMs: number;
     cardReviews: number;
     schulteRuns: number;
     retries: number;
@@ -29,12 +40,41 @@ type Summary = {
   quiz: {
     items: Array<{
       topicId: string;
+      track: TrackId;
+      total: number;
+      correct: number;
+      accuracy: number;
+      averageMs: number;
+      stars: number;
+    }>;
+    byDifficulty: Array<{
+      difficulty: Difficulty;
       total: number;
       correct: number;
       accuracy: number;
       averageMs: number;
     }>;
+    weekday: Array<{ weekday: number; quizCount: number; correct: number }>;
     overall: { total: number; correct: number; accuracy: number; averageMs: number };
+  };
+  progress: {
+    totalTopics: number;
+    clearedTopics: number;
+    totalStars: number;
+    maxStars: number;
+    starsDistribution: Array<{ stars: number; count: number }>;
+    tracks: Array<{
+      id: TrackId;
+      title: string;
+      totalTopics: number;
+      clearedTopics: number;
+      stars: number;
+      maxStars: number;
+      total: number;
+      correct: number;
+      accuracy: number;
+      averageMs: number;
+    }>;
   };
   cards: {
     summary: {
@@ -58,6 +98,16 @@ const variantLabel: Record<string, string> = {
   color_letters: "彩色字母",
 };
 const ms2s = (ms: number) => (ms / 1000).toFixed(2);
+const trackColor: Record<TrackId, string> = {
+  speed: "#315c77",
+  sequence: "#6a5a8a",
+  material: "#bb623a",
+};
+const trackShort: Record<TrackId, string> = {
+  speed: "资料速算",
+  sequence: "数字推理",
+  material: "资料实战",
+};
 
 function emptySummary(): Summary {
   const zeroDay = {
@@ -74,9 +124,33 @@ function emptySummary(): Summary {
       date: new Date(Date.now() + 8 * 3600000 - (29 - i) * 86400000)
         .toISOString()
         .slice(0, 10),
+      durationMs: 0,
       ...zeroDay,
     })),
-    quiz: { items: [], overall: { total: 0, correct: 0, accuracy: 0, averageMs: 0 } },
+    quiz: {
+      items: [],
+      byDifficulty: (["easy", "medium", "hard"] as const).map((difficulty) => ({
+        difficulty,
+        total: 0,
+        correct: 0,
+        accuracy: 0,
+        averageMs: 0,
+      })),
+      weekday: Array.from({ length: 7 }, (_, weekday) => ({
+        weekday,
+        quizCount: 0,
+        correct: 0,
+      })),
+      overall: { total: 0, correct: 0, accuracy: 0, averageMs: 0 },
+    },
+    progress: {
+      totalTopics: 0,
+      clearedTopics: 0,
+      totalStars: 0,
+      maxStars: 0,
+      starsDistribution: [0, 1, 2, 3].map((stars) => ({ stars, count: 0 })),
+      tracks: [],
+    },
     cards: {
       summary: { total: 0, new: 0, due: 0, learning: 0, mastered: 0, accuracy: 0 },
       today: 0,
@@ -87,9 +161,14 @@ function emptySummary(): Summary {
   };
 }
 
-export function ProfilePage() {
+export function ProfilePage({
+  user,
+}: {
+  user: { nickname: string; email?: string };
+}) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [trackFilter, setTrackFilter] = useState<"all" | TrackId>("all");
   useEffect(() => {
     let cancelled = false;
     void api<Summary>("/profile/summary")
@@ -104,131 +183,231 @@ export function ProfilePage() {
       cancelled = true;
     };
   }, []);
+  const filteredModules = useMemo(() => {
+    const items = summary?.quiz.items ?? [];
+    return trackFilter === "all"
+      ? items
+      : items.filter((item) => item.track === trackFilter);
+  }, [summary, trackFilter]);
   if (loading && !summary) return <LoadingSpinner message="统计加载中…" />;
   const data = summary ?? emptySummary();
+  const todayTotal =
+    data.activity.today.quizCount +
+    data.activity.today.cardReviews +
+    data.activity.today.schulteRuns +
+    data.activity.today.retries;
+  const initial = Array.from(user.nickname)[0] ?? "学";
+
   return (
     <Stack gap="1.5rem">
-      <section className="panel">
-        <p className="eyebrow">学习记录</p>
-        <h2>学习统计</h2>
+      <section className="panel profile-overview">
+        <div className="profile-identity">
+          <div className="profile-avatar" aria-hidden="true">
+            {initial}
+          </div>
+          <div>
+            <p className="eyebrow">学习数据</p>
+            <h2>{user.nickname}</h2>
+            <p className="muted">
+              {user.email || "邮箱账号"} · 连续学习 {data.activity.streak} 天
+              {data.activity.activeToday ? " · 今日已打卡" : " · 今天还没开练"}
+            </p>
+          </div>
+        </div>
         <ResponsiveGrid minItemWidth="150px" gap="0.9rem">
           <StatCard label="累计学习天数" value={`${data.activity.studyDays} 天`} />
-          <StatCard
-            label="连续学习"
-            value={`${data.activity.streak} 天`}
-          />
+          <StatCard label="连续学习" value={`${data.activity.streak} 天`} />
           <StatCard label="累计答题" value={`${data.quiz.overall.total} 题`} />
           <StatCard
             label="总正确率"
             value={`${Math.round(data.quiz.overall.accuracy * 100)}%`}
           />
+          <StatCard label="今日完成" value={`${todayTotal} 项`} />
           <StatCard
-            label="今日完成"
-            value={`${data.activity.today.quizCount + data.activity.today.cardReviews + data.activity.today.schulteRuns + data.activity.today.retries} 项`}
+            label="平均每题用时"
+            value={`${Math.round(data.quiz.overall.averageMs / 100) / 10}s`}
           />
-          <StatCard label="平均每题用时" value={`${Math.round(data.quiz.overall.averageMs / 100) / 10}s`} />
         </ResponsiveGrid>
       </section>
 
       <section className="panel">
-        <h3 className="section-title">近 30 天做题与正确率趋势</h3>
+        <div className="section-head">
+          <h3 className="section-title">学习节奏</h3>
+          <span className="muted">用热力图看坚持，用星期图找规律</span>
+        </div>
+        <div className="two-col viz-two-col">
+          <div>
+            <p className="subtitle">近 30 天学习热力</p>
+            <ActivityHeatmap days={data.trend30} />
+          </div>
+          <div>
+            <p className="subtitle">一周答题分布</p>
+            <WeekdayBars items={data.quiz.weekday} />
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-head">
+          <h3 className="section-title">近 30 天做题与正确率趋势</h3>
+          <span className="muted">折线为当天题目正确率</span>
+        </div>
         <TrendChart
-          seriesLabels={["速算/数推", "规范词复习"]}
-          colors={["#17324d", "#bb623a"]}
+          seriesLabels={["速算/数推", "规范词复习", "舒尔特/错题重做"]}
+          colors={["#17324d", "#bb623a", "#7fa88f"]}
           points={data.trend30.map((day) => ({
             date: day.date,
-            bars: [day.quizCount, day.cardReviews],
+            bars: [day.quizCount, day.cardReviews, day.schulteRuns + day.retries],
             line: day.quizCount > 0 ? day.accuracy : null,
           }))}
         />
       </section>
 
-      <QuizBreakdown items={data.quiz.items} />
+      <section className="panel">
+        <div className="section-head">
+          <h3 className="section-title">通关进度</h3>
+          <span className="muted">高难度局通过才算通关</span>
+        </div>
+        <div className="progress-overview">
+          <div className="progress-total">
+            <ProgressRing
+              ratio={
+                data.progress.totalTopics
+                  ? data.progress.clearedTopics / data.progress.totalTopics
+                  : 0
+              }
+              value={`${data.progress.clearedTopics}/${data.progress.totalTopics}`}
+              label="模块通关"
+              size={118}
+              stroke={11}
+              color="#2f7d5d"
+            />
+            <p className="muted">
+              {data.progress.totalTopics
+                ? `已完成 ${Math.round(
+                    (data.progress.clearedTopics / data.progress.totalTopics) * 100,
+                  )}% 的模块，继续按解锁顺序推进`
+                : "还没有关卡进度"}
+            </p>
+          </div>
+          <div className="track-cards">
+            {data.progress.tracks.map((track) => (
+              <article className="track-card" key={track.id}>
+                <ProgressRing
+                  ratio={
+                    track.totalTopics
+                      ? track.clearedTopics / track.totalTopics
+                      : 0
+                  }
+                  value={`${track.clearedTopics}/${track.totalTopics}`}
+                  label="关卡"
+                  size={76}
+                  stroke={8}
+                  color={trackColor[track.id]}
+                />
+                <div className="track-card-text">
+                  <h4>{track.title}</h4>
+                  <p>
+                    {track.stars}/{track.maxStars} 星 · 累计 {track.total} 题
+                  </p>
+                  <p className="muted">
+                    正确率{" "}
+                    {track.total
+                      ? `${Math.round(track.accuracy * 100)}%`
+                      : "—"}{" "}
+                    · 平均{" "}
+                    {track.total
+                      ? `${Math.round(track.averageMs / 1000)}s/题`
+                      : "—"}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+        <StarDistribution
+          items={data.progress.starsDistribution}
+          totalStars={data.progress.totalStars}
+          maxStars={data.progress.maxStars}
+        />
+      </section>
+
+      <section className="panel">
+        <div className="section-head">
+          <h3 className="section-title">分模块正确率 · 弱项优先</h3>
+          <span className="muted">{filteredModules.length} 个模块有记录</span>
+        </div>
+        {data.quiz.items.length === 0 ? (
+          <EmptyState
+            icon={ChartNoAxesColumn}
+            title="还没有训练数据"
+            description="前往「专项训练」开始闯关，这里会展示每关的正确率与星级"
+          />
+        ) : (
+          <Stack gap="1rem">
+            <div className="viz-filters">
+              {(["all", "speed", "sequence", "material"] as const).map(
+                (filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={`viz-chip ${trackFilter === filter ? "active" : ""}`}
+                    onClick={() => setTrackFilter(filter)}
+                  >
+                    {filter === "all" ? "全部" : trackShort[filter]}
+                  </button>
+                ),
+              )}
+            </div>
+            <ModuleAccuracyBars items={filteredModules} />
+            <WeakHint items={data.quiz.items} />
+          </Stack>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="section-head">
+          <h3 className="section-title">难度分布与用时</h3>
+          <span className="muted">高难度局为实战材料题</span>
+        </div>
+        <DifficultyDonut items={data.quiz.byDifficulty} />
+      </section>
+
       <CardsSection data={data} />
       <ExtraStats data={data} />
     </Stack>
   );
 }
 
-function QuizBreakdown({
-  items,
-}: {
-  items: Summary["quiz"]["items"];
-}) {
-  const byTrack = useMemo(() => {
-    const tracks = new Map<TrackId, Summary["quiz"]["items"]>();
-    for (const item of items) {
-      const topic = topicById.get(item.topicId as Parameters<typeof topicById.get>[0]);
-      const trackId = topic?.track ?? "speed";
-      const list = tracks.get(trackId) ?? [];
-      list.push(item);
-      tracks.set(trackId, list);
-    }
-    return tracks;
-  }, [items]);
+function WeakHint({ items }: { items: Summary["quiz"]["items"] }) {
   const practiced = items.filter((item) => item.total >= 10);
   const weakest = [...practiced]
+    .filter((item) => item.accuracy < 0.9)
     .sort((a, b) => a.accuracy - b.accuracy)
     .slice(0, 3);
-  return (
-    <section className="panel">
-      <div className="section-head">
-        <h3 className="section-title">分模块成绩（速算 / 数字推理）</h3>
-        <span className="muted">{items.length} 个模块有记录</span>
-      </div>
-      {items.length === 0 ? (
-        <EmptyState
-          icon={ChartNoAxesColumn}
-          title="还没有训练数据"
-          description="前往「专项训练」开始闯关，这里会展示每关的正确率与星级"
-        />
-      ) : (
-        <Stack gap="1rem">
-          {(["speed", "sequence", "material"] as const).map((trackId) => {
-            const list = byTrack.get(trackId) ?? [];
-            if (!list.length) return null;
-            const trackTitle =
-              trackId === "speed" ? "资料速算" : trackId === "sequence" ? "数字推理" : "资料实战";
-            return (
-              <div key={trackId}>
-                <p className="subtitle">
-                  {trackTitle} · {list.length} 关有记录
-                </p>
-                <div className="stat-table">
-                  <div className="stat-row stat-row-head">
-                    <span>关卡</span>
-                    <span>题量</span>
-                    <span>正确率</span>
-                    <span>平均用时</span>
-                  </div>
-                  {[...list]
-                    .sort((a, b) => a.total - b.total)
-                    .map((item) => (
-                      <div className="stat-row" key={item.topicId}>
-                        <span>{titleOf(item.topicId)}</span>
-                        <span>{item.total}</span>
-                        <span>{Math.round(item.accuracy * 100)}%</span>
-                        <span>{Math.round(item.averageMs / 100) / 10}s</span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            );
-          })}
-          {weakest.length > 0 && (
-            <p className="weak-hint">
-              相对薄弱（题量 ≥10）：{weakest.map((item) => titleOf(item.topicId)).join("、")}，可回
-              「专项训练」对应关卡重点补强。
-            </p>
-          )}
-        </Stack>
-      )}
-    </section>
-  );
+  if (weakest.length)
+    return (
+      <p className="weak-hint">
+        相对薄弱（题量 ≥10）：{weakest.map((item) => titleOf(item.topicId)).join("、")}
+        ，可回「专项训练」对应关卡重点补强。
+      </p>
+    );
+  if (practiced.length)
+    return (
+      <p className="good-hint">
+        题量 ≥10 的模块正确率均在 90% 以上，继续保持这个节奏。
+      </p>
+    );
+  return null;
 }
 
 function CardsSection({ data }: { data: Summary }) {
   const { summary } = data.cards;
+  const segments = [
+    { label: "待学习", value: summary.new, color: "#9fb3c0" },
+    { label: "学习中", value: summary.learning, color: "#d9a441" },
+    { label: "已掌握", value: summary.mastered, color: "#2f7d5d" },
+  ];
   return (
     <section className="panel">
       <div className="section-head">
@@ -237,12 +416,48 @@ function CardsSection({ data }: { data: Summary }) {
           近 7 日复习 {data.cards.last7} 次 · 今日 {data.cards.today} 次
         </span>
       </div>
-      <ResponsiveGrid minItemWidth="140px" gap="0.9rem">
-        <StatCard label="全部卡片" value={summary.total} />
-        <StatCard label="待学习/复习" value={summary.new + summary.due} />
-        <StatCard label="已掌握" value={summary.mastered} />
-        <StatCard label="记忆正确率" value={`${Math.round(summary.accuracy * 100)}%`} />
-      </ResponsiveGrid>
+      <div className="cards-overview">
+        <ProgressRing
+          ratio={summary.total ? summary.mastered / summary.total : 0}
+          value={`${summary.mastered}/${summary.total}`}
+          label="已掌握"
+          size={100}
+          stroke={9}
+          color="#2f7d5d"
+        />
+        <div className="cards-detail">
+          <div className="stacked-meter" aria-hidden="true">
+            {segments.map((segment) =>
+              segment.value > 0 ? (
+                <i
+                  key={segment.label}
+                  style={{
+                    flexGrow: segment.value,
+                    background: segment.color,
+                  }}
+                  title={`${segment.label} ${segment.value}`}
+                />
+              ) : null,
+            )}
+          </div>
+          <div className="stacked-legend">
+            {segments.map((segment) => (
+              <span key={segment.label}>
+                <i style={{ background: segment.color }} />
+                {segment.label} <strong>{segment.value}</strong>
+              </span>
+            ))}
+            <span>
+              <i style={{ background: "#bb623a" }} />
+              待复习 <strong>{summary.due}</strong>
+            </span>
+            <span className="stacked-accuracy">
+              记忆正确率{" "}
+              <strong>{Math.round(summary.accuracy * 100)}%</strong>
+            </span>
+          </div>
+        </div>
+      </div>
       {summary.total === 0 && (
         <p className="muted hint-line">在「申论 → 规范词卡片」复习后会展示这里。</p>
       )}
@@ -262,15 +477,21 @@ function ExtraStats({ data }: { data: Summary }) {
           <p className="subtitle">
             <ListChecks size={15} /> 错题本
           </p>
-          <ResponsiveGrid minItemWidth="120px" gap="0.7rem">
-            <StatCard label="待巩固错题" value={data.mistakes.open} />
-            <StatCard label="已掌握" value={data.mistakes.mastered} />
-            <StatCard label="重做次数" value={data.mistakes.retryTotal} />
-            <StatCard
-              label="重做正确率"
+          <div className="retry-overview">
+            <ProgressRing
+              ratio={data.mistakes.retryAccuracy}
               value={`${Math.round(data.mistakes.retryAccuracy * 100)}%`}
+              label="重做正确率"
+              size={88}
+              stroke={8}
+              color="#bb623a"
             />
-          </ResponsiveGrid>
+            <ResponsiveGrid minItemWidth="110px" gap="0.7rem">
+              <StatCard label="待巩固错题" value={data.mistakes.open} />
+              <StatCard label="已掌握" value={data.mistakes.mastered} />
+              <StatCard label="重做次数" value={data.mistakes.retryTotal} />
+            </ResponsiveGrid>
+          </div>
         </div>
         <div className="sub-block">
           <p className="subtitle">

@@ -79,6 +79,7 @@ updatedAt: 2026-09-02
 4. 本地预览：
    - 终端 A 启动 API mock：`node scripts/dev-api-server.mjs`（监听 4174，每次请求实时读 entries.json，无需重启）
    - 终端 B 启动页面：`npm run dev`（http://localhost:5173 ，`/api` 代理到 4174）
+   - 登录：页面仅支持邮箱登录。mock 内置账号 `demo@civil.local` / `civil1234`，也可在注册页直接创建新账号（账号只存在内存中，重启 mock 即清空）
    - 前置条件：先跑过一次 `npm run content:build`（mock 读 `public/generated/knowledge/entries.json`）；mock 用 `import` 直接读 `src/generator/catalog.ts`，因此需要 Node ≥ 22.18（类型剥离默认开启；`node -v` 自查）
 5. 验证展示位置（见下节），确认后即可提交源码。
 

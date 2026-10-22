@@ -77,7 +77,53 @@ function parseQuery(url) {
   return params
 }
 
-const MOCK_USER = { id: 'dev-user-001', nickname: '开发用户' }
+const SESSION_COOKIE = 'civil_exam_session'
+/** 本地 mock 的邮箱账号与会话（仅内存，重启即失效） */
+const authState = {
+  users: new Map(), // email -> { id, nickname, email, password }
+  sessions: new Map(), // token -> email
+}
+const DEMO_ACCOUNT = { email: 'demo@civil.local', password: 'civil1234', nickname: '开发用户' }
+authState.users.set(DEMO_ACCOUNT.email, {
+  id: 'dev-user-001',
+  nickname: DEMO_ACCOUNT.nickname,
+  email: DEMO_ACCOUNT.email,
+  password: DEMO_ACCOUNT.password,
+})
+
+function cookieValue(req, name) {
+  const raw = req.headers.cookie || ''
+  for (const part of raw.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key === name) return decodeURIComponent(rest.join('='))
+  }
+  return ''
+}
+
+function currentMockUser(req) {
+  const token = cookieValue(req, SESSION_COOKIE)
+  if (!token) return null
+  const email = authState.sessions.get(token)
+  return email ? authState.users.get(email) ?? null : null
+}
+
+function publicUser(record) {
+  return { id: record.id, nickname: record.nickname, email: record.email }
+}
+
+function startMockSession(res, email) {
+  const token = crypto.randomUUID().replaceAll('-', '')
+  authState.sessions.set(token, email)
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`,
+  )
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify(payload))
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -160,22 +206,61 @@ const server = http.createServer(async (req, res) => {
 
   console.log(`[dev-api] ${req.method} ${pathname}`)
 
-  // === Auth API ===
+  // === Auth API（邮箱注册 / 登录，仅本地 mock） ===
   if (pathname === '/api/auth/me' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ success: true, data: { user: MOCK_USER }, error: null }))
+    const user = currentMockUser(req)
+    if (!user) {
+      sendJson(res, 401, { success: false, data: null, error: { code: 'UNAUTHORIZED', message: '请先登录' } })
+      return
+    }
+    sendJson(res, 200, { success: true, data: { user: publicUser(user) }, error: null })
+    return
+  }
+
+  if (pathname === '/api/auth/register' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req))
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const password = String(body.password ?? '')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || password.length < 8) {
+      sendJson(res, 400, { success: false, data: null, error: { code: 'INVALID_PARAM', message: '邮箱或密码格式不正确' } })
+      return
+    }
+    if (authState.users.has(email)) {
+      sendJson(res, 409, { success: false, data: null, error: { code: 'EMAIL_TAKEN', message: '该邮箱已注册，请直接登录' } })
+      return
+    }
+    const nickname = String(body.nickname || email.split('@')[0]).slice(0, 12)
+    const record = {
+      id: `dev-${crypto.randomUUID()}`,
+      nickname,
+      email,
+      password,
+    }
+    authState.users.set(email, record)
+    startMockSession(res, email)
+    sendJson(res, 201, { success: true, data: { user: publicUser(record) }, error: null })
     return
   }
 
   if (pathname === '/api/auth/login' && req.method === 'POST') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ success: true, data: { user: MOCK_USER }, error: null }))
+    const body = JSON.parse(await readBody(req))
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const password = String(body.password ?? '')
+    const record = authState.users.get(email)
+    if (!record || record.password !== password) {
+      sendJson(res, 401, { success: false, data: null, error: { code: 'INVALID_CREDENTIALS', message: '邮箱或密码不正确' } })
+      return
+    }
+    startMockSession(res, email)
+    sendJson(res, 200, { success: true, data: { user: publicUser(record) }, error: null })
     return
   }
 
   if (pathname === '/api/auth/logout' && req.method === 'POST') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ success: true, data: null, error: null }))
+    const token = cookieValue(req, SESSION_COOKIE)
+    if (token) authState.sessions.delete(token)
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`)
+    sendJson(res, 200, { success: true, data: { loggedOut: true }, error: null })
     return
   }
 
@@ -578,19 +663,175 @@ const server = http.createServer(async (req, res) => {
   
   const profileSummaryMatch = pathname === '/api/profile/summary' && req.method === 'GET'
   if (profileSummaryMatch) {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
+    const starsByKey = passedRuns()
+    const answeredRuns = [...quizState.runs.values()].filter((run) => run.answered.length > 0)
+    const dayKey = (time) => new Date(time + 8 * 3600_000).toISOString().slice(0, 10)
+    const today = dayKey(Date.now())
+    const dayMap = new Map()
+    const bumpDay = (date, patch) => {
+      const entry = dayMap.get(date) ?? {
+        quizCount: 0,
+        correct: 0,
+        durationMs: 0,
+        cardReviews: 0,
+        schulteRuns: 0,
+        retries: 0,
+      }
+      entry.quizCount += patch.quizCount ?? 0
+      entry.correct += patch.correct ?? 0
+      entry.durationMs += patch.durationMs ?? 0
+      dayMap.set(date, entry)
+    }
+    const itemsMap = new Map()
+    const diffMap = new Map(DIFFS.map((difficulty) => [difficulty, { difficulty, total: 0, correct: 0, msSum: 0 }]))
+    const weekday = Array.from({ length: 7 }, (_, index) => ({ weekday: index, quizCount: 0, correct: 0 }))
+    let total = 0
+    let correctTotal = 0
+    let msSum = 0
+    let openMistakes = 0
+
+    answeredRuns.forEach((run, index) => {
+      const date = new Date(Date.now() + 8 * 3600_000 - (index % 30) * 86400_000)
+        .toISOString()
+        .slice(0, 10)
+      const runTotal = run.answered.length
+      const runCorrect = run.answered.filter((answer) => answer.correct).length
+      const runMs = run.answered.reduce((sum, answer) => sum + (answer.durationMs ?? 0), 0)
+      bumpDay(date, { quizCount: runTotal, correct: runCorrect, durationMs: runMs })
+      const weekdayIndex = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7
+      weekday[weekdayIndex].quizCount += runTotal
+      weekday[weekdayIndex].correct += runCorrect
+      const item = itemsMap.get(run.topicId) ?? { topicId: run.topicId, total: 0, correct: 0, msSum: 0 }
+      item.total += runTotal
+      item.correct += runCorrect
+      item.msSum += runMs
+      itemsMap.set(run.topicId, item)
+      const diff = diffMap.get(run.difficulty)
+      if (diff) {
+        diff.total += runTotal
+        diff.correct += runCorrect
+        diff.msSum += runMs
+      }
+      total += runTotal
+      correctTotal += runCorrect
+      msSum += runMs
+      openMistakes += runTotal - runCorrect
+    })
+
+    const trend30 = Array.from({ length: 30 }, (_, index) => {
+      const date = new Date(Date.now() + 8 * 3600_000 - (29 - index) * 86400_000)
+        .toISOString()
+        .slice(0, 10)
+      const entry = dayMap.get(date)
+      return {
+        date,
+        quizCount: entry?.quizCount ?? 0,
+        correct: entry?.correct ?? 0,
+        accuracy: entry?.quizCount ? entry.correct / entry.quizCount : 0,
+        durationMs: entry?.durationMs ?? 0,
+        cardReviews: 0,
+        schulteRuns: 0,
+        retries: 0,
+      }
+    })
+    let streak = 0
+    const cursor = new Date(`${today}T00:00:00Z`)
+    while (dayMap.has(cursor.toISOString().slice(0, 10))) {
+      streak += 1
+      cursor.setUTCDate(cursor.getUTCDate() - 1)
+    }
+    const todayEntry = dayMap.get(today)
+    const quizItems = [...itemsMap.values()].map((item) => {
+      const topic = topicOfId(item.topicId)
+      return {
+        topicId: item.topicId,
+        track: topic?.track ?? 'speed',
+        total: item.total,
+        correct: item.correct,
+        accuracy: item.total ? item.correct / item.total : 0,
+        averageMs: item.total ? Math.round(item.msSum / item.total) : 0,
+        stars: starsByKey.get(`${item.topicId}|hard`) ?? 0,
+      }
+    })
+    const progressTracks = TRACKS.map((track) => {
+      const trackTopics = CATALOG.filter((topic) => topic.track === track.id)
+      const trackItems = quizItems.filter((item) => item.track === track.id)
+      let cleared = 0
+      let stars = 0
+      for (const topic of trackTopics) {
+        const value = starsByKey.get(`${topic.id}|hard`) ?? 0
+        stars += value
+        if (value >= 1) cleared += 1
+      }
+      const trackTotal = trackItems.reduce((sum, item) => sum + item.total, 0)
+      const trackCorrect = trackItems.reduce((sum, item) => sum + item.correct, 0)
+      const trackMsSum = trackItems.reduce(
+        (sum, item) => sum + item.averageMs * item.total,
+        0,
+      )
+      return {
+        id: track.id,
+        title: track.title,
+        totalTopics: trackTopics.length,
+        clearedTopics: cleared,
+        stars,
+        maxStars: trackTopics.length * 3,
+        total: trackTotal,
+        correct: trackCorrect,
+        accuracy: trackTotal ? trackCorrect / trackTotal : 0,
+        averageMs: trackTotal ? Math.round(trackMsSum / trackTotal) : 0,
+      }
+    })
+    const starsDistribution = [0, 1, 2, 3].map((stars) => ({
+      stars,
+      count: CATALOG.filter((topic) => (starsByKey.get(`${topic.id}|hard`) ?? 0) === stars).length,
+    }))
+    sendJson(res, 200, {
       success: true,
       data: {
-        activity: { studyDays: 0, streak: 0, activeToday: false, today: { quizCount: 0, cardReviews: 0, schulteRuns: 0, retries: 0 } },
-        trend30: Array.from({ length: 30 }, (_, i) => ({ date: '', quizCount: 0, correct: 0, accuracy: 0, durationMs: 0, cardReviews: 0, schulteRuns: 0, retries: 0 })),
-        quiz: { items: [], overall: { total: 0, correct: 0, accuracy: 0, averageMs: 0 } },
+        activity: {
+          studyDays: dayMap.size,
+          streak,
+          activeToday: Boolean(todayEntry?.quizCount),
+          today: {
+            quizCount: todayEntry?.quizCount ?? 0,
+            cardReviews: 0,
+            schulteRuns: 0,
+            retries: 0,
+          },
+        },
+        trend30,
+        quiz: {
+          items: quizItems,
+          byDifficulty: [...diffMap.values()].map((item) => ({
+            difficulty: item.difficulty,
+            total: item.total,
+            correct: item.correct,
+            accuracy: item.total ? item.correct / item.total : 0,
+            averageMs: item.total ? Math.round(item.msSum / item.total) : 0,
+          })),
+          weekday,
+          overall: {
+            total,
+            correct: correctTotal,
+            accuracy: total ? correctTotal / total : 0,
+            averageMs: total ? Math.round(msSum / total) : 0,
+          },
+        },
+        progress: {
+          totalTopics: CATALOG.length,
+          clearedTopics: progressTracks.reduce((sum, track) => sum + track.clearedTopics, 0),
+          totalStars: progressTracks.reduce((sum, track) => sum + track.stars, 0),
+          maxStars: CATALOG.length * 3,
+          starsDistribution,
+          tracks: progressTracks,
+        },
         cards: { summary: { total: 0, new: 0, due: 0, learning: 0, mastered: 0, accuracy: 0 }, today: 0, last7: 0 },
-        mistakes: { open: 0, mastered: 0, retryTotal: 0, retryAccuracy: 0 },
+        mistakes: { open: openMistakes, mastered: 0, retryTotal: 0, retryAccuracy: 0 },
         schulte: { bests: [], runs30: 0 },
       },
       error: null,
-    }))
+    })
     return
   }
 
@@ -609,4 +850,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[dev-api] Mock API server running at http://127.0.0.1:${PORT}`)
   console.log(`[dev-api] Entries: ${path.relative(WORKSPACE, ENTRIES_PATH)}`)
+  console.log(`[dev-api] 登录账号：${DEMO_ACCOUNT.email} / ${DEMO_ACCOUNT.password}`)
 })

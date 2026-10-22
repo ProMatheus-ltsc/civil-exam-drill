@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { handle } from "hono/cloudflare-pages";
 import { z } from "zod";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -44,12 +45,17 @@ interface Database {
 }
 type Bindings = {
   DB: Database;
-  // 登录前置门控邀请码（env 直比，大小写不敏感；参考 money-growth-system 模式，V2 2026-09-03）
-  INVITE_CODE: string;
   // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
   ASSETS?: { fetch(input: string | URL | Request): Promise<Response> };
 };
-type Variables = { userId: string; tokenHash: string; nickname: string };
+type Variables = {
+  userId: string;
+  tokenHash: string;
+  nickname: string;
+  email: string;
+};
+type AppEnv = { Bindings: Bindings; Variables: Variables };
+type AppContext = Context<AppEnv>;
 
 // ---- 知识内容加载（静态 JSON 经 env.ASSETS 运行时读取，isolate 级缓存；避免打进 Worker bundle 超 3MiB）----
 interface KnowledgeEntry {
@@ -296,6 +302,181 @@ async function sha(value: string) {
     .join("");
 }
 
+// ---- 邮箱注册登录 ----
+const PASSWORD_ITERATIONS = 120_000;
+const SESSION_DAYS = 30;
+const emailSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(254)
+  .email("邮箱格式不正确")
+  .transform((value) => value.toLocaleLowerCase("en-US"));
+const passwordSchema = z
+  .string()
+  .min(8, "密码至少 8 位")
+  .max(72, "密码最多 72 位");
+
+function toBase64(bytes: Uint8Array) {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+}
+
+function fromBase64(value: string) {
+  const raw = atob(value);
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+}
+
+async function derivePassword(
+  password: string,
+  salt: Uint8Array,
+  iterations: number,
+) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: salt as BufferSource,
+      iterations,
+    },
+    key,
+    256,
+  );
+  return new Uint8Array(bits);
+}
+
+async function hashPassword(password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await derivePassword(password, salt, PASSWORD_ITERATIONS);
+  return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${toBase64(salt)}$${toBase64(hash)}`;
+}
+
+async function verifyPassword(password: string, stored: string | null) {
+  if (!stored) return false;
+  const [scheme, iterationsRaw, saltBase64, hashBase64] = stored.split("$");
+  const iterations = Number(iterationsRaw);
+  if (
+    scheme !== "pbkdf2-sha256" ||
+    !Number.isInteger(iterations) ||
+    iterations < 1000 ||
+    !saltBase64 ||
+    !hashBase64
+  )
+    return false;
+  const expected = fromBase64(hashBase64);
+  const actual = await derivePassword(
+    password,
+    fromBase64(saltBase64),
+    iterations,
+  );
+  if (actual.length !== expected.length) return false;
+  let diff = 0;
+  for (let index = 0; index < actual.length; index += 1)
+    diff |= actual[index] ^ expected[index];
+  return diff === 0;
+}
+
+/** 未注册邮箱也跑一次 PBKDF2，让失败响应耗时接近，降低邮箱枚举价值 */
+let dummyPasswordHash: Promise<string> | null = null;
+function getDummyPasswordHash() {
+  dummyPasswordHash ??= hashPassword("dummy-password-not-used");
+  return dummyPasswordHash;
+}
+
+async function createSession(c: AppContext, userId: string) {
+  const token = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll(
+    "-",
+    "",
+  );
+  const tokenHash = await sha(token);
+  const expiresAt = iso(new Date(Date.now() + SESSION_DAYS * 86400000));
+  await c.env.DB.prepare(
+    "INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)",
+  )
+    .bind(uuid("ses"), userId, tokenHash, expiresAt)
+    .run();
+  setCookie(c, SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: new URL(c.req.url).protocol === "https:",
+    sameSite: "Strict",
+    path: "/",
+    maxAge: SESSION_DAYS * 86400,
+  });
+  return expiresAt;
+}
+
+async function authAttemptsExceeded(
+  c: AppContext,
+  key: string,
+  limit: number,
+  failuresOnly = false,
+) {
+  const attempts = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM auth_attempts WHERE client_key=? AND created_at>datetime('now','-10 minutes')${failuresOnly ? " AND succeeded=0" : ""}`,
+  )
+    .bind(key)
+    .first<{ count: number }>();
+  return (attempts?.count ?? 0) >= limit;
+}
+
+async function recordAuthAttempt(
+  c: AppContext,
+  key: string,
+  succeeded: boolean,
+) {
+  await c.env.DB.prepare(
+    "INSERT INTO auth_attempts(client_key,succeeded) VALUES(?,?)",
+  )
+    .bind(key, succeeded ? 1 : 0)
+    .run();
+}
+
+async function emailSignupInviteId(c: AppContext) {
+  await c.env.DB.prepare(
+    "INSERT INTO invite_codes(code_hash,label,enabled) VALUES(?,?,1) ON CONFLICT(code_hash) DO NOTHING",
+  )
+    .bind("email-signup", "email-signup")
+    .run();
+  const invite = await c.env.DB.prepare(
+    "SELECT id FROM invite_codes WHERE code_hash=?",
+  )
+    .bind("email-signup")
+    .first<{ id: number }>();
+  if (!invite) throw new Error("EMAIL_SIGNUP_INVITE_MISSING");
+  return invite.id;
+}
+
+async function uniqueNickname(
+  c: AppContext,
+  inviteId: number,
+  source: string,
+) {
+  const cleaned = source.replace(/\s+/g, " ").trim() || "学员";
+  const base = Array.from(cleaned).slice(0, 12).join("");
+  for (let index = 0; index < 20; index += 1) {
+    const suffix = index === 0 ? "" : String(index + 1);
+    const candidate =
+      Array.from(base)
+        .slice(0, Math.max(1, 12 - suffix.length))
+        .join("") + suffix;
+    const exists = await c.env.DB.prepare(
+      "SELECT id FROM users WHERE invite_code_id=? AND nickname_normalized=?",
+    )
+      .bind(inviteId, candidate.toLocaleLowerCase("zh-CN"))
+      .first<{ id: string }>();
+    if (!exists) return candidate;
+  }
+  return `学员${crypto.randomUUID().slice(0, 4)}`;
+}
+
 async function jsonBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   return schema.parse(await request.json());
 }
@@ -330,8 +511,6 @@ app.onError((error, c) => {
 });
 
 app.use("*", async (c, next) => {
-  if (c.req.path === "/api/health" || c.req.path === "/api/auth/login")
-    return next();
   if (["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method)) {
     const requestOrigin = c.req.header("Origin");
     const expectedOrigin = new URL(c.req.url).origin;
@@ -340,18 +519,30 @@ app.use("*", async (c, next) => {
     if (c.req.header("Sec-Fetch-Site") === "cross-site")
       return c.json(fail("FORBIDDEN", "拒绝跨站写入请求"), 403);
   }
+  if (
+    c.req.path === "/api/health" ||
+    c.req.path === "/api/auth/login" ||
+    c.req.path === "/api/auth/register"
+  )
+    return next();
   const token = getCookie(c, SESSION_COOKIE) ?? "";
   if (!token) return c.json(fail("UNAUTHORIZED", "请先登录"), 401);
   const tokenHash = await sha(token);
   const session = await c.env.DB.prepare(
-    `SELECT s.user_id AS userId,s.expires_at AS expiresAt,u.nickname FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status='active'`,
+    `SELECT s.user_id AS userId,s.expires_at AS expiresAt,u.nickname,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status='active'`,
   )
     .bind(tokenHash)
-    .first<{ userId: string; expiresAt: string; nickname: string }>();
+    .first<{
+      userId: string;
+      expiresAt: string;
+      nickname: string;
+      email: string | null;
+    }>();
   if (!session) return c.json(fail("UNAUTHORIZED", "登录已失效"), 401);
   c.set("userId", session.userId);
   c.set("tokenHash", tokenHash);
   c.set("nickname", session.nickname);
+  c.set("email", session.email ?? "");
   await next();
 });
 
@@ -360,82 +551,101 @@ app.get("/health", async (c) => {
   return c.json(ok({ status: "ok", database: "ok", time: iso() }));
 });
 
-app.post("/auth/login", async (c) => {
+app.post("/auth/register", async (c) => {
   const body = await jsonBody(
     c.req.raw,
     z.object({
-      inviteCode: z.string().trim().min(4).max(32),
-      nickname: z.string().trim().min(1).max(12),
+      email: emailSchema,
+      password: passwordSchema,
+      nickname: z.string().trim().max(12).optional(),
     }),
   );
-  const clientKey = `login:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
-  const attempts = await c.env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM auth_attempts WHERE client_key=? AND created_at>datetime('now','-10 minutes')",
+  const clientKey = `register:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
+  if (await authAttemptsExceeded(c, clientKey, 8))
+    return c.json(fail("RATE_LIMITED", "注册过于频繁，请稍后再试"), 429);
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM users WHERE email_normalized=?",
   )
-    .bind(clientKey)
-    .first<{ count: number }>();
-  if ((attempts?.count ?? 0) >= 10)
-    return c.json(fail("RATE_LIMITED", "登录尝试过于频繁，请稍后再试"), 429);
-  // 邀请码 env 直比（大小写不敏感）；未配置 INVITE_CODE 时拒绝
-  const expected = String(c.env.INVITE_CODE ?? "").trim().toUpperCase();
-  const valid = expected !== "" && body.inviteCode.trim().toUpperCase() === expected;
-  await c.env.DB.prepare(
-    "INSERT INTO auth_attempts(client_key,succeeded) VALUES(?,?)",
-  )
-    .bind(clientKey, valid ? 1 : 0)
-    .run();
-  if (!valid) return c.json(fail("INVITE_INVALID", "邀请码无效或已停用"), 401);
-  // 兼容 users.invite_code_id 外键：为 env 邀请码维护一条固定绑定记录
-  await c.env.DB.prepare(
-    "INSERT INTO invite_codes(code_hash,label,enabled) VALUES(?,?,1) ON CONFLICT(code_hash) DO NOTHING",
-  )
-    .bind("env-mode", "invite-code-env")
-    .run();
-  const invite = await c.env.DB.prepare(
-    "SELECT id FROM invite_codes WHERE code_hash=?",
-  )
-    .bind("env-mode")
-    .first<{ id: number }>();
-  const inviteId = invite?.id ?? 1;
-  const normalized = body.nickname.toLocaleLowerCase("zh-CN");
-  let user = await c.env.DB.prepare(
-    "SELECT id,nickname FROM users WHERE invite_code_id=? AND nickname_normalized=?",
-  )
-    .bind(inviteId, normalized)
-    .first<{ id: string; nickname: string }>();
-  if (!user) {
-    user = { id: uuid("usr"), nickname: body.nickname };
-    await c.env.DB.prepare(
-      "INSERT INTO users(id,invite_code_id,nickname,nickname_normalized) VALUES(?,?,?,?)",
-    )
-      .bind(user.id, inviteId, user.nickname, normalized)
-      .run();
-  } else {
-    await c.env.DB.prepare(
-      "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
-    )
-      .bind(user.id)
-      .run();
+    .bind(body.email)
+    .first<{ id: string }>();
+  if (existing) {
+    await recordAuthAttempt(c, clientKey, false);
+    return c.json(fail("EMAIL_TAKEN", "该邮箱已注册，请直接登录"), 409);
   }
-  const token = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll(
-    "-",
-    "",
+  const inviteId = await emailSignupInviteId(c);
+  const nickname = await uniqueNickname(
+    c,
+    inviteId,
+    body.nickname ?? body.email.split("@")[0] ?? "",
   );
-  const tokenHash = await sha(token);
-  const expiresAt = iso(new Date(Date.now() + 30 * 86400000));
-  await c.env.DB.prepare(
-    "INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)",
+  const user = { id: uuid("usr"), nickname, email: body.email };
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO users(id,invite_code_id,nickname,nickname_normalized,email,email_normalized,password_hash) VALUES(?,?,?,?,?,?,?)",
+    )
+      .bind(
+        user.id,
+        inviteId,
+        nickname,
+        nickname.toLocaleLowerCase("zh-CN"),
+        body.email,
+        body.email,
+        await hashPassword(body.password),
+      )
+      .run();
+  } catch (error) {
+    await recordAuthAttempt(c, clientKey, false);
+    if (String(error).includes("UNIQUE constraint failed"))
+      return c.json(fail("EMAIL_TAKEN", "该邮箱已注册，请直接登录"), 409);
+    throw error;
+  }
+  await recordAuthAttempt(c, clientKey, true);
+  const expiresAt = await createSession(c, user.id);
+  return c.json(ok({ expiresAt, user }), 201);
+});
+
+app.post("/auth/login", async (c) => {
+  const body = await jsonBody(
+    c.req.raw,
+    z.object({ email: emailSchema, password: passwordSchema }),
+  );
+  const clientKey = `login:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
+  if (await authAttemptsExceeded(c, clientKey, 10, true))
+    return c.json(fail("RATE_LIMITED", "登录尝试过于频繁，请稍后再试"), 429);
+  const user = await c.env.DB.prepare(
+    "SELECT id,nickname,email,password_hash AS passwordHash FROM users WHERE email_normalized=? AND status='active'",
   )
-    .bind(uuid("ses"), user.id, tokenHash, expiresAt)
+    .bind(body.email)
+    .first<{
+      id: string;
+      nickname: string;
+      email: string;
+      passwordHash: string | null;
+    }>();
+  const valid = await verifyPassword(
+    body.password,
+    user?.passwordHash ?? (await getDummyPasswordHash()),
+  );
+  await recordAuthAttempt(c, clientKey, Boolean(user) && valid);
+  if (!user || !valid)
+    return c.json(fail("INVALID_CREDENTIALS", "邮箱或密码不正确"), 401);
+  await c.env.DB.prepare(
+    "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
+  )
+    .bind(user.id)
     .run();
-  setCookie(c, SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: new URL(c.req.url).protocol === "https:",
-    sameSite: "Strict",
-    path: "/",
-    maxAge: 30 * 86400,
-  });
-  return c.json(ok({ expiresAt, user }));
+  await c.env.DB.prepare(
+    "DELETE FROM sessions WHERE user_id=? AND expires_at<=CURRENT_TIMESTAMP",
+  )
+    .bind(user.id)
+    .run();
+  const expiresAt = await createSession(c, user.id);
+  return c.json(
+    ok({
+      expiresAt,
+      user: { id: user.id, nickname: user.nickname, email: user.email },
+    }),
+  );
 });
 
 app.post("/auth/logout", async (c) => {
@@ -454,7 +664,11 @@ app.get("/auth/me", async (c) => {
     .first<{ expiresAt: string }>();
   return c.json(
     ok({
-      user: { id: c.get("userId"), nickname: c.get("nickname") },
+      user: {
+        id: c.get("userId"),
+        nickname: c.get("nickname"),
+        email: c.get("email"),
+      },
       expiresAt: session?.expiresAt,
     }),
   );
@@ -1480,7 +1694,7 @@ app.get("/profile/summary", async (c) => {
   const userId = c.get("userId");
   const now = iso();
   const start45 = new Date(Date.now() - 45 * 86400000).toISOString();
-  const [attempts, retries, essayEvents, schulte, quizRows, cardRows, mistakeRows, retryAcc, schulteBests, cards] = await Promise.all([
+  const [attempts, retries, essayEvents, schulte, quizRows, difficultyRows, cardRows, mistakeRows, retryAcc, schulteBests, cards, quizStatus] = await Promise.all([
     c.env.DB.prepare(
       "SELECT created_at,correct,duration_ms FROM quiz_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
     )
@@ -1508,6 +1722,13 @@ app.get("/profile/summary", async (c) => {
       .bind(userId)
       .all<Record<string, unknown>>(),
     c.env.DB.prepare(
+      `SELECT q.difficulty AS difficulty,COUNT(*) AS total,SUM(a.correct) AS correct,AVG(a.duration_ms) AS averageMs
+       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+       WHERE a.user_id=? GROUP BY q.difficulty`,
+    )
+      .bind(userId)
+      .all<Record<string, unknown>>(),
+    c.env.DB.prepare(
       "SELECT repetitions,interval_days AS intervalDays,due_at AS dueAt,remembered_count AS rememberedCount,forgot_count AS forgotCount FROM essay_term_progress WHERE user_id=?",
     )
       .bind(userId)
@@ -1528,7 +1749,9 @@ app.get("/profile/summary", async (c) => {
       .bind(userId)
       .all<{ gridSize: number; variant: string; bestMs: number }>(),
     getEssayCards(c),
+    loadQuizStatus(c),
   ]);
+  const { passStars } = quizStatus;
 
   // —— 30 日学习趋势（本地自然日） ——
   const dayMap = new Map<
@@ -1588,14 +1811,107 @@ app.get("/profile/summary", async (c) => {
     quizTotal += total;
     quizCorrect += correct;
     quizMsSum += averageMs * total;
+    const topicId = String(row.topicId);
+    const topic = topicById.get(topicId as TopicId);
     return {
-      topicId: String(row.topicId),
+      topicId,
+      track: topic?.track ?? "speed",
       total,
       correct,
       accuracy: total ? correct / total : 0,
       averageMs,
+      stars: passStars.get(diffKey(topicId, "hard")) ?? 0,
     };
   });
+
+  // —— 难度分布（低/中/高） ——
+  const byDifficulty = (["easy", "medium", "hard"] as const).map(
+    (difficulty) => {
+      const row = difficultyRows.results.find(
+        (item) => String(item.difficulty) === difficulty,
+      );
+      const total = Number(row?.total) || 0;
+      const correct = Number(row?.correct) || 0;
+      return {
+        difficulty,
+        total,
+        correct,
+        accuracy: total ? correct / total : 0,
+        averageMs: Math.round(Number(row?.averageMs) || 0),
+      };
+    },
+  );
+
+  // —— 通关进度：模块以高难度局最佳星级判定 ——
+  const trackTitles: Record<string, string> = {
+    speed: "资料速算",
+    sequence: "数字推理",
+    material: "资料实战",
+  };
+  const trackOrder = ["speed", "sequence", "material"] as const;
+  let clearedTopics = 0;
+  let totalStars = 0;
+  const starsDistribution = [0, 1, 2, 3].map((stars) => ({
+    stars,
+    count: 0,
+  }));
+  const progressTracks = trackOrder.map((track) => {
+    const trackTopics = topics.filter((topic) => topic.track === track);
+    const trackItems = quizItems.filter((item) => item.track === track);
+    const total = trackItems.reduce((sum, item) => sum + item.total, 0);
+    const correct = trackItems.reduce((sum, item) => sum + item.correct, 0);
+    const msSum = trackItems.reduce(
+      (sum, item) => sum + item.averageMs * item.total,
+      0,
+    );
+    let cleared = 0;
+    let stars = 0;
+    for (const topic of trackTopics) {
+      const value = passStars.get(diffKey(topic.id, "hard")) ?? 0;
+      stars += value;
+      if (value >= 1) cleared += 1;
+      starsDistribution[value].count += 1;
+      if (value >= 1) clearedTopics += 1;
+      totalStars += value;
+    }
+    return {
+      id: track,
+      title: trackTitles[track],
+      totalTopics: trackTopics.length,
+      clearedTopics: cleared,
+      stars,
+      maxStars: trackTopics.length * 3,
+      total,
+      correct,
+      accuracy: total ? correct / total : 0,
+      averageMs: total ? Math.round(msSum / total) : 0,
+    };
+  });
+  const progress = {
+    totalTopics: topics.length,
+    clearedTopics,
+    totalStars,
+    maxStars: topics.length * 3,
+    starsDistribution,
+    tracks: progressTracks,
+  };
+
+  // —— 星期节奏（最近 45 天作答；周一=0） ——
+  const weekday = Array.from({ length: 7 }, (_, index) => ({
+    weekday: index,
+    quizCount: 0,
+    correct: 0,
+  }));
+  for (const row of attempts.results) {
+    const normalized = row.created_at.includes("T")
+      ? row.created_at
+      : `${row.created_at.replace(" ", "T")}Z`;
+    const time = Date.parse(normalized);
+    if (Number.isNaN(time)) continue;
+    const index = (new Date(time + 8 * 3600_000).getUTCDay() + 6) % 7;
+    weekday[index].quizCount += 1;
+    weekday[index].correct += Number(row.correct) || 0;
+  }
 
   // —— 规范词卡片 ——
   const rows = cardRows.results;
@@ -1637,6 +1953,8 @@ app.get("/profile/summary", async (c) => {
       trend30,
       quiz: {
         items: quizItems,
+        byDifficulty,
+        weekday,
         overall: {
           total: quizTotal,
           correct: quizCorrect,
@@ -1644,6 +1962,7 @@ app.get("/profile/summary", async (c) => {
           averageMs: quizTotal ? Math.round(quizMsSum / quizTotal) : 0,
         },
       },
+      progress,
       cards: { summary, today: todayEntry?.cardReviews ?? 0, last7 },
       mistakes: {
         open: Math.max(0, openMistakes),

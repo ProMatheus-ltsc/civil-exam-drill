@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
   BookOpen,
@@ -14,65 +13,190 @@ import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { ToastContainer } from "@shared/core/components/Toast";
 import { api } from "./api/client";
-import { useAsync } from "./hooks/useAsync";
 import { EssayPage, KnowledgeDocPage, KnowledgePage } from "./pages/KnowledgePage";
 import { MistakesPage } from "./pages/MistakesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QuizPage } from "./pages/QuizPage";
 import { SchultePage } from "./pages/SchultePage";
 
-type User = { id: string; nickname: string };
+type User = { id: string; nickname: string; email?: string };
+type AuthMode = "login" | "register";
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 function Login({ onLogin }: { onLogin: (user: User) => void }) {
-  const [inviteCode, setInviteCode] = useState(""),
-    [nickname, setNickname] = useState("");
-  const { busy, run } = useAsync();
-  const submit = () =>
-    run(async () => {
-      const data = await api<{ user: User }>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ inviteCode, nickname }),
-      });
+  const [mode, setMode] = useState<AuthMode>("login"),
+    [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
+    [confirm, setConfirm] = useState(""),
+    [nickname, setNickname] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+
+  const switchMode = (next: AuthMode) => {
+    setMode(next);
+    setError("");
+    setPassword("");
+    setConfirm("");
+  };
+
+  const submit = async () => {
+    const trimmedEmail = email.trim();
+    if (!emailPattern.test(trimmedEmail)) {
+      setError("请输入有效的邮箱地址");
+      return;
+    }
+    if (password.length < 8) {
+      setError("密码至少 8 位");
+      return;
+    }
+    if (mode === "register" && password !== confirm) {
+      setError("两次输入的密码不一致");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      const data = await api<{ user: User }>(
+        mode === "register" ? "/auth/register" : "/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: trimmedEmail,
+            password,
+            ...(mode === "register" && nickname.trim()
+              ? { nickname: nickname.trim() }
+              : {}),
+          }),
+        },
+      );
       onLogin(data.user);
-    });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "操作失败，请稍后重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitOnEnter = (event: { key: string }) => {
+    if (event.key === "Enter") void submit();
+  };
+
   return (
     <main className="login-shell dvh">
-      <section className="login-card">
+      <section className="login-card auth-card">
         <p className="eyebrow">个人学习工具</p>
         <h1>学习助手</h1>
-        <p className="muted">登录后继续知识复习和专项训练。</p>
+        <p className="muted">
+          {mode === "login"
+            ? "使用邮箱登录，继续知识复习与专项训练。"
+            : "注册后学习记录会自动同步，换设备也能接着练。"}
+        </p>
+        <div className="auth-tabs" role="tablist" aria-label="登录或注册">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "login"}
+            className={mode === "login" ? "active" : ""}
+            onClick={() => switchMode("login")}
+          >
+            登录
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "register"}
+            className={mode === "register" ? "active" : ""}
+            onClick={() => switchMode("register")}
+          >
+            注册
+          </button>
+        </div>
         <Stack gap="1rem">
           <label>
-            邀请码
+            邮箱
             <input
-              value={inviteCode}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setInviteCode(event.target.value)
-              }
-              placeholder="请输入邀请码"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              inputMode="email"
+              maxLength={254}
             />
           </label>
+          {mode === "register" && (
+            <label>
+              昵称（可选）
+              <input
+                value={nickname}
+                onChange={(event) => setNickname(event.target.value)}
+                maxLength={12}
+                placeholder="默认取邮箱前缀，可稍后修改"
+                autoComplete="nickname"
+                onKeyDown={submitOnEnter}
+              />
+            </label>
+          )}
           <label>
-            昵称
+            密码
             <input
-              value={nickname}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setNickname(event.target.value)
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="至少 8 位"
+              autoComplete={
+                mode === "login" ? "current-password" : "new-password"
               }
-              maxLength={12}
-              placeholder="1～12 个字符"
-              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) =>
-                event.key === "Enter" && submit()
-              }
+              onKeyDown={submitOnEnter}
             />
           </label>
+          {mode === "register" && (
+            <label>
+              确认密码
+              <input
+                type="password"
+                value={confirm}
+                onChange={(event) => setConfirm(event.target.value)}
+                placeholder="再输入一次密码"
+                autoComplete="new-password"
+                onKeyDown={submitOnEnter}
+              />
+            </label>
+          )}
+          {error && (
+            <p className="auth-error" role="alert">
+              {error}
+            </p>
+          )}
           <button
+            type="button"
             className="primary touch-target"
             disabled={busy}
-            onClick={submit}
+            onClick={() => void submit()}
           >
-            {busy ? "登录中…" : "进入学习"}
+            {busy
+              ? mode === "login"
+                ? "登录中…"
+                : "注册中…"
+              : mode === "login"
+                ? "登录"
+                : "注册并登录"}
           </button>
+          <p className="auth-switch muted">
+            {mode === "login" ? "还没有账号？" : "已有账号？"}
+            <button
+              type="button"
+              onClick={() =>
+                switchMode(mode === "login" ? "register" : "login")
+              }
+            >
+              {mode === "login" ? "免费注册" : "返回登录"}
+            </button>
+          </p>
+          <p className="auth-note muted">
+            仅支持邮箱登录，密码经加密存储，不会以明文保存。
+          </p>
         </Stack>
       </section>
     </main>
@@ -86,7 +210,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
     { to: "/quiz", icon: Calculator, label: "专项训练" },
     { to: "/mistakes", icon: ListChecks, label: "错题本" },
     { to: "/schulte", icon: Brain, label: "舒尔特方格" },
-    { to: "/profile", icon: ChartNoAxesColumn, label: "个人统计" },
+    { to: "/profile", icon: ChartNoAxesColumn, label: "数据分析" },
   ];
   return (
     <Layout
@@ -103,7 +227,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
         <Route path="/quiz" element={<QuizPage />} />
         <Route path="/mistakes" element={<MistakesPage />} />
         <Route path="/schulte" element={<SchultePage />} />
-        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/profile" element={<ProfilePage user={user} />} />
         <Route path="*" element={<Navigate to="/knowledge" replace />} />
       </Routes>
     </Layout>

@@ -1198,6 +1198,14 @@ a.entry {
   padding: 10px 14px;
   font-size: 0.88rem;
 }
+.good-hint {
+  margin: 4px 0 0;
+  color: #2f6b52;
+  background: #ecf5f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+}
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1864,3 +1872,565 @@ a.entry {
     padding: 6px 7px;
   }
 }
+
+/* ===== 邮箱登录 / 注册 ===== */
+.auth-card {
+  display: grid;
+  gap: 4px;
+}
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 16px 0 18px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f1f4f6;
+}
+.auth-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #627283;
+  font-weight: 800;
+}
+.auth-tabs button.active {
+  background: #fff;
+  color: #17324d;
+  box-shadow: 0 2px 10px #17324d14;
+}
+.auth-error {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #fdeee7;
+  color: #a33a2e;
+  font-size: 0.86rem;
+}
+.auth-switch {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+.auth-switch button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #315c77;
+  font-weight: 800;
+}
+.auth-note {
+  margin: 0;
+  text-align: center;
+  font-size: 0.76rem;
+}
+
+/* ===== 数据分析页 · 概览 ===== */
+.profile-overview {
+  display: grid;
+  gap: 18px;
+}
+.profile-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-identity h2 {
+  margin: 0 0 4px;
+}
+.profile-identity p {
+  margin: 0;
+}
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #17324d, #315c77);
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+/* ===== 环形进度 ===== */
+.progress-ring {
+  position: relative;
+  flex: 0 0 auto;
+}
+.progress-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.progress-ring-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  line-height: 1.1;
+}
+.progress-ring-center strong {
+  font-size: 1.05rem;
+  color: #17324d;
+}
+.progress-ring-center span {
+  margin-top: 2px;
+  color: #7b8b96;
+  font-size: 0.7rem;
+}
+
+/* ===== 学习热力 / 星期节奏 ===== */
+.activity-heatmap {
+  margin: 0;
+}
+.heat-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  grid-auto-flow: column;
+  grid-auto-columns: 14px;
+  gap: 4px;
+  align-content: start;
+}
+.heat-cell {
+  border-radius: 3px;
+  background: #eef2f4;
+}
+.heat-cell.blank {
+  background: transparent;
+}
+.heat-cell[data-level="1"] {
+  background: #dce9e2;
+}
+.heat-cell[data-level="2"] {
+  background: #b7d4c4;
+}
+.heat-cell[data-level="3"] {
+  background: #78a98d;
+}
+.heat-cell[data-level="4"] {
+  background: #2f7d5d;
+}
+.activity-heatmap figcaption,
+.weekday-chart figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: #6b7c88;
+  font-size: 0.78rem;
+}
+.heat-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.heat-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #eef2f4;
+}
+.heat-legend i[data-level="1"] {
+  background: #dce9e2;
+}
+.heat-legend i[data-level="2"] {
+  background: #b7d4c4;
+}
+.heat-legend i[data-level="3"] {
+  background: #78a98d;
+}
+.heat-legend i[data-level="4"] {
+  background: #2f7d5d;
+}
+
+.weekday-chart {
+  margin: 0;
+}
+.weekday-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 142px;
+  padding: 8px 6px 0;
+  border: 1px solid #e4eaed;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+.weekday-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+.weekday-value {
+  min-height: 14px;
+  color: #627283;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.weekday-track {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.weekday-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, #4d7a97, #17324d);
+}
+.weekday-label {
+  color: #7b8b96;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* ===== 通关进度 ===== */
+.progress-overview {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 22px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.progress-total {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.progress-total p {
+  margin: 0;
+  font-size: 0.82rem;
+}
+.track-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.track-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8eb;
+  border-radius: 14px;
+  background: #fbfcfd;
+}
+.track-card-text {
+  min-width: 0;
+}
+.track-card-text h4 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+.track-card-text p {
+  margin: 0;
+  color: #627283;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.star-distribution {
+  display: grid;
+  gap: 8px;
+}
+.star-strip {
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #eef2f4;
+}
+.star-strip span {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+.star-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #627283;
+  font-size: 0.76rem;
+}
+.star-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.star-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.star-legend em {
+  margin-left: auto;
+  font-style: normal;
+  color: #8b99a3;
+}
+
+/* ===== 分模块正确率 ===== */
+.viz-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.viz-chip {
+  min-height: 34px;
+  padding: 5px 13px;
+  border: 1px solid #cfdbe2;
+  border-radius: 999px;
+  background: #fff;
+  color: #516676;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.viz-chip.active {
+  border-color: #17324d;
+  background: #17324d;
+  color: #fff;
+}
+.module-bars {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 165px) 1fr 44px 48px;
+  gap: 10px;
+  align-items: center;
+}
+.bar-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #3d5866;
+  font-size: 0.84rem;
+}
+.bar-stars {
+  flex: 0 0 auto;
+  color: #b98a4b;
+  font-size: 0.7rem;
+  font-style: normal;
+}
+.bar-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f4;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+.bar-value {
+  text-align: right;
+  color: #17324d;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.bar-meta {
+  text-align: right;
+  color: #8b99a3;
+  font-size: 0.74rem;
+}
+
+/* ===== 难度分布 ===== */
+.difficulty-viz {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 4vw, 42px);
+  flex-wrap: wrap;
+}
+.difficulty-donut {
+  position: relative;
+  width: 148px;
+  height: 148px;
+  flex: 0 0 auto;
+}
+.difficulty-donut svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+.donut-center strong {
+  color: #17324d;
+  font-size: 1.35rem;
+}
+.donut-center span {
+  color: #7b8b96;
+  font-size: 0.7rem;
+}
+.difficulty-legend {
+  flex: 1;
+  min-width: 260px;
+  display: grid;
+  gap: 12px;
+}
+.difficulty-row {
+  display: grid;
+  grid-template-columns: 10px minmax(90px, 130px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.difficulty-text {
+  display: grid;
+  gap: 1px;
+}
+.difficulty-text strong {
+  color: #3d5866;
+  font-size: 0.84rem;
+}
+.difficulty-text span {
+  color: #8b99a3;
+  font-size: 0.72rem;
+}
+.difficulty-meter {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f4;
+}
+.difficulty-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.difficulty-time {
+  color: #627283;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+/* ===== 规范词 / 错题 ===== */
+.cards-overview {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.cards-detail {
+  flex: 1;
+  min-width: 240px;
+  display: grid;
+  gap: 12px;
+}
+.stacked-meter {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f4;
+}
+.stacked-meter i {
+  display: block;
+  height: 100%;
+}
+.stacked-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #627283;
+  font-size: 0.78rem;
+}
+.stacked-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.stacked-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.stacked-legend strong {
+  color: #17324d;
+}
+.stacked-accuracy {
+  margin-left: auto;
+}
+.retry-overview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.retry-overview > :last-child {
+  flex: 1;
+  min-width: 180px;
+}
+
+@media (max-width: 900px) {
+  .progress-overview {
+    grid-template-columns: 1fr;
+  }
+  .progress-total {
+    grid-template-columns: auto 1fr;
+    justify-items: start;
+    align-items: center;
+    text-align: left;
+  }
+}
+@media (max-width: 600px) {
+  .section-head {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .bar-row {
+    grid-template-columns: minmax(84px, 1.2fr) 1fr 40px;
+  }
+  .bar-meta {
+    display: none;
+  }
+  .difficulty-row {
+    grid-template-columns: 10px minmax(80px, 110px) 1fr auto;
+  }
+  .heat-grid {
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-columns: 12px;
+    gap: 3px;
+  }
+  .weekday-bars {
+    height: 120px;
+    gap: 5px;
+  }
+  .weekday-label {
+    font-size: 0.64rem;
+  }
+  .auth-card {
+    padding: 26px 20px;
+  }
+}
+EOF
+echo done
