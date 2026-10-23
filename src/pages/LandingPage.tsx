@@ -68,7 +68,7 @@ export function LandingPage() {
       <main className="public-landing">
         <section className="public-hero">
           <div className="public-hero-copy">
-            <p className="eyebrow">公考练习 · 学习数据 · 弱项处方</p>
+            <p className="eyebrow">每日练习 · 学习记录 · 弱项复盘</p>
             <h1>
               把每一次练习，
               <br />

@@ -12,7 +12,6 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           </span>
           <span>
             <strong>学习助手</strong>
-            <small>公考练习与数据分析</small>
           </span>
         </Link>
         <nav className="public-nav" aria-label="公开导航">

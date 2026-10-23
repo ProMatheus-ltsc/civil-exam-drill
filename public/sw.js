@@ -1,4 +1,4 @@
-const CACHE = 'civil-exam-shell-v2'
+const CACHE = 'civil-exam-shell-v3'
 const SHELL = [
   '/',
   '/index.html',

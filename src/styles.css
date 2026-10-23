@@ -2822,11 +2822,6 @@ a.entry {
   font-size: 1rem;
   letter-spacing: 0.02em;
 }
-.public-brand small {
-  color: #6e7e8a;
-  font-size: 0.7rem;
-  font-weight: 600;
-}
 .public-nav {
   display: flex;
   align-items: center;
@@ -3699,9 +3694,6 @@ a.entry {
     padding: 12px 16px;
   }
   .public-nav a:not(.public-nav-cta) {
-    display: none;
-  }
-  .public-brand small {
     display: none;
   }
   .public-footer {
