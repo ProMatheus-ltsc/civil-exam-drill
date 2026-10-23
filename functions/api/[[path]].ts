@@ -313,7 +313,8 @@ async function sha(value: string) {
 }
 
 // ---- 邮箱注册登录 ----
-const PASSWORD_ITERATIONS = 120_000;
+// Workers WebCrypto rejects PBKDF2 iteration counts above 100000.
+const PASSWORD_ITERATIONS = 100_000;
 const SESSION_DAYS = 30;
 const emailSchema = z
   .string()
