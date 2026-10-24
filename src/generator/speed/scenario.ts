@@ -4,6 +4,7 @@
  * 避免“不使用计算器，计算 X”这类干瘪问法与“数值一/二/三”标签。
  */
 import type { MaterialSpec, QuestionDraft } from "../types";
+import { round } from "../random";
 
 type Scenario = { stem: string; material: MaterialSpec };
 
@@ -227,6 +228,81 @@ function divideScenario(params: Record<string, number | string>): Scenario {
   };
 }
 
+function sensitiveScenario(
+  templateId: string,
+  params: Record<string, number | string>,
+): Scenario | null {
+  // 高难度只给题目真正用到的已知量：总份数、所占份数、整体量、增长量都不进材料，
+  // 否则表格会直接提示份数甚至把答案列出来。
+  if (templateId.startsWith("sensitive-fraction-to-whole")) {
+    const part = Number(params.part);
+    const numerator = Number(params.numerator);
+    const denominator = Number(params.denominator);
+    if (![part, numerator, denominator].every(Number.isFinite) || denominator <= 0)
+      return null;
+    const percent = round((100 * numerator) / denominator, 1);
+    return {
+      stem: "该地区全部规上企业营业收入约为多少亿元？",
+      material: {
+        paragraphs: [
+          `某地区高新技术企业实现营业收入 ${part} 亿元，占全部规上企业营业收入的 ${percent}%。`,
+        ],
+        table: {
+          caption: "某地区规上企业营业收入",
+          headers: ["指标", "数值"],
+          rows: [
+            ["高新技术企业营业收入(亿元)", String(part)],
+            ["占全部规上企业比重", `${percent}%`],
+          ],
+        },
+      },
+    };
+  }
+  if (templateId.startsWith("sensitive-share")) {
+    const part = Number(params.part);
+    const whole = Number(params.whole);
+    if (![part, whole].every(Number.isFinite) || whole === 0) return null;
+    return {
+      stem: "该行业投资占比约为多少？",
+      material: {
+        paragraphs: [
+          `某行业完成投资 ${part} 亿元，全行业投资为 ${whole} 亿元。`,
+        ],
+        table: {
+          caption: "某行业投资情况（单位：亿元）",
+          headers: ["指标", "数值"],
+          rows: [
+            ["行业投资", String(part)],
+            ["全行业投资", String(whole)],
+          ],
+        },
+      },
+    };
+  }
+  if (templateId.startsWith("sensitive-growth-shares")) {
+    const current = Number(params.current);
+    const rate = Number(params.rate);
+    if (![current, rate].every(Number.isFinite)) return null;
+    return {
+      stem: "增长量约为多少万吨？",
+      material: {
+        paragraphs: [
+          `某产品本期产量为 ${current} 万吨，同比增长 ${rate}%。`,
+        ],
+        table: {
+          caption: "某产品产量情况",
+          headers: ["指标", "数值"],
+          rows: [
+            ["本期产量(万吨)", String(current)],
+            ["同比增速", `${rate}%`],
+          ],
+        },
+      },
+    };
+  }
+  return null;
+}
+
 function buildMaterial(
   caption: string,
   rows: string[][],
@@ -269,5 +345,6 @@ export function rephraseDraft(
     return arithmeticScenario(draft.templateId, draft.params);
   if (topicId === "multiply") return multiplyScenario(draft.templateId, draft.params);
   if (topicId === "divide") return divideScenario(draft.params);
+  if (topicId === "sensitive") return sensitiveScenario(draft.templateId, draft.params);
   return null;
 }

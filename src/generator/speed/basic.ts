@@ -592,15 +592,32 @@ export function generateDivide(r: Rng): QuestionDraft {
 
 export function generateSensitive(r: Rng): QuestionDraft {
   const { level, integer, pick, random } = r;
+  const hard = level === 3;
   const denominator = pick(level === 1 ? [4, 5, 8, 10] : level === 2 ? [6, 8, 12, 16] : [7, 11, 13, 16]);
-  const numerator = integer(1, Math.min(3, denominator - 1));
-  const unit = integer(4 * level, 24 * level) * 10;
+  // 高难度不再总是 1/n：2/7、3/11 这类分数同样要会百化分，
+  // 且部分量要先拆成“每份”再乘总份数，不能一步看出答案。
+  const numerator = hard
+    ? denominator === 16
+      ? 3
+      : integer(2, Math.min(3, denominator - 1))
+    : integer(1, Math.min(3, denominator - 1));
+  const unit = hard
+    ? integer(4 * level, 24 * level) * 7
+    : integer(4 * level, 24 * level) * 10;
   const part = unit * numerator;
   const whole = unit * denominator;
   const percent = round((100 * numerator) / denominator, 1);
   const variant = integer(0, 2);
   if (variant === 0) {
-    const set = options(whole, [part * (denominator - numerator), part * denominator, whole + unit], " 亿元", random);
+    const set = options(
+      whole,
+      hard
+        ? [whole + unit, whole - unit, whole + unit * 2]
+        : [part * (denominator - numerator), part * denominator, whole + unit],
+      " 亿元",
+      random,
+      hard ? 0 : 2,
+    );
     return {
       templateId: "sensitive-fraction-to-whole-v2",
       params: { denominator, numerator, part, whole },
@@ -611,13 +628,49 @@ export function generateSensitive(r: Rng): QuestionDraft {
   }
   if (variant === 1) {
     const answer = round((part / whole) * 100, 1);
-    const set = options(answer, [round(100 / denominator, 1), round((100 * (denominator - numerator)) / denominator, 1), round(answer + 5, 1)], "%", random, 1);
+    const set = options(
+      answer,
+      [
+        round(100 / denominator, 1),
+        round((100 * (denominator - numerator)) / denominator, 1),
+        round(answer + (hard ? 1 : 5), 1),
+      ],
+      "%",
+      random,
+      1,
+    );
     return {
       templateId: "sensitive-share-v2",
       params: { denominator, numerator, part, whole },
       stem: `某行业完成投资 ${part} 亿元，全行业投资为 ${whole} 亿元。该行业投资占比约为多少？`,
       ...set,
       explanation: `占比=部分÷整体=${part}÷${whole}=${numerator}/${denominator}≈${answer}%。先约成敏感分数再转百分数，避免长除法。`,
+    };
+  }
+  if (hard) {
+    const perShare = integer(17, 83);
+    const current = (denominator + numerator) * perShare;
+    const base = denominator * perShare;
+    const growth = numerator * perShare;
+    // 高难度干扰项围绕答案铺开：用本期×增速（经典错法）、多一份/少一份，
+    // 不再放「基期量」这种一眼就能排除的远项。
+    const set = options(
+      growth,
+      [
+        Math.round((current * percent) / 100),
+        growth + perShare,
+        growth - perShare,
+      ],
+      " 万吨",
+      random,
+      0,
+    );
+    return {
+      templateId: "sensitive-growth-shares-v2",
+      params: { current, rate: percent, unit: base, growth },
+      stem: `某产品本期产量为 ${current} 万吨，同比增长 ${percent}%。增长量约为多少万吨？`,
+      ...set,
+      explanation: `同比增长 ${percent}%≈${numerator}/${denominator}：把基期看作 ${denominator} 份、本期看作 ${denominator + numerator} 份，增长量=${current}÷${denominator + numerator}×${numerator}=${growth} 万吨。`,
     };
   }
   const rate = pick([10, 20, 25]);

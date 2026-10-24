@@ -29,6 +29,43 @@ describe("question generator", () => {
     expect(unlockOf("sensitive")).toEqual(["multiply"]);
   });
 
+  it("敏感数高难度材料不提示份数，也不泄露答案", () => {
+    const templates = new Set<string>();
+    for (let seed = 0; seed < 300; seed += 1) {
+      const question = generateQuestion({
+        topicId: "sensitive",
+        difficulty: "hard",
+        excludedFingerprints: [],
+        randomSeed: `sensitive-hard-${seed}`,
+      });
+      templates.add(question.templateId);
+      const material = question.material;
+      expect(
+        material?.paragraphs.length,
+        `${question.templateId} 应附材料`,
+      ).toBeGreaterThan(0);
+      const cells = material?.table?.rows.flat() ?? [];
+      const materialText = [...(material?.paragraphs ?? []), ...cells].join(" ");
+      expect(question.stem).not.toContain("份数");
+      expect(materialText).not.toMatch(/总份数|所占份数|整体量|增长量|基期量/);
+      if (question.templateId === "sensitive-fraction-to-whole-v2") {
+        expect(Number(question.params.numerator)).toBeGreaterThanOrEqual(2);
+        expect(cells).not.toContain(String(question.params.whole));
+      }
+      if (question.templateId === "sensitive-share-v2") {
+        expect(Number(question.params.numerator)).toBeGreaterThanOrEqual(2);
+        expect(cells.some((cell) => cell.endsWith("%"))).toBe(false);
+      }
+      if (question.templateId === "sensitive-growth-shares-v2") {
+        expect(cells).not.toContain(String(question.params.growth));
+        expect(cells).not.toContain(String(question.params.unit));
+      }
+    }
+    expect(templates.has("sensitive-fraction-to-whole-v2")).toBe(true);
+    expect(templates.has("sensitive-share-v2")).toBe(true);
+    expect(templates.has("sensitive-growth-shares-v2")).toBe(true);
+  });
+
   /**
    * 审计过的前置（原则：前置必须是「不会 A 就做不了 B」的真依赖，而不是把同族题型串成一条线）。
    * 这几条都是查过专文后定的，改链条时这里要一起改：
