@@ -365,6 +365,46 @@ describe("question generator", () => {
   });
 
   /**
+   * 除法估算的选项必须按「资料分析真题口径」铺开，不能是 ±1。
+   *
+   * 回归背景：旧实现的干扰项写死成 [q-1, q+1, q+10]，相邻选项只差 1
+   * （如 181 的题出 180/181/182/191，相邻仅差 0.55%）。真实考试选项间距 ≥5%，
+   * 这种题逼着考生列竖式逐个试乘，题干写「估算」、选项要「精算」，自相矛盾——
+   * 线上表现为 divide 中等 13 题 38%、17.4s/题，9 道错题全是「答对了估算值却选错相邻项」。
+   * 而 divide 是增长率/倍数/比重/平均数四关的前置，一环卡死整条链。
+   */
+  it("divide 选项间距符合真题口径（简单 12% / 中等 6% / 困难 3.5%），不得出现 ±1 相邻项", () => {
+    const floors: Record<string, number> = { easy: 0.11, medium: 0.055, hard: 0.03 };
+    for (const difficulty of difficulties) {
+      for (let seed = 0; seed < 60; seed += 1) {
+        const question = generateQuestion({
+          topicId: "divide",
+          difficulty: difficulty.id,
+          excludedFingerprints: [],
+          randomSeed: `div-${difficulty.id}-${seed}`,
+        });
+        const nums = question.options.map((option) => Number(option));
+        expect(new Set(question.options).size, `选项重复：${question.stem}`).toBe(4);
+        expect(nums.every((value) => Number.isInteger(value) && value > 0)).toBe(true);
+        // 标答 = 商的整数部分（余数恒小于半个除数，故「最接近的整数」就是商）
+        const params = question.params as { quotient: number; dividend: number; divisor: number };
+        expect(nums[question.answerIndex]).toBe(params.quotient);
+        // 相邻选项相对间距：用较小编号做分母，避免大数端被稀释
+        const sorted = [...nums].sort((x, y) => x - y);
+        for (let index = 1; index < sorted.length; index += 1) {
+          const gap = (sorted[index] - sorted[index - 1]) / sorted[index - 1];
+          expect(
+            gap,
+            `${difficulty.id} 选项挨太近：${question.stem} → ${sorted.join("/")}`,
+          ).toBeGreaterThanOrEqual(floors[difficulty.id]);
+        }
+        // 解析里不能再出现「±1 是常见误判」这类把坏题正当化的话术
+        expect(question.explanation).not.toContain("±1");
+      }
+    }
+  });
+
+  /**
    * 加法/减法/多项求和/多项连加/多项求差是纯算数题：题干里的算式就是答案本身，
    * 这一条不变量比「选项互异」硬得多——取值区间写错（比如减数大于被减数）、
    * 选项出现负数、把答案和选项写岔了，都会在这里暴露。

@@ -578,15 +578,32 @@ export function generateDivide(r: Rng): QuestionDraft {
   const estimate = random() > 0.5;
   const remainder = estimate ? integer(1, Math.max(1, Math.floor(divisor / 3))) : 0;
   const dividend = divisor * quotient + remainder;
-  const set = options(quotient, [quotient - 1, quotient + 1, quotient + 10], "", random, 0);
+  // 选项间距按资料分析真题口径铺开、随难度收窄：简单 12%（估首位即可定位）、
+  // 中等 6%（要估到第二位）、困难 3.5%（接近精算）。
+  // 不能用 ±1 做干扰项——那等于逼考生列竖式逐个试乘，把「估算」考成「精算」，
+  // 题干写「估算」选项却要求个位不差，属于自相矛盾的题目（真实考试选项间距 ≥5%）。
+  const spread = level === 1 ? 0.12 : level === 2 ? 0.06 : 0.035;
+  const shift = (from: number, rate: number, direction: 1 | -1) => {
+    // 向外取整：向上项取 ceil、向下项取 floor，保证实际间距不小于名义值
+    // （直接 round 会让 85×1.24=105.4 缩成 105，相邻只剩 10.5%）
+    const raw = from * (1 + direction * rate);
+    const rounded = direction === 1 ? Math.ceil(raw) : Math.floor(raw);
+    // 商较小时相对间距会退化成 0 或 1，强制留出至少 2 的可辨差距
+    return Math.abs(rounded - from) >= 2 ? rounded : from + direction * 2;
+  };
+  const up = shift(quotient, spread, 1);
+  const down = shift(quotient, spread, -1);
+  // 第三个干扰项在 up 之上再退一格，避免「2×spread 相对答案」在小商时被取整压窄
+  const far = shift(up, spread, 1);
+  const set = options(quotient, [up, down, far], "", random, 0);
   return {
-    templateId: estimate ? `division-estimate-${level}-v2` : `division-exact-${level}-v2`,
+    templateId: estimate ? `division-estimate-${level}-v3` : `division-exact-${level}-v3`,
     params: { dividend, divisor, quotient, remainder },
     stem: `不使用计算器，${estimate ? "估算" : "计算"} ${dividend}÷${divisor}${estimate ? "（取最接近的整数）" : ""}。`,
     ...set,
     explanation: estimate
-      ? `先看 ${divisor} 的整数倍：${divisor}×${quotient}=${divisor * quotient}，余 ${remainder} 不足半个除数（${divisor}÷2≈${fmt(divisor / 2)}），因此最接近 ${quotient}。`
-      : `直除首商：${divisor}×${quotient}=${dividend} 恰好整除，所以商为 ${quotient}（选项 ±1 是估算余数时的常见误判）。`,
+      ? `先看 ${divisor} 的整数倍：${divisor}×${quotient}=${divisor * quotient}，余 ${remainder} 不足半个除数（${divisor}÷2≈${fmt(divisor / 2)}），所以取 ${quotient}。资料分析里选项间距远大于余数造成的误差，估到「整商」就够定位，不必逐个试乘。`
+      : `直除首商：${divisor}×${quotient}=${dividend} 恰好整除，所以商为 ${quotient}。先定首位（${divisor}×${quotient >= 10 ? Math.floor(quotient / 10) * 10 : quotient} 已接近 ${dividend}），再补末位即可。`,
   };
 }
 
