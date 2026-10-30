@@ -2058,7 +2058,7 @@ app.get("/profile/summary", async (c) => {
   const rangeDays = integerQuery(c.req.query("days"), 30, 7, 90);
   // 一次取回 90 天原始记录，7/30/90 天视图都从这里裁剪，避免切换时重复查库
   const start90 = new Date(Date.now() - 90 * 86400000).toISOString();
-  const [attempts, retries, essayEvents, schulte, quizRows, difficultyRows, cardRows, mistakeRows, retryAcc, schulteBests, cards, quizStatus] = await Promise.all([
+  const [attempts, retries, essayEvents, schulte, quizRows, difficultyRows, cardRows, mistakeRows, retryAcc, schulteBests, cards, quizStatus, essayLevelRows] = await Promise.all([
     c.env.DB.prepare(
       "SELECT created_at,correct,duration_ms FROM quiz_attempts WHERE user_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 5000",
     )
@@ -2114,6 +2114,11 @@ app.get("/profile/summary", async (c) => {
       .all<{ gridSize: number; variant: string; bestMs: number }>(),
     getEssayCards(c),
     loadQuizStatus(c),
+    c.env.DB.prepare(
+      "SELECT level_id AS levelId,stars,updated_at AS updatedAt FROM essay_training_progress WHERE user_id=?",
+    )
+      .bind(userId)
+      .all<{ levelId: string; stars: number; updatedAt: string }>(),
   ]);
   const { passStars } = quizStatus;
 
@@ -2303,6 +2308,21 @@ app.get("/profile/summary", async (c) => {
   const retryTotal = Number(retryAcc?.total) || 0;
   const retryAccuracy = retryTotal ? (Number(retryAcc?.correct) || 0) / retryTotal : 0;
 
+  // —— 申论闯关（今日计划要显示「下一关」，否则申论会从每日视野里消失） ——
+  const essayByLevel = new Map(
+    essayLevelRows.results.map((row) => [String(row.levelId), Number(row.stars) || 0]),
+  );
+  const essayStarsOf = (id: string) => essayByLevel.get(id) ?? 0;
+  const essayCleared = ESSAY_LEVELS.filter((level) => essayStarsOf(level.id) >= 1).length;
+  // 下一关 = 已解锁但还没拿到 1 星的第一关；全通关时给 null
+  const essayNext =
+    ESSAY_LEVELS.find((level) => essayUnlocked(level.id, essayStarsOf) && essayStarsOf(level.id) < 1) ??
+    null;
+  // 「今天做过申论」：任一关卡的进度在今天被更新过（自评保存或交卷都算）
+  const essayTodayDone = essayLevelRows.results.some(
+    (row) => row.updatedAt && cnDay(String(row.updatedAt)) === today,
+  );
+
   return c.json(
     ok({
       rangeDays,
@@ -2340,6 +2360,25 @@ app.get("/profile/summary", async (c) => {
       schulte: {
         bests: schulteBests.results,
         runs: schulte.results.length,
+      },
+      essay: {
+        cleared: essayCleared,
+        total: ESSAY_LEVELS.length,
+        todayDone: essayTodayDone,
+        next: essayNext
+          ? {
+              id: essayNext.id,
+              day: essayNext.day,
+              title: essayNext.title,
+              goal: essayNext.goal,
+              // 整关用时（各子任务之和）；前端按子任务推进，不要求一次做完
+              minutes: essayMinutes(essayNext),
+              taskCount: essayNext.tasks.length,
+              firstTask: essayNext.tasks[0]
+                ? { title: essayNext.tasks[0].title, minutes: essayNext.tasks[0].minutes }
+                : null,
+            }
+          : null,
       },
     }),
   );

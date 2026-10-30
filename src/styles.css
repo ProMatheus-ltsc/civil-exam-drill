@@ -4483,6 +4483,38 @@ a.entry {
   padding: 8px 14px;
   text-decoration: none;
 }
+/* 申论主线：与行测微计划视觉上分开，避免被当成第四个 10 分钟小任务 */
+.plan-essay {
+  border-color: #d6dcee;
+  background: linear-gradient(180deg, #fbfcff, #f5f7fe);
+}
+.plan-essay .plan-task-icon {
+  background: #e6ebfa;
+  color: #40527f;
+}
+.plan-essay.done {
+  border-color: #cfe3d8;
+  background: #f4faf6;
+}
+.plan-essay.done .plan-task-icon {
+  background: #dff0e6;
+  color: #2f7b5f;
+}
+.plan-essay-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #e6ebfa;
+  color: #40527f;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.plan-essay.done .plan-essay-badge {
+  background: #dff0e6;
+  color: #2f7b5f;
+}
 .plan-columns {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr;

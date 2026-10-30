@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock3,
   ListChecks,
+  PenLine,
   Target,
   Timer,
 } from "lucide-react";
@@ -49,6 +50,20 @@ type Summary = {
     };
   };
   mistakes: { open: number; mastered: number };
+  essay: {
+    cleared: number;
+    total: number;
+    todayDone: boolean;
+    next: {
+      id: string;
+      day: number;
+      title: string;
+      goal: string;
+      minutes: number;
+      taskCount: number;
+      firstTask: { title: string; minutes: number } | null;
+    } | null;
+  };
 };
 
 type MockItem = {
@@ -259,6 +274,42 @@ export function PlanPage() {
     return { tasks, today, doneCount, totalMinutes, focusId, focusTitle };
   }, [summary]);
 
+  /**
+   * 申论主线：与行测微计划分开展示。
+   * 申论一关 30~120 分钟，塞进「15 分钟」的行测计划里会把节奏撑爆，
+   * 所以单独成卡、按子任务推进，并始终占位（哪怕全通关）——
+   * 之前这块整个缺失，导致申论断档 14 天都没人提醒。
+   */
+  const essayTask = useMemo(() => {
+    const essay = summary?.essay;
+    if (!essay) return null;
+    if (!essay.next) {
+      if (essay.cleared < essay.total) return null;
+      return {
+        title: "申论 39 关已全部通关",
+        reason: "闯关部分结束，接下来用整卷模考保持手感",
+        minutes: 0,
+        href: "/essay",
+        cta: "查看进度",
+        done: essay.todayDone,
+        badge: `${essay.cleared}/${essay.total}`,
+      };
+    }
+    const { next } = essay;
+    const first = next.firstTask;
+    return {
+      title: `申论 Day${next.day} · ${next.title}`,
+      reason: first
+        ? `今日第 1/${next.taskCount} 步：${first.title}（${first.minutes} 分钟）· 全关共 ${next.minutes} 分钟，可拆几次做完 · 已通关 ${essay.cleared}/${essay.total}`
+        : `已通关 ${essay.cleared}/${essay.total}，这一关还没开始`,
+      minutes: first?.minutes ?? next.minutes,
+      href: "/essay",
+      cta: "去闯关",
+      done: essay.todayDone,
+      badge: `${essay.cleared}/${essay.total}`,
+    };
+  }, [summary]);
+
   const challenge = useMemo(() => {
     const submitted = (mocks?.items ?? [])
       .filter((item) => item.status === "submitted")
@@ -388,6 +439,32 @@ export function PlanPage() {
           <span>有一场进行中的模考，回来继续作答</span>
           <ArrowRight size={16} />
         </Link>
+      )}
+
+      {essayTask && (
+        <article className={`plan-task plan-essay${essayTask.done ? " done" : ""}`}>
+          <span className="plan-task-icon">
+            {essayTask.done ? <CheckCircle2 size={20} /> : <PenLine size={20} />}
+          </span>
+          <div className="plan-task-body">
+            <div className="plan-task-head">
+              <h3>{essayTask.title}</h3>
+              <span className="plan-essay-badge">申论 {essayTask.badge}</span>
+              {essayTask.minutes > 0 && (
+                <span className="plan-task-time">
+                  <Clock3 size={13} /> {essayTask.minutes} 分钟
+                </span>
+              )}
+            </div>
+            <p>{essayTask.reason}</p>
+          </div>
+          <Link
+            className={essayTask.done ? "secondary plan-task-cta" : "primary plan-task-cta"}
+            to={essayTask.href}
+          >
+            {essayTask.done ? "再练一次" : essayTask.cta}
+          </Link>
+        </article>
       )}
 
       <div className="plan-tasks">
