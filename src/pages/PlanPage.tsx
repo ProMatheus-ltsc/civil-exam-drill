@@ -387,9 +387,10 @@ export function PlanPage() {
   if (busy && !summary) return <LoadingSpinner message="正在生成今日计划…" />;
 
   const activeExam = mocks?.active;
-  const progress = plan.tasks.length
-    ? Math.round((plan.doneCount / plan.tasks.length) * 100)
-    : 0;
+  // 申论也是今日任务，一并计入完成度，否则会出现「4 张卡却显示 0/3」
+  const taskTotal = plan.tasks.length + (essayTask ? 1 : 0);
+  const taskDone = plan.doneCount + (essayTask?.done ? 1 : 0);
+  const progress = taskTotal ? Math.round((taskDone / taskTotal) * 100) : 0;
   const permissionText = !reminderSupported()
     ? "当前浏览器不支持通知"
     : Notification.permission === "denied"
@@ -404,7 +405,10 @@ export function PlanPage() {
         <div>
           <p className="eyebrow">今日计划</p>
           <h2>
-            <CalendarCheck size={22} /> {greeting()}，今天练 {plan.totalMinutes} 分钟
+            <CalendarCheck size={22} />{" "}
+            {essayTask && essayTask.minutes > 0
+              ? `${greeting()}，行测 ${plan.totalMinutes} 分钟 · 申论 ${essayTask.minutes} 分钟`
+              : `${greeting()}，今天练 ${plan.totalMinutes} 分钟`}
           </h2>
           <p className="muted">
             {new Intl.DateTimeFormat("zh-CN", {
@@ -418,7 +422,7 @@ export function PlanPage() {
         </div>
         <div className="plan-progress">
           <strong>
-            {plan.doneCount}/{plan.tasks.length}
+            {taskDone}/{taskTotal}
           </strong>
           <span>已完成</span>
           <div className="plan-progress-track">
