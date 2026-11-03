@@ -844,6 +844,7 @@ app.get("/knowledge", async (c) => {
           "common_sense",
           "quantitative",
           "essay",
+          "strategy",
         ])
         .optional(),
       category: z.string().min(1).max(50).optional(),
