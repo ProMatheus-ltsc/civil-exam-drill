@@ -22,6 +22,7 @@ export const modules = [
   "common_sense",
   "quantitative",
   "essay",
+  "strategy",
 ];
 
 const schema = z.object({

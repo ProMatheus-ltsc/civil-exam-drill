@@ -95,6 +95,7 @@ const modules = [
   ["judgment", "判断推理"],
   ["common_sense", "常识判断"],
   ["quantitative", "数量关系"],
+  ["strategy", "备考方法"],
 ];
 const categoryLabels: Record<string, string> = {
   overview: "总纲",
@@ -126,6 +127,10 @@ const categoryLabels: Record<string, string> = {
   geometry: "几何问题",
   counting: "排列组合与概率",
   materials: "素材库",
+  psychology: "考场心理",
+  habits: "学习习惯",
+  mock: "模考",
+  "sentence-patterns": "句式模板",
   "training-cognition": "精讲 · 认知重建（Day 1-4）",
   "training-reading": "精讲 · 阅读理解（Day 5-10）",
   "training-core": "精讲 · 核心能力（Day 11-20）",
