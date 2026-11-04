@@ -112,6 +112,25 @@ export function isCatalogTopic(id: string): id is TopicId {
   return topicById.has(id as TopicId);
 }
 
+/**
+ * 标答是否被抄进了题干或材料。
+ *
+ * 只比「数字本体」：题干写「1240 亿元」、选项写「1240」不算泄漏（那本来就是已知量），
+ * 所以判断依据是 **材料表格里是否有一格恰好等于答案**，或题干里出现「每项/每份/平均…= 答案」这类直给。
+ * 阈值 2 位：10、25 这种小数字当已知量太常见，容易出现假阳性。
+ */
+function leaksAnswer(draft: QuestionDraft): boolean {
+  if (!draft.material) return false;
+  const answerText = draft.options[draft.answerIndex] ?? "";
+  const answer = Number(answerText.replace(/[^\d.-]/g, ""));
+  if (!Number.isFinite(answer) || Math.abs(answer) < 10) return false;
+  const same = (cell: string) => {
+    const value = Number(String(cell).replace(/[^\d.-]/g, ""));
+    return Number.isFinite(value) && value === answer;
+  };
+  return (draft.material.table?.rows ?? []).some((row) => row.some(same));
+}
+
 export function generateQuestion(input: {
   topicId: TopicId;
   difficulty: Difficulty;
@@ -139,6 +158,10 @@ export function generateQuestion(input: {
       }
     }
     const materialJson = draft.material ? JSON.stringify(draft.material) : "";
+    // 硬校验：标答不能出现在题干/材料里。
+    // 踩过的坑：divide 高难度材料把「每项 = 商」「余数」直接列进表格，等于把答案印在题面上；
+    // 这类泄漏在生成器里静默通过，只有选手做题时才发现「不用算」。
+    if (input.difficulty === "hard" && leaksAnswer(draft)) continue;
     const fingerprint = bytesToHex(
       sha256(
         utf8ToBytes(

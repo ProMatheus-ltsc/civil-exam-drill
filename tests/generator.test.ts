@@ -486,6 +486,39 @@ describe("question generator", () => {
     }
   });
 
+  /**
+   * 高难度材料题绝不能把标答写进材料。
+   *
+   * 踩过的坑：divide 高难度材料列出「每项(万元) = 商」「余数」，等于把答案印在题面上；
+   * 更隐蔽的一版是 context.ts 把 params 全表列进材料，而 answer / 增长量 / 年均增量 / 占比
+   * 这些参数本身就是标答，于是十几个模块的难题表格里都躺着答案——生成器静默通过，
+   * 只有做题时才发现「不用算」。
+   */
+  it("高难材料题：材料表格里不出现标答", () => {
+    for (const topic of topics.filter((t) => t.track === "speed")) {
+      for (let seed = 0; seed < 25; seed += 1) {
+        const question = generateQuestion({
+          topicId: topic.id,
+          difficulty: "hard",
+          excludedFingerprints: [],
+          randomSeed: `leak-${topic.id}-${seed}`,
+        });
+        const answer = Number(
+          (question.options[question.answerIndex] ?? "").replace(/[^\d.-]/g, ""),
+        );
+        if (!Number.isFinite(answer) || Math.abs(answer) < 10) continue;
+        const cells = question.material?.table?.rows.flat() ?? [];
+        const hit = cells.filter(
+          (cell) => Number(String(cell).replace(/[^\d.-]/g, "")) === answer,
+        );
+        expect(
+          hit,
+          `${topic.id} seed=${seed}：材料直接给出标答 ${answer} ↦ ${JSON.stringify(cells)}`,
+        ).toEqual([]);
+      }
+    }
+  });
+
   it("sequence topics map to knowledge docs and keep numeric stems", () => {
     for (const topic of topics.filter((t) => t.track === "sequence")) {
       expect(topic.docId).toBeTruthy();

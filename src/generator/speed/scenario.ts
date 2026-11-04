@@ -205,25 +205,27 @@ function multiplyScenario(templateId: string, params: Record<string, number | st
 function divideScenario(params: Record<string, number | string>): Scenario {
   const dividend = Number(params.dividend);
   const divisor = Number(params.divisor);
-  const quotient = Number(params.quotient);
-  const remainder = Number(params.remainder) || 0;
   const unit = "万元";
+  // 材料只给「已知量」：本年资金总额、上年资金总额、承办项目数。
+  // 绝不能列出「每项 = 商」「余数」——那等于把答案与取整依据直接印在表格里（曾经的线上问题）。
+  // 也不能给一个跟题干对不上的支出构成：先按四类列支、又要求把总额平均分给项目，逻辑自相矛盾。
+  const previous = Math.round(dividend * 0.86);
+  const rows = [
+    ["2023 年资金总额(万元)", String(previous)],
+    ["2024 年资金总额(万元)", String(dividend)],
+    ["承办项目数(个)", String(divisor)],
+  ];
   return {
-    stem: `某专项资金总额为 ${dividend} 万元，拟平均分配给 ${divisor} 个承办项目。每个项目约可分配多少万元？（取最接近的整数）`,
+    stem: `2024 年某专项资金总额为 ${dividend} 万元，拟平均分配给 ${divisor} 个承办项目。每个项目约可分配多少万元？（取最接近的整数）`,
     material: buildMaterial(
-      "专项资金分配数据（单位：万元）",
-      [
-        ["资金总额(万元)", String(dividend)],
-        ["项目数(个)", String(divisor)],
-        ["每项(万元)", String(quotient)],
-        ["余数(万元)", String(remainder)],
-      ],
+      "某专项资金规模与项目数",
+      rows,
       unit,
       [
-        { label: "资金总额", value: dividend },
-        { label: "项目数", value: divisor },
+        { label: "2023 年资金总额", value: previous },
+        { label: "2024 年资金总额", value: dividend },
       ],
-      `某专项资金共 ${dividend} 万元，拟分配至 ${divisor} 个项目。`,
+      `2023—2024 年某专项资金总额分别为 ${previous} 万元、${dividend} 万元，2024 年拟分配至 ${divisor} 个承办项目。`,
     ),
   };
 }

@@ -83,10 +83,19 @@ function semanticEntries(
     "expression",
     "params",
   ]);
+  // **只允许复述题干已经给出的量**。
+  // 踩过的坑：材料把 params 全表列出来，而 answer/增长量/年均增量/占比 这些参数本身就是标答，
+  // 于是高难度题的表格里直接躺着答案（divide 曾把「每项」「余数」列进去），题目当场作废。
+  // 判据取「题干里是否出现过这个数值」，与具体模块、具体参数名解耦：
+  // 题干没露过的量一定不该出现在材料里。
+  const given = new Set(
+    (draft.stem.match(/\d+(?:\.\d+)?/g) ?? []).map((token) => Number(token)),
+  );
   const entries: Array<{ label: string; value: number }> = [];
   for (const [key, value] of Object.entries(draft.params)) {
     if (skip.has(key)) continue;
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (!given.has(value) && !given.has(Math.round(value))) continue;
     const label = KEY_LABELS[key];
     if (!label) continue;
     entries.push({ label, value });
