@@ -131,6 +131,7 @@ const categoryLabels: Record<string, string> = {
   habits: "学习习惯",
   mock: "模考",
   "sentence-patterns": "句式模板",
+  toolkit: "复盘工具",
   "training-cognition": "精讲 · 认知重建（Day 1-4）",
   "training-reading": "精讲 · 阅读理解（Day 5-10）",
   "training-core": "精讲 · 核心能力（Day 11-20）",
