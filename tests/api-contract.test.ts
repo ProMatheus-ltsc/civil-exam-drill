@@ -757,8 +757,9 @@ describe("API contract guards", () => {
     const payload = await response.json();
     expect(response.status).toBe(200);
     // 规范词卡片总条目数与分类数：新增条目或新增主题卡片时需同步更新下面两个数值
-    expect(payload.data.cards).toHaveLength(321);
-    expect(payload.data.categories).toHaveLength(10);
+    // 2026-11-06 新增基层治理 / 数字政府 / 应急管理三类，共 52 张
+    expect(payload.data.cards).toHaveLength(373);
+    expect(payload.data.categories).toHaveLength(13);
   });
 
   it("writes progress and review event atomically", async () => {
