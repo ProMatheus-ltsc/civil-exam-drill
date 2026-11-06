@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { app } from "../functions/api/[[path]]";
 import { topics } from "../src/generator";
 import { essayQuestionById, essayQuizOf } from "../src/essay/bank";
+import { loadEntries } from "../scripts/content/lib.mjs";
 
 /**
  * 客观题的标准答案与作答构造（测试专用）。
@@ -756,8 +757,29 @@ describe("API contract guards", () => {
     );
     const payload = await response.json();
     expect(response.status).toBe(200);
-    expect(payload.data.cards).toHaveLength(126);
-    expect(payload.data.categories).toHaveLength(9);
+    const { entries } = await loadEntries();
+    const terms = entries.filter(
+      (entry) => entry.module === "essay" && entry.category === "standard-terms",
+    );
+    const rowCount = terms.reduce((total, entry) => {
+      return (
+        total +
+        entry.markdown.split("\n").filter((line) => {
+          if (!line.trim().startsWith("|")) return false;
+          const cells = line
+            .split("|")
+            .slice(1, -1)
+            .map((cell) => cell.trim());
+          return (
+            cells.length >= 2 &&
+            cells[0] !== "材料信号" &&
+            !cells.every((cell) => /^-+$/.test(cell))
+          );
+        }).length
+      );
+    }, 0);
+    expect(payload.data.cards).toHaveLength(rowCount);
+    expect(payload.data.categories).toHaveLength(terms.length);
   });
 
   it("writes progress and review event atomically", async () => {
