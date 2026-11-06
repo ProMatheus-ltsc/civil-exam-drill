@@ -758,7 +758,8 @@ describe("API contract guards", () => {
     expect(response.status).toBe(200);
     // 规范词卡片总条目数与分类数：新增条目或新增主题卡片时需同步更新下面两个数值
     // 2026-11-06 新增基层治理 / 数字政府 / 应急管理三类，共 52 张
-    expect(payload.data.cards).toHaveLength(373);
+    // 同日补齐人才（+16）、科技创新（+13）两张偏薄词表，共 402 张
+    expect(payload.data.cards).toHaveLength(402);
     expect(payload.data.categories).toHaveLength(13);
   });
 
