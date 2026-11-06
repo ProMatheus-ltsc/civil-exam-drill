@@ -83,6 +83,12 @@ function draftOf(level: EssayLevel): Draft {
   return { checked: level.checked, quiz: {}, notes: level.notes };
 }
 
+/** 未通关时保留上次判分标记，但要说清是「上次」——错题选项已被清空，标记的是上一交卷的结果 */
+function markLabel(correct: boolean, settled: boolean) {
+  const prefix = correct ? "✓ " : "✗ ";
+  return `${prefix}${settled ? "" : "上次"}${correct ? "答对" : "答错"}`;
+}
+
 function StarRow({ count, size = 13 }: { count: number; size?: number }) {
   return (
     <span className="stars" aria-label={`${count} 星`}>
@@ -141,21 +147,35 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
         checked: number[];
         correct: number;
         quizTotal: number;
+        marks: QuizMark[];
       }>(`/essay/training/${level.id}`, {
         method: "POST",
         body: JSON.stringify({ quiz, checked: draft.checked, notes: draft.notes }),
       });
       await load();
+      /**
+       * 没通关时把答错的选项清空、只留答对的：用户再交一次就是「只重做错题」，
+       * 而不是对着上次选错的那个按钮不知道从哪改起。通关了就保留原样。
+       * 万一 marks 没取到，就原样保留——宁可不清，也不能把答对的也清掉。
+       */
+      const passed = result.stars >= 1;
+      const resetWrong = !passed && result.marks.length > 0;
+      const kept: Record<string, number> = {};
+      for (const [id, key] of Object.entries(draft.quiz)) {
+        if (!resetWrong || result.marks.some((mark) => mark.id === id && mark.correct)) kept[id] = key;
+      }
       setDrafts((current) => ({
         ...current,
-        [level.id]: { checked: result.checked, quiz: draft.quiz, notes: draft.notes },
+        [level.id]: { checked: result.checked, quiz: kept, notes: draft.notes },
       }));
       const head = `客观题 ${result.correct}/${result.quizTotal}`;
       showToast(
-        result.stars >= 1
+        passed
           ? `第 ${level.day} 关已通关（${result.stars} 星，${head}），下一关已解锁`
-          : `${head}，还差一点才通关——客观题需答对 ${essayQuizPassLine(level.quiz.length)} 题且总分达 80%`,
-        result.stars >= 1 ? "success" : "info",
+          : resetWrong
+            ? `${head}，答错的选项已清空，只做剩下的几道再交卷即可`
+            : `${head}，还差一点才通关——客观题需答对 ${essayQuizPassLine(level.quiz.length)} 题且总分达 80%`,
+        passed ? "success" : "info",
       );
     });
 
@@ -328,7 +348,7 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
                                   <span>{item.stem}</span>
                                   {mark && (
                                     <em className={`essay-quiz-badge ${mark.correct ? "ok" : "no"}`}>
-                                      {mark.correct ? "✓ 答对" : "✗ 答错"}
+                                      {markLabel(mark.correct, level.stars >= 1)}
                                     </em>
                                   )}
                                 </p>
