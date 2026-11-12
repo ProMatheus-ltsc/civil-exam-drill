@@ -578,7 +578,7 @@ app.use("*", async (c, next) => {
   if (!token) return c.json(fail("UNAUTHORIZED", "请先登录"), 401);
   const tokenHash = await sha(token);
   const session = await c.env.DB.prepare(
-    `SELECT s.user_id AS userId,s.expires_at AS expiresAt,u.nickname,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status='active'`,
+    `SELECT s.user_id AS userId,s.expires_at AS expiresAt,u.nickname,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND julianday(s.expires_at)>julianday('now') AND u.status='active'`,
   )
     .bind(tokenHash)
     .first<{
@@ -683,10 +683,8 @@ app.post("/auth/login", async (c) => {
   )
     .bind(user.id)
     .run();
-  await c.env.DB.prepare(
-    "DELETE FROM sessions WHERE user_id=? AND expires_at<=CURRENT_TIMESTAMP",
-  )
-    .bind(user.id)
+  await c.env.DB
+    .prepare("DELETE FROM sessions WHERE julianday(expires_at)<=julianday('now')")
     .run();
   const expiresAt = await createSession(c, user.id);
   return c.json(

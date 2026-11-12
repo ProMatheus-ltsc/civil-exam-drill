@@ -310,6 +310,7 @@ export const difficulties: Array<{ id: Difficulty; label: string; description: s
 
 /** 历史遗留 topicId（旧版综合模块被拆分前产生的错题/统计数据展示用） */
 export const legacyTopics: Array<{ id: string; title: string }> = [
+  { id: "formula-base", title: "基期量（旧）" },
   { id: "arithmetic", title: "加减与多项求和" },
   { id: "growth", title: "增长率/增长量（旧版综合）" },
   { id: "ratio", title: "比重/盐水/平均数（旧版综合）" },
