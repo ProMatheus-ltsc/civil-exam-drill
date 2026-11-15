@@ -12,11 +12,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Clone shared-core
         run: |
-          git clone https://github.com/ProMatheus-ltsc/shared-core.git ../shared-core
-          git -C ../shared-core checkout 971b3e6999fc7fc77af16e6af52775ad3fbaa628
-      - name: Install shared-core dependencies
-        run: npm install --no-audit --no-fund
-        working-directory: ../shared-core
+          git clone --depth 1 https://github.com/ProMatheus-ltsc/shared-core.git ../shared-core
+          cd ../shared-core && npm install --no-audit --no-fund
       - uses: actions/setup-node@v4
         with:
           node-version: 22
