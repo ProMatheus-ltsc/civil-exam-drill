@@ -21,6 +21,7 @@ import { Layout } from "@shared/core/components/Layout";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { ToastContainer } from "@shared/core/components/Toast";
+import { useAuth } from "@shared/core/auth";
 import { api } from "./api/client";
 import { PublicLayout } from "./components/PublicLayout";
 import { InstallPrompt } from "./components/InstallPrompt";
@@ -50,9 +51,10 @@ function Login({
   onLogin,
   initialMode = "login",
 }: {
-  onLogin: (user: User) => void;
+  onLogin: () => void;
   initialMode?: AuthMode;
 }) {
+  const { login, registerWith } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode),
     [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
@@ -87,20 +89,15 @@ function Login({
     setError("");
     setBusy(true);
     try {
-      const data = await api<{ user: User }>(
-        mode === "register" ? "/auth/register" : "/auth/login",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            email: trimmedEmail,
-            password,
-            ...(mode === "register" && nickname.trim()
-              ? { nickname: nickname.trim() }
-              : {}),
-          }),
-        },
-      );
-      onLogin(data.user);
+      const ok =
+        mode === "register"
+          ? await registerWith({ username: trimmedEmail, password, displayName: nickname.trim() || undefined })
+          : await login(trimmedEmail, password);
+      if (!ok) {
+        setError("操作失败，请稍后重试");
+        return;
+      }
+      onLogin();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "操作失败，请稍后重试");
     } finally {
@@ -289,7 +286,7 @@ function SignedIn({ user, onLogout }: { user: User; onLogout: () => void }) {
 function PublicRoutes({
   onLogin,
 }: {
-  onLogin: (user: User) => void;
+  onLogin: () => void;
 }) {
   return (
     <Routes>
@@ -331,34 +328,34 @@ function PublicRoutes({
 }
 
 export function App() {
-  const [user, setUser] = useState<User | null>(null),
-    [loading, setLoading] = useState(true);
+  const { state, user, logout: sharedLogout } = useAuth();
   const navigate = useNavigate();
-  useEffect(() => {
-    api<{ user: User }>("/auth/me")
-      .then((data) => setUser(data.user))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
+  const loading = state === "loading";
+  const user2 = user
+    ? ({
+        id: user.id,
+        nickname: user.displayName ?? user.username,
+        email: user.email,
+      } as User)
+    : null;
   const logout = () => {
-    void api("/auth/logout", { method: "POST" })
+    void sharedLogout()
       .catch(() => undefined)
       .finally(() => {
-        setUser(null);
         navigate("/");
       });
   };
   if (loading) return <LoadingSpinner message="恢复登录状态…" />;
-  const completeLogin = (next: User) => {
-    setUser(next);
+  // 登录成功后共享包的 AuthProvider 已更新登录态，这里只需跳转
+  const completeLogin = () => {
     navigate("/plan");
   };
   return (
     <>
       <ToastContainer />
       <InstallPrompt />
-      {user ? (
-        <SignedIn user={user} onLogout={logout} />
+      {user2 ? (
+        <SignedIn user={user2} onLogout={logout} />
       ) : (
         <PublicRoutes onLogin={completeLogin} />
       )}

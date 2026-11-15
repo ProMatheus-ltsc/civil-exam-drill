@@ -31,13 +31,26 @@ class FakeStatement {
     return this;
   }
   async first<T>() {
-    if (this.sql.includes("FROM sessions s JOIN users"))
+    // 匹配用的归一化 SQL：去掉所有空白，避免不同来源的 SQL 排版差异影响匹配
+    const flat = this.sql.replace(/\s+/g, " ");
+    if (flat.includes("FROM sessions s JOIN users")) {
+      // 共享包的会话查询：按 token_hash 命中，返回会话 + 用户整行
       return {
-        userId: "usr_test",
-        expiresAt: "2099-01-01T00:00:00Z",
-        nickname: "测试用户",
+        session_id: "ses_test",
+        user_id: "usr_test",
+        token_hash: String(this.values[0]),
+        expires_at: "2099-01-01T00:00:00Z",
+        id: "usr_test",
+        username: "test@example.com",
+        username_normalized: "test@example.com",
+        password_hash: "pbkdf2-sha256$100000$abc$def",
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: "2026-01-01T00:00:00Z",
         email: "test@example.com",
+        nickname: "测试用户",
+        status: "active",
       } as T;
+    }
     if (this.sql === "SELECT 1") return { ok: 1 } as T;
     if (this.sql.includes("FROM auth_attempts")) return { count: 0 } as T;
     if (this.sql.includes("FROM mock_exams e JOIN users")) {
@@ -108,7 +121,24 @@ class FakeStatement {
       } as T;
     }
     if (this.sql.includes("FROM invite_codes")) return { id: 1 } as T;
-    if (this.sql.includes("FROM users WHERE email_normalized=?")) {
+    if (flat.includes("FROM users WHERE username_normalized = ?")) {
+      const usernameNormalized = String(this.values[0]);
+      const user = this.db.users.get(usernameNormalized) ?? null;
+      if (!user) return null;
+      // 共享包的统一用户行：标准列 + 项目特有列
+      return {
+        id: user.id,
+        username: user.email,
+        username_normalized: usernameNormalized,
+        password_hash: user.passwordHash,
+        created_at: "2026-01-01T00:00:00Z",
+        last_login_at: "2026-01-01T00:00:00Z",
+        email: user.email,
+        nickname: user.nickname,
+        status: user.status ?? "active",
+      } as T;
+    }
+    if (flat.includes("FROM users WHERE email_normalized=?")) {
       const email = String(this.values[0]);
       return (this.db.users.get(email) ?? null) as T | null;
     }
@@ -253,6 +283,7 @@ class FakeStatement {
   }
   async run() {
     this.db.writes.push(this.sql);
+    const flat = this.sql.replace(/\s+/g, " ");
     if (this.sql.startsWith("UPDATE quiz_attempts SET mastered=?")) {
       const [mastered, reviewStage] = this.values as [number, number];
       this.db.mistakeStage = Number(reviewStage);
@@ -329,16 +360,26 @@ class FakeStatement {
       }
     }
     if (
-      this.sql.startsWith("INSERT INTO users(") &&
-      this.sql.includes("email_normalized")
+      flat.startsWith("INSERT INTO users (") &&
+      flat.includes("username_normalized")
     ) {
-      const [id, , nickname, , email, emailNormalized, passwordHash] =
-        this.values.map(String);
-      this.db.users.set(emailNormalized, {
+      // 共享包的统一插入语句，列顺序：
+      //   id, username, username_normalized, password_hash, created_at,
+      //   last_login_at, + 项目特有列（email, nickname, nickname_normalized,
+      //   status, invite_code_id）
+      const values = this.values.map(String);
+      const id = values[0];
+      const username = values[1];
+      const usernameNormalized = values[2];
+      const passwordHash = values[3];
+      const email = values[6] ?? username;
+      const nickname = values[7] ?? username;
+      this.db.users.set(usernameNormalized, {
         id,
         nickname,
         email,
         passwordHash,
+        status: "active",
       });
     }
     if (this.sql.startsWith("INSERT INTO password_resets")) {

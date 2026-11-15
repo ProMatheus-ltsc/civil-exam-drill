@@ -4,6 +4,24 @@ import { handle } from "hono/cloudflare-pages";
 import { z } from "zod";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
+  SESSION_COOKIE,
+  RESET_TOKEN_MINUTES,
+  authAttemptsExceeded,
+  checkPassword,
+  clearSessionCookieHeader,
+  createSession,
+  deleteSessionByToken,
+  dummyPasswordHash,
+  findUser,
+  insertUser,
+  makePasswordHash,
+  recordAuthAttempt,
+  resetToken,
+  resolveSession,
+  sessionCookieHeader,
+  touchLastLogin,
+} from "./auth";
+import {
   generateQuestion,
   isCatalogTopic,
   topicById,
@@ -303,7 +321,6 @@ const fail = (code: string, message: string, details?: unknown) => ({
 const iso = (date = new Date()) => date.toISOString();
 const uuid = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const encoder = new TextEncoder();
-const SESSION_COOKIE = "civil_exam_session";
 
 async function sha(value: string) {
   const bytes = await crypto.subtle.digest("SHA-256", encoder.encode(value));
@@ -313,9 +330,8 @@ async function sha(value: string) {
 }
 
 // ---- 邮箱注册登录 ----
-// Workers WebCrypto rejects PBKDF2 iteration counts above 100000.
-const PASSWORD_ITERATIONS = 100_000;
-const SESSION_DAYS = 30;
+// 认证实现见 functions/api/auth.ts —— 已收归 @shared/core 的统一认证。
+// 这里的 schema 是本项目特有的入参校验（邮箱格式、密码长度）。
 const emailSchema = z
   .string()
   .trim()
@@ -327,112 +343,6 @@ const passwordSchema = z
   .string()
   .min(8, "密码至少 8 位")
   .max(72, "密码最多 72 位");
-
-function toBase64(bytes: Uint8Array) {
-  let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
-  return btoa(text);
-}
-
-function fromBase64(value: string) {
-  const raw = atob(value);
-  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
-}
-
-async function derivePassword(
-  password: string,
-  salt: Uint8Array,
-  iterations: number,
-) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: salt as BufferSource,
-      iterations,
-    },
-    key,
-    256,
-  );
-  return new Uint8Array(bits);
-}
-
-async function hashPassword(password: string) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await derivePassword(password, salt, PASSWORD_ITERATIONS);
-  return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${toBase64(salt)}$${toBase64(hash)}`;
-}
-
-async function verifyPassword(password: string, stored: string | null) {
-  if (!stored) return false;
-  const [scheme, iterationsRaw, saltBase64, hashBase64] = stored.split("$");
-  const iterations = Number(iterationsRaw);
-  if (
-    scheme !== "pbkdf2-sha256" ||
-    !Number.isInteger(iterations) ||
-    iterations < 1000 ||
-    !saltBase64 ||
-    !hashBase64
-  )
-    return false;
-  const expected = fromBase64(hashBase64);
-  const actual = await derivePassword(
-    password,
-    fromBase64(saltBase64),
-    iterations,
-  );
-  if (actual.length !== expected.length) return false;
-  let diff = 0;
-  for (let index = 0; index < actual.length; index += 1)
-    diff |= actual[index] ^ expected[index];
-  return diff === 0;
-}
-
-/** 未注册邮箱也跑一次 PBKDF2，让失败响应耗时接近，降低邮箱枚举价值 */
-let dummyPasswordHash: Promise<string> | null = null;
-function getDummyPasswordHash() {
-  dummyPasswordHash ??= hashPassword("dummy-password-not-used");
-  return dummyPasswordHash;
-}
-
-async function createSession(c: AppContext, userId: string) {
-  const token = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll(
-    "-",
-    "",
-  );
-  const tokenHash = await sha(token);
-  const expiresAt = iso(new Date(Date.now() + SESSION_DAYS * 86400000));
-  await c.env.DB.prepare(
-    "INSERT INTO sessions(id,user_id,token_hash,expires_at) VALUES(?,?,?,?)",
-  )
-    .bind(uuid("ses"), userId, tokenHash, expiresAt)
-    .run();
-  setCookie(c, SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: new URL(c.req.url).protocol === "https:",
-    sameSite: "Strict",
-    path: "/",
-    maxAge: SESSION_DAYS * 86400,
-  });
-  return expiresAt;
-}
-
-const RESET_TOKEN_MINUTES = 30;
-
-function resetToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return toBase64(bytes)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-}
 
 async function sendResetEmail(c: AppContext, to: string, resetUrl: string) {
   const apiKey = c.env.RESEND_API_KEY;
@@ -457,32 +367,6 @@ async function sendResetEmail(c: AppContext, to: string, resetUrl: string) {
     );
   }
   return response.ok;
-}
-
-async function authAttemptsExceeded(
-  c: AppContext,
-  key: string,
-  limit: number,
-  failuresOnly = false,
-) {
-  const attempts = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM auth_attempts WHERE client_key=? AND created_at>datetime('now','-10 minutes')${failuresOnly ? " AND succeeded=0" : ""}`,
-  )
-    .bind(key)
-    .first<{ count: number }>();
-  return (attempts?.count ?? 0) >= limit;
-}
-
-async function recordAuthAttempt(
-  c: AppContext,
-  key: string,
-  succeeded: boolean,
-) {
-  await c.env.DB.prepare(
-    "INSERT INTO auth_attempts(client_key,succeeded) VALUES(?,?)",
-  )
-    .bind(key, succeeded ? 1 : 0)
-    .run();
 }
 
 async function emailSignupInviteId(c: AppContext) {
@@ -577,21 +461,14 @@ app.use("*", async (c, next) => {
   const token = getCookie(c, SESSION_COOKIE) ?? "";
   if (!token) return c.json(fail("UNAUTHORIZED", "请先登录"), 401);
   const tokenHash = await sha(token);
-  const session = await c.env.DB.prepare(
-    `SELECT s.user_id AS userId,s.expires_at AS expiresAt,u.nickname,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND julianday(s.expires_at)>julianday('now') AND u.status='active'`,
-  )
-    .bind(tokenHash)
-    .first<{
-      userId: string;
-      expiresAt: string;
-      nickname: string;
-      email: string | null;
-    }>();
-  if (!session) return c.json(fail("UNAUTHORIZED", "登录已失效"), 401);
+  // 会话解析下沉到 @shared/core/server/authDb（过期即删行）
+  const session = await resolveSession(c.env.DB, token);
+  if (!session || session.user.status !== "active")
+    return c.json(fail("UNAUTHORIZED", "登录已失效"), 401);
   c.set("userId", session.userId);
   c.set("tokenHash", tokenHash);
-  c.set("nickname", session.nickname);
-  c.set("email", session.email ?? "");
+  c.set("nickname", String(session.user.nickname ?? ""));
+  c.set("email", String(session.user.email ?? ""));
   await next();
 });
 
@@ -610,7 +487,7 @@ app.post("/auth/register", async (c) => {
     }),
   );
   const clientKey = `register:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
-  if (await authAttemptsExceeded(c, clientKey, 8))
+  if (await authAttemptsExceeded(c.env.DB, clientKey, 8))
     return c.json(fail("RATE_LIMITED", "注册过于频繁，请稍后再试"), 429);
   const existing = await c.env.DB.prepare(
     "SELECT id FROM users WHERE email_normalized=?",
@@ -618,7 +495,7 @@ app.post("/auth/register", async (c) => {
     .bind(body.email)
     .first<{ id: string }>();
   if (existing) {
-    await recordAuthAttempt(c, clientKey, false);
+    await recordAuthAttempt(c.env.DB, clientKey, false);
     return c.json(fail("EMAIL_TAKEN", "该邮箱已注册，请直接登录"), 409);
   }
   const inviteId = await emailSignupInviteId(c);
@@ -629,27 +506,22 @@ app.post("/auth/register", async (c) => {
   );
   const user = { id: uuid("usr"), nickname, email: body.email };
   try {
-    await c.env.DB.prepare(
-      "INSERT INTO users(id,invite_code_id,nickname,nickname_normalized,email,email_normalized,password_hash) VALUES(?,?,?,?,?,?,?)",
-    )
-      .bind(
-        user.id,
-        inviteId,
-        nickname,
-        nickname.toLocaleLowerCase("zh-CN"),
-        body.email,
-        body.email,
-        await hashPassword(body.password),
-      )
-      .run();
+    await insertUser(c.env.DB, {
+      id: user.id,
+      email: body.email,
+      nickname,
+      passwordHash: await makePasswordHash(body.password),
+      inviteCodeId: inviteId,
+    });
   } catch (error) {
-    await recordAuthAttempt(c, clientKey, false);
+    await recordAuthAttempt(c.env.DB, clientKey, false);
     if (String(error).includes("UNIQUE constraint failed"))
       return c.json(fail("EMAIL_TAKEN", "该邮箱已注册，请直接登录"), 409);
     throw error;
   }
-  await recordAuthAttempt(c, clientKey, true);
-  const expiresAt = await createSession(c, user.id);
+  await recordAuthAttempt(c.env.DB, clientKey, true);
+  const { token, expiresAt } = await createSession(c.env.DB, user.id);
+  c.header("Set-Cookie", sessionCookieHeader(token, c.req.raw));
   return c.json(ok({ expiresAt, user }), 201);
 });
 
@@ -659,34 +531,18 @@ app.post("/auth/login", async (c) => {
     z.object({ email: emailSchema, password: passwordSchema }),
   );
   const clientKey = `login:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
-  if (await authAttemptsExceeded(c, clientKey, 10, true))
+  if (await authAttemptsExceeded(c.env.DB, clientKey, 10, true))
     return c.json(fail("RATE_LIMITED", "登录尝试过于频繁，请稍后再试"), 429);
-  const user = await c.env.DB.prepare(
-    "SELECT id,nickname,email,password_hash AS passwordHash FROM users WHERE email_normalized=? AND status='active'",
-  )
-    .bind(body.email)
-    .first<{
-      id: string;
-      nickname: string;
-      email: string;
-      passwordHash: string | null;
-    }>();
-  const valid = await verifyPassword(
-    body.password,
-    user?.passwordHash ?? (await getDummyPasswordHash()),
-  );
-  await recordAuthAttempt(c, clientKey, Boolean(user) && valid);
+  const user = await findUser(c.env.DB, body.email);
+  const valid =
+    user?.status === "active" &&
+    (await checkPassword(body.password, user?.password_hash ?? (await dummyPasswordHash())));
+  await recordAuthAttempt(c.env.DB, clientKey, Boolean(user) && valid);
   if (!user || !valid)
     return c.json(fail("INVALID_CREDENTIALS", "邮箱或密码不正确"), 401);
-  await c.env.DB.prepare(
-    "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
-  )
-    .bind(user.id)
-    .run();
-  await c.env.DB
-    .prepare("DELETE FROM sessions WHERE julianday(expires_at)<=julianday('now')")
-    .run();
-  const expiresAt = await createSession(c, user.id);
+  await touchLastLogin(c.env.DB, user.id);
+  const { token, expiresAt } = await createSession(c.env.DB, user.id);
+  c.header("Set-Cookie", sessionCookieHeader(token, c.req.raw));
   return c.json(
     ok({
       expiresAt,
@@ -698,9 +554,9 @@ app.post("/auth/login", async (c) => {
 app.post("/auth/password/forgot", async (c) => {
   const body = await jsonBody(c.req.raw, z.object({ email: emailSchema }));
   const clientKey = `forgot:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
-  if (await authAttemptsExceeded(c, clientKey, 5))
+  if (await authAttemptsExceeded(c.env.DB, clientKey, 5))
     return c.json(fail("RATE_LIMITED", "请求过于频繁，请稍后再试"), 429);
-  await recordAuthAttempt(c, clientKey, true);
+  await recordAuthAttempt(c.env.DB, clientKey, true);
 
   const user = await c.env.DB.prepare(
     "SELECT id,nickname,email FROM users WHERE email_normalized=? AND status='active'",
@@ -751,7 +607,7 @@ app.post("/auth/password/reset", async (c) => {
     }),
   );
   const clientKey = `reset:${await sha(c.req.header("CF-Connecting-IP") ?? "local")}`;
-  if (await authAttemptsExceeded(c, clientKey, 10, true))
+  if (await authAttemptsExceeded(c.env.DB, clientKey, 10, true))
     return c.json(fail("RATE_LIMITED", "尝试过于频繁，请稍后再试"), 429);
 
   const record = await c.env.DB.prepare(
@@ -772,7 +628,7 @@ app.post("/auth/password/reset", async (c) => {
     !record.usedAt &&
     Number.isFinite(Date.parse(record.expiresAt)) &&
     Date.parse(record.expiresAt) > Date.now();
-  await recordAuthAttempt(c, clientKey, Boolean(valid));
+  await recordAuthAttempt(c.env.DB, clientKey, Boolean(valid));
   if (!record || !valid)
     return c.json(
       fail("INVALID_RESET_TOKEN", "重置链接已失效，请重新申请"),
@@ -782,7 +638,7 @@ app.post("/auth/password/reset", async (c) => {
   await c.env.DB.prepare(
     "UPDATE users SET password_hash=? WHERE id=?",
   )
-    .bind(await hashPassword(body.password), record.userId)
+    .bind(await makePasswordHash(body.password), record.userId)
     .run();
   await c.env.DB.prepare(
     "UPDATE password_resets SET used_at=CURRENT_TIMESTAMP WHERE user_id=?",
@@ -792,7 +648,8 @@ app.post("/auth/password/reset", async (c) => {
   await c.env.DB.prepare("DELETE FROM sessions WHERE user_id=?")
     .bind(record.userId)
     .run();
-  const expiresAt = await createSession(c, record.userId);
+  const { token, expiresAt } = await createSession(c.env.DB, record.userId);
+  c.header("Set-Cookie", sessionCookieHeader(token, c.req.raw));
   return c.json(
     ok({
       expiresAt,
@@ -806,10 +663,8 @@ app.post("/auth/password/reset", async (c) => {
 });
 
 app.post("/auth/logout", async (c) => {
-  await c.env.DB.prepare("DELETE FROM sessions WHERE token_hash=?")
-    .bind(c.get("tokenHash"))
-    .run();
-  deleteCookie(c, SESSION_COOKIE, { path: "/" });
+  await deleteSessionByToken(c.env.DB, c.get("tokenHash"));
+  c.header("Set-Cookie", clearSessionCookieHeader(c.req.raw));
   return c.json(ok({ loggedOut: true }));
 });
 

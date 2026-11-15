@@ -1,15 +1,15 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Stack } from "@shared/core/components/responsive/Stack";
+import { useAuth } from "@shared/core/auth";
 import { api } from "../api/client";
 
-type ResetUser = { id: string; nickname: string; email?: string };
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function ResetPasswordPage({
   onLogin,
 }: {
-  onLogin: (user: ResetUser) => void;
+  onLogin: () => void;
 }) {
   const token = new URLSearchParams(useLocation().search).get("token") ?? "";
   return token ? (
@@ -136,8 +136,9 @@ function SetPassword({
   onLogin,
 }: {
   token: string;
-  onLogin: (user: ResetUser) => void;
+  onLogin: () => void;
 }) {
+  const { refresh } = useAuth();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -155,11 +156,13 @@ function SetPassword({
     setError("");
     setBusy(true);
     try {
-      const data = await api<{ user: ResetUser }>("/auth/password/reset", {
+      await api("/auth/password/reset", {
         method: "POST",
         body: JSON.stringify({ token, password }),
       });
-      onLogin(data.user);
+      // 重置成功后后端已下发新会话 Cookie，刷新登录态让共享包感知
+      await refresh();
+      onLogin();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "重置失败，请稍后重试");
     } finally {
