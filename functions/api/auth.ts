@@ -3,14 +3,15 @@
  *
  * 共享包提供标准实现（哈希、会话、Cookie、限流表操作），本文件只做
  * "本项目特有的那部分"：
- * - 登录标识是邮箱（共享包统一用 username，这里把 email 同时写入
- *   username / username_normalized 两个列，登录名归一化列因此可直接用共享包）
+ * - 登录标识是邮箱（本项目 users 表的登录名归一化列是 email_normalized，
+ *   共享包按 UserShape 声明的形状取列，**不改本项目的表结构**）
  * - 昵称在邀请码范围内唯一（`uniqueNickname`）
  * - 密码重置邮件走 Resend
  * - 密码重置链接指向 `/#/reset?token=...`
  *
- * 表结构与共享包统一契约一致（见 migrations/0014_unified_auth.sql）：
- *   users(id, username, username_normalized, password_hash, created_at, last_login_at, ...)
+ * 本项目沿用既有表结构：
+ *   users(id, invite_code_id, nickname, nickname_normalized, status,
+ *         created_at, last_login_at, email, email_normalized, password_hash)
  *   sessions(id, user_id, token_hash, expires_at, created_at)
  *   auth_attempts(id, client_key, succeeded, created_at)
  */
@@ -150,7 +151,7 @@ export function readSessionToken(request: Request): string | undefined {
 
 // ==================== 用户 ====================
 
-/** 查用户（按 username_normalized，即邮箱） */
+/** 查用户（按 email_normalized，即邮箱） */
 export async function findUser(db: Db, email: string) {
   return findUserByUsername(asD1(db), email, {
     userExtraColumns: USER_EXTRA_COLUMNS,
