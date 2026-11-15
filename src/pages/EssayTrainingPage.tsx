@@ -76,14 +76,23 @@ type Payload = {
   };
 };
 
-/** 展开中的草稿：自评勾选 + 客观题作答（题目 id → 选项原始下标）+ 笔记 */
-type Draft = { checked: number[]; quiz: Record<string, number>; notes: string };
+/**
+ * 展开中的草稿：自评勾选 + 客观题作答（题目 id → 选项原始下标）+ 笔记。
+ * `submitted` 记录上一次交卷的作答，用于判断某题是否已被用户改动；
+ * 改动过的题目不再套用上次的对错样式，避免「我刚改了答案却还显示上次打错」。
+ */
+type Draft = {
+  checked: number[];
+  quiz: Record<string, number>;
+  notes: string;
+  submitted: Record<string, number>;
+};
 
 function draftOf(level: EssayLevel): Draft {
-  return { checked: level.checked, quiz: {}, notes: level.notes };
+  return { checked: level.checked, quiz: {}, notes: level.notes, submitted: {} };
 }
 
-/** 未通关时保留上次判分标记，但要说清是「上次」——错题选项已被清空，标记的是上一交卷的结果 */
+/** 判分标记前缀；已通关（最佳成绩）时直接说对错，未通关时标清是「上次」 */
 function markLabel(correct: boolean, settled: boolean) {
   const prefix = correct ? "✓ " : "✗ ";
   return `${prefix}${settled ? "" : "上次"}${correct ? "答对" : "答错"}`;
@@ -154,27 +163,23 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
       });
       await load();
       /**
-       * 没通关时把答错的选项清空、只留答对的：用户再交一次就是「只重做错题」，
-       * 而不是对着上次选错的那个按钮不知道从哪改起。通关了就保留原样。
-       * 万一 marks 没取到，就原样保留——宁可不清，也不能把答对的也清掉。
+       * 交卷后保留本次全部作答（包括答错的），用户一眼就能看到自己选了什么、哪题错了，
+       * 直接在错题上改一个选项就能再交——这才是「重新交卷」的通道。
+       * `submitted` 记下这次交卷的作答，渲染时据此判断某题是否已被改动；
+       * 改动过的题目不套用上次的对错样式，避免新旧结果混淆。
        */
       const passed = result.stars >= 1;
-      const resetWrong = !passed && result.marks.length > 0;
-      const kept: Record<string, number> = {};
-      for (const [id, key] of Object.entries(draft.quiz)) {
-        if (!resetWrong || result.marks.some((mark) => mark.id === id && mark.correct)) kept[id] = key;
-      }
+      const submitted: Record<string, number> = {};
+      for (const [id, key] of Object.entries(draft.quiz)) submitted[id] = key;
       setDrafts((current) => ({
         ...current,
-        [level.id]: { checked: result.checked, quiz: kept, notes: draft.notes },
+        [level.id]: { checked: result.checked, quiz: draft.quiz, notes: draft.notes, submitted },
       }));
       const head = `客观题 ${result.correct}/${result.quizTotal}`;
       showToast(
         passed
           ? `第 ${level.day} 关已通关（${result.stars} 星，${head}），下一关已解锁`
-          : resetWrong
-            ? `${head}，答错的选项已清空，只做剩下的几道再交卷即可`
-            : `${head}，还差一点才通关——客观题需答对 ${essayQuizPassLine(level.quiz.length)} 题且总分达 80%`,
+          : `${head}，未达通关线——直接改正错题后点「重新交卷」即可`,
         passed ? "success" : "info",
       );
     });
@@ -267,7 +272,24 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
                     <span className="stage-text">
                       <strong>
                         第 {level.day} 关 · {level.title}
-                        {level.stars >= 1 && <em className="stage-done">已通关</em>}
+                        {(() => {
+                          const latestPassed =
+                            level.quizResult == null ||
+                            level.quizResult.correct >= essayQuizPassLine(level.quizResult.total);
+                          if (level.stars < 1) return null;
+                          if (latestPassed) return <em className="stage-done">已通关</em>;
+                          return (
+                            <em className="stage-done" style={{ background: "#fef3c7", color: "#92400e" }}>
+                              历史通关
+                            </em>
+                          );
+                        })()}
+                        {level.quizResult &&
+                          level.quizResult.correct < essayQuizPassLine(level.quizResult.total) && (
+                            <em className="stage-done" style={{ background: "#fee2e2", color: "#b91c1c" }}>
+                              上次未达标
+                            </em>
+                          )}
                         {!level.unlocked && !isOpen && (
                           <em className="stage-lock" title={`需先通关：${level.previousTitle}`}>
                             <Lock size={10} /> 需先通关：{level.previousTitle}
@@ -340,16 +362,24 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
                           {level.quiz.map((item, index) => {
                             const chosen = draft.quiz[item.id];
                             const mark = level.quizResult?.marks.find((entry) => entry.id === item.id);
+                            // 该题是否已被用户改动：改动后不再套用上次的对错样式，等重新交卷再判
+                            const dirty =
+                              mark != null &&
+                              draft.submitted[item.id] !== undefined &&
+                              draft.submitted[item.id] !== chosen;
                             return (
                               <div className="essay-quiz-item" key={item.id}>
                                 <p className="essay-quiz-stem">
                                   <span className="essay-quiz-index">{index + 1}</span>
                                   <em className="essay-quiz-tag">{item.tag}</em>
                                   <span>{item.stem}</span>
-                                  {mark && (
+                                  {mark && !dirty && (
                                     <em className={`essay-quiz-badge ${mark.correct ? "ok" : "no"}`}>
                                       {markLabel(mark.correct, level.stars >= 1)}
                                     </em>
+                                  )}
+                                  {mark && dirty && (
+                                    <em className="essay-quiz-badge">已修改，重新交卷后判分</em>
                                   )}
                                 </p>
                                 <div className="essay-quiz-options">
@@ -359,8 +389,8 @@ export function EssayTraining({ onDoc }: { onDoc: (docId: string) => void }) {
                                     const className = [
                                       "essay-quiz-option",
                                       isChosen ? "on" : "",
-                                      mark && isAnswer ? "right" : "",
-                                      mark && isChosen && !mark.correct ? "wrong" : "",
+                                      mark && !dirty && isAnswer ? "right" : "",
+                                      mark && !dirty && isChosen && !mark.correct ? "wrong" : "",
                                     ]
                                       .filter(Boolean)
                                       .join(" ");
