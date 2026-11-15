@@ -6,8 +6,9 @@
  *
  * 本项目的差异（都在这里消化，共享包不为个别项目塞特例）：
  * - 登录标识是邮箱：登录/注册时把 username 映射成 email 字段
- * - `/auth/me` 返回的是 `{ user: { id, nickname, email } }`，
- *   用户载荷里没有 username，需要从 email 补
+ * - `/auth/me` 返回的是 `{ user: { id, nickname, email }, expiresAt }`，
+ *   用户被包在 `user` 层里；共享包的 REST 驱动默认读**裸**用户对象，
+ *   所以这里先把 `user` 层拆开再交给驱动。
  */
 import {
   createRestAuthDriver,
@@ -24,6 +25,25 @@ interface AuthUserPayload {
   email?: string;
   username?: string;
   [key: string]: unknown;
+}
+
+/**
+ * 拆掉 `{ user: {...} }` 外层，返回裸用户对象。
+ *
+ * **为什么必须拆**：共享包的 REST 驱动判断「有没有登录态」看的是
+ * 载荷顶层有没有 `id`。本项目后端把用户包在 `user` 里，顶层没有 `id`
+ * → 驱动认为「未登录」→ AuthProvider 把状态机置为 `login`
+ * → **用户被弹回登录页**（症状：点开新标签页里的申论知识库后，
+ * 新标签页重新探测会话失败，看起来像「被踢下线」）。
+ *
+ * 只在确实是 `{ user: { id } }` 形状时才拆；裸用户对象原样返回。
+ */
+function unwrapUserEnvelope<T>(payload: T): T {
+  if (!payload || typeof payload !== "object") return payload;
+  const envelope = payload as { user?: AuthUserPayload };
+  if (envelope.user && typeof envelope.user === "object" && envelope.user.id)
+    return envelope.user as unknown as T;
+  return payload;
 }
 
 /**
@@ -53,6 +73,7 @@ function mapUser(raw: AuthUserPayload): AuthUser {
  * - 登录：共享包发 `{ username, password }` → 本项目后端认 `{ email, password }`
  * - 注册：共享包发 `{ username, password, email, nickname }`
  *   → 本项目后端认 `{ email, password, nickname }`（email 必填）
+ * - 响应：本项目后端把用户包在 `{ user }` 里，拆开后再交给驱动
  */
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
@@ -61,9 +82,11 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const translated: Record<string, unknown> = { ...body, email };
     // 本项目后端不认 username，只认 email
     delete translated.username;
-    return api<T>(path, { ...init, body: JSON.stringify(translated) });
+    return unwrapUserEnvelope(
+      await api<T>(path, { ...init, body: JSON.stringify(translated) }),
+    );
   }
-  return api<T>(path, init ?? {});
+  return unwrapUserEnvelope(await api<T>(path, init ?? {}));
 }
 
 /** 本项目的服务端认证驱动 */
