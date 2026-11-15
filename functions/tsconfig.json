@@ -7,6 +7,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "lib": ["ES2022", "WebWorker"]
   },
   "include": ["./**/*.ts", "../src/generator/**/*.ts"]
