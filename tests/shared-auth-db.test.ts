@@ -122,7 +122,7 @@ describe("共享包 authDb（真实 SQLite）", () => {
 
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
-    await createSession(d1, "usr_1", token, tokenHash, {
+    await createSession(d1, "usr_1", token, {
       userExtraColumns: ["email", "nickname", "status"],
     });
 
@@ -168,7 +168,7 @@ describe("共享包 authDb（真实 SQLite）", () => {
     });
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
-    await createSession(d1, "usr_1", token, tokenHash, {
+    await createSession(d1, "usr_1", token, {
       userExtraColumns: ["email", "nickname", "status"],
       userShape: { hasStatusColumn: true },
     });
@@ -201,7 +201,7 @@ describe("共享包 authDb（真实 SQLite）", () => {
     await insertUser(d1, { id: "usr_1", username: "alice@example.com", passwordHash: "hash" });
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
-    await createSession(d1, "usr_1", token, tokenHash);
+    await createSession(d1, "usr_1", token);
 
     await deleteSession(d1, tokenHash);
     const session = await resolveSession(d1, token, tokenHash);

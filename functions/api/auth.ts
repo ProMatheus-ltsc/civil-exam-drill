@@ -85,12 +85,10 @@ export async function createSession(
   userId: string,
 ): Promise<{ token: string; expiresAt: string }> {
   const token = generateSessionToken();
-  const tokenHash = await sha256Hex(token);
   const { expiresAt } = await sharedCreateSession(
     asD1(db),
     userId,
     token,
-    tokenHash,
     {
       sessionDays: 30,
       maxSessionsPerUser: 20,
