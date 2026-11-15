@@ -40,6 +40,7 @@ import {
   DEFAULT_USER_SHAPE,
   type D1Like,
 } from "@shared/core/server/authDb";
+import { toD1 } from "@shared/core/server/d1";
 
 /** 响应信封（与本项目其它接口一致） */
 export const ok = <T>(data: T) => ({ success: true as const, data, error: null });
@@ -60,7 +61,7 @@ type Db = { prepare(sql: string): any };
 
 /** 共享包的 D1Like 适配（本项目 Statement 接口与 D1Like 结构一致） */
 function asD1(db: Db): D1Like {
-  return db as unknown as D1Like;
+  return toD1(db);
 }
 
 /** users 表的项目特有列（共享包按 extraColumns 参与读写） */

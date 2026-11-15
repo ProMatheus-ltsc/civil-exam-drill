@@ -56,17 +56,17 @@ import {
   writingPromptById,
 } from "../../src/essay/writing";
 import { MISTAKE_CAUSE_IDS } from "../../src/mistakes";
+import type { D1WithBatchLike, D1PreparedStatementLike } from "@shared/core/server/d1";
 
-interface Statement {
-  bind(...values: unknown[]): Statement;
-  first<T = Record<string, unknown>>(): Promise<T | null>;
-  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-  run(): Promise<{ success: boolean; meta?: Record<string, unknown> }>;
-}
-interface Database {
-  prepare(sql: string): Statement;
-  batch(statements: Statement[]): Promise<unknown[]>;
-}
+/**
+ * D1 句柄类型 —— 收归 @shared/core/server/d1 的统一声明。
+ * 与 Cloudflare 官方 D1Database 结构兼容，只是换成不依赖类型包的结构化类型。
+ *
+ * 本项目直接调用 `db.batch(...)`，所以用含 batch 的变体，
+ * TypeScript 就知道它一定存在，不必到处写非空断言。
+ */
+type Statement = D1PreparedStatementLike;
+type Database = D1WithBatchLike;
 type Bindings = {
   DB: Database;
   // Pages 静态资源绑定（内容 JSON 静态化后运行时读取；运行时经 ASSETS.fetch 读取 /generated/**）
