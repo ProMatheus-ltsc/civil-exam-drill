@@ -22,7 +22,6 @@ import { knowledgeDocHref, openKnowledgeDoc } from "../lib/doc-link";
 import { topics } from "../generator";
 import { DocPractice } from "../components/DocPractice";
 import { EssayTraining } from "./EssayTrainingPage";
-import { EssayWritingPage } from "./EssayWritingPage";
 import { useAsync } from "../hooks/useAsync";
 import { isReviewDue } from "../essay/queue";
 import { initialProgress, scheduleReview } from "../essay/scheduler";
@@ -759,10 +758,8 @@ export function EssayPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab =
-    tabParam === "cards" || tabParam === "knowledge" || tabParam === "writing"
-      ? tabParam
-      : "training";
-  const setTab = (next: "knowledge" | "cards" | "training" | "writing") => {
+    tabParam === "cards" || tabParam === "knowledge" ? tabParam : "training";
+  const setTab = (next: "knowledge" | "cards" | "training") => {
     setSearchParams(next === "training" ? {} : { tab: next }, { replace: true });
   };
   return (
@@ -786,12 +783,6 @@ export function EssayPage() {
         >
           规范词卡片
         </button>
-        <button
-          className={tab === "writing" ? "active" : ""}
-          onClick={() => setTab("writing")}
-        >
-          整篇批改
-        </button>
       </div>
       {tab === "training" && (
         // 延伸讲解开新标签页（与专项训练的 📖 同口径）：讲解是「查资料」的旁支动作，
@@ -799,7 +790,6 @@ export function EssayPage() {
         <EssayTraining onDoc={openKnowledgeDoc} />
       )}
       {tab === "knowledge" && <KnowledgePage essay />}
-      {tab === "writing" && <EssayWritingPage />}
       {tab === "cards" && (
         <section className="panel">
           <p className="eyebrow">按记忆计划复习</p>

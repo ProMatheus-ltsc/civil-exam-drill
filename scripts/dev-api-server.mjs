@@ -158,14 +158,9 @@ const essayBankUrl = new URL('../src/essay/bank.ts', import.meta.url).href
 const essayRulesUrl = new URL('../src/essay/rules.ts', import.meta.url).href
 const { essayStars } = await import(essayRulesUrl)
 const { essayQuizIssue, essayQuizOf, gradeEssayQuiz } = await import(essayBankUrl)
-// 整篇批改：题目与规则评分同源 src/essay/writing.ts
-const essayWritingUrl = new URL('../src/essay/writing.ts', import.meta.url).href
-const { WRITING_PROMPTS, writingPromptById, gradeWriting } = await import(essayWritingUrl)
 // 错因标签同源 src/mistakes.ts，避免本地与线上的可选值不一致
 const mistakesUrl = new URL('../src/mistakes.ts', import.meta.url).href
 const { MISTAKE_CAUSE_IDS } = await import(mistakesUrl)
-/** id -> 批改记录（本地重启即失效） */
-const essaySubmissions = new Map()
 /** levelId -> { checked: number[], quiz: [{id,key}], notes: string, stars: number } */
 const essayTrainingState = new Map()
 
@@ -563,96 +558,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   // === Essay API（返回空数据，避免卡死）===
-  if (pathname === '/api/essay/writing/prompts' && req.method === 'GET') {
-    sendJson(res, 200, { success: true, data: { prompts: WRITING_PROMPTS }, error: null })
-    return
-  }
-
-  if (pathname === '/api/essay/writing/submissions' && req.method === 'GET') {
-    const user = currentMockUser(req)
-    const items = [...essaySubmissions.values()]
-      .filter((item) => item.userId === (user?.id ?? 'dev-user'))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, 20)
-      .map((item) => ({
-        id: item.id,
-        promptId: item.promptId,
-        promptTitle: item.promptTitle,
-        title: item.title,
-        wordCount: item.grade.wordCount,
-        score: item.grade.score,
-        grade: item.grade.grade,
-        createdAt: item.createdAt,
-      }))
-    sendJson(res, 200, { success: true, data: { items }, error: null })
-    return
-  }
-
-  const writingDetailMatch = pathname.match(/^\/api\/essay\/writing\/submissions\/([^/]+)$/)
-  if (writingDetailMatch && req.method === 'GET') {
-    const user = currentMockUser(req)
-    const record = essaySubmissions.get(decodeURIComponent(writingDetailMatch[1]))
-    if (!record || record.userId !== (user?.id ?? 'dev-user')) {
-      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '批改记录不存在或无权访问' } })
-      return
-    }
-    sendJson(res, 200, {
-      success: true,
-      data: {
-        id: record.id,
-        promptId: record.promptId,
-        promptTitle: record.promptTitle,
-        title: record.title,
-        content: record.content,
-        createdAt: record.createdAt,
-        ...record.grade,
-      },
-      error: null,
-    })
-    return
-  }
-
-  if (pathname === '/api/essay/writing/submissions' && req.method === 'POST') {
-    const body = JSON.parse(await readBody(req))
-    const prompt = writingPromptById.get(String(body.promptId ?? ''))
-    const title = String(body.title ?? '').trim()
-    const content = String(body.content ?? '').trim()
-    if (!prompt) {
-      sendJson(res, 404, { success: false, data: null, error: { code: 'NOT_FOUND', message: '练习题目不存在' } })
-      return
-    }
-    if (!title || content.length < 200) {
-      sendJson(res, 400, { success: false, data: null, error: { code: 'INVALID_PARAM', message: '标题不能为空，正文至少 200 字' } })
-      return
-    }
-    const user = currentMockUser(req)
-    const record = {
-      id: `essay-${crypto.randomUUID()}`,
-      userId: user?.id ?? 'dev-user',
-      promptId: prompt.id,
-      promptTitle: prompt.title,
-      title,
-      content,
-      createdAt: new Date().toISOString(),
-      grade: gradeWriting(prompt, title, content),
-    }
-    essaySubmissions.set(record.id, record)
-    sendJson(res, 200, {
-      success: true,
-      data: {
-        id: record.id,
-        promptId: record.promptId,
-        promptTitle: record.promptTitle,
-        title: record.title,
-        content: record.content,
-        createdAt: record.createdAt,
-        ...record.grade,
-      },
-      error: null,
-    })
-    return
-  }
-
   if (pathname === '/api/essay/cards' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({

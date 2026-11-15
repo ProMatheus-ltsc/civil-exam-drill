@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, CalendarCheck, Users } from "lucide-react";
+import { ArrowRight, CalendarCheck, MessageCircle, Users } from "lucide-react";
+import { CommunityModal } from "../components/CommunityModal";
 import { CommunityQrGrid } from "../components/CommunityQr";
 
 export function CommunityPage({ publicView = false }: { publicView?: boolean }) {
+  const [humanReviewOpen, setHumanReviewOpen] = useState(false);
   return (
     <section className="panel community-page">
       <p className="eyebrow">打卡与社群</p>
@@ -29,6 +32,13 @@ export function CommunityPage({ publicView = false }: { publicView?: boolean }) 
       </div>
       <CommunityQrGrid />
       <div className="community-page-actions">
+        <button
+          className="secondary"
+          type="button"
+          onClick={() => setHumanReviewOpen(true)}
+        >
+          <MessageCircle size={16} /> 预约人工批改
+        </button>
         {publicView ? (
           <Link className="primary" to="/register">
             免费注册，开始学习 <ArrowRight size={16} />
@@ -39,11 +49,17 @@ export function CommunityPage({ publicView = false }: { publicView?: boolean }) 
               去看今日计划 <ArrowRight size={16} />
             </Link>
             <Link className="secondary" to="/essay">
-              去写作批改
+              去申论闯关
             </Link>
           </>
         )}
       </div>
+      <CommunityModal
+        open={humanReviewOpen}
+        onClose={() => setHumanReviewOpen(false)}
+        title="预约人工批改"
+        reason="人工批改为内测增值服务：扫码添加个人微信，备注「人工批改」。当前暂不接入支付，先沟通批改范围与时间。"
+      />
     </section>
   );
 }

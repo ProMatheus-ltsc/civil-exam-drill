@@ -102,10 +102,6 @@ class FakeStatement {
         )[0];
       return (previous ? { score: previous.score } : null) as T | null;
     }
-    if (this.sql.includes("FROM essay_submissions WHERE id=? AND user_id=?")) {
-      const row = this.db.essaySubmissions.get(String(this.values[0]));
-      return (row && row.userId === String(this.values[1]) ? row : null) as T | null;
-    }
     if (this.sql.includes("FROM password_resets pr JOIN users")) {
       const reset = this.db.passwordResets.get(String(this.values[0]));
       if (!reset) return null;
@@ -234,13 +230,6 @@ class FakeStatement {
           : rows) as T[],
       };
     }
-    if (this.sql.includes("FROM essay_submissions")) {
-      return {
-        results: [...this.db.essaySubmissions.values()]
-          .filter((row) => row.userId === String(this.values[0]))
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) as T[],
-      };
-    }
     if (this.sql.includes("FROM mock_exam_questions")) {
       const rows = [...(this.db.mockQuestions.get(String(this.values[0])) ?? [])].sort(
         (a, b) => a.position - b.position,
@@ -293,49 +282,6 @@ class FakeStatement {
     }
     if (this.sql.startsWith("UPDATE quiz_attempts SET cause_tag=?")) {
       this.db.mistakeCause = this.values[0] as string | null;
-    }
-    if (this.sql.startsWith("INSERT INTO essay_submissions")) {
-      const [
-        id,
-        userId,
-        promptId,
-        promptTitle,
-        title,
-        content,
-        wordCount,
-        score,
-        grade,
-        dimensionsJson,
-        feedbackJson,
-        createdAt,
-      ] = this.values as [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        number,
-        number,
-        string,
-        string,
-        string,
-        string,
-      ];
-      this.db.essaySubmissions.set(id, {
-        id,
-        userId,
-        promptId,
-        promptTitle,
-        title,
-        content,
-        wordCount,
-        score,
-        grade,
-        dimensionsJson,
-        feedbackJson,
-        createdAt,
-      });
     }
     if (this.sql.startsWith("UPDATE mock_exam_questions SET selected_index")) {
       const [selectedIndex, elapsedMs, , questionId, examId] =
@@ -489,23 +435,6 @@ class FakeDb {
       selectedIndex: number | null;
       elapsedMs: number;
     }>
-  >();
-  essaySubmissions = new Map<
-    string,
-    {
-      id: string;
-      userId: string;
-      promptId: string;
-      promptTitle: string;
-      title: string;
-      content: string;
-      wordCount: number;
-      score: number;
-      grade: string;
-      dimensionsJson: string;
-      feedbackJson: string;
-      createdAt: string;
-    }
   >();
   prepare(sql: string) {
     return new FakeStatement(this, sql);
@@ -1101,64 +1030,6 @@ describe("API contract guards", () => {
       { ...env, DB: db },
     );
     expect(invalid.status).toBe(404);
-  });
-
-  it("grades and stores an essay writing submission", async () => {
-    const db = new FakeDb();
-    const content = `本文认为，把群众的小事办实，关键在于站稳群众立场，把每一件具体事落到可执行的行动上。
-
-把小事办实，首先要听懂群众的真实诉求。材料中，有的社区在加装电梯前挨家挨户听意见，再请居民代表共同商定方案。这说明，很多“小事”背后连着不同群体的利益，只有把意见听全，服务才能对得上群众需要。
-
-把小事办实，需要建立闭环落实机制。应当明确责任人、办理时限和反馈方式，做到件件有着落、事事有回音，让群众看到诚意和进度。
-
-总之，群众的“小事”就是治理的“大事”。唯有把群众满意作为出发点和落脚点，才能把一件件小事办到群众心坎上。`;
-    const response = await app.request(
-      "/api/essay/writing/submissions",
-      {
-        method: "POST",
-        headers: { ...auth, "content-type": "application/json" },
-        body: JSON.stringify({
-          promptId: "grassroots",
-          title: "把小事办实 把民心暖热",
-          content,
-        }),
-      },
-      { ...env, DB: db },
-    );
-    expect(response.status).toBe(200);
-    const data = (await response.json()).data;
-    expect(data.dimensions).toHaveLength(4);
-    expect(data.paragraphs.length).toBeGreaterThanOrEqual(3);
-    expect(data.score).toBeGreaterThanOrEqual(0);
-    expect(data.score).toBeLessThanOrEqual(100);
-    expect(db.essaySubmissions.size).toBe(1);
-    const submissionId = data.id as string;
-
-    const list = await app.request(
-      "/api/essay/writing/submissions",
-      { headers: auth },
-      { ...env, DB: db },
-    );
-    expect(list.status).toBe(200);
-    const listPayload = (await list.json()).data;
-    expect(listPayload.items).toHaveLength(1);
-    expect(listPayload.items[0]).toMatchObject({
-      id: submissionId,
-      promptId: "grassroots",
-      title: "把小事办实 把民心暖热",
-      score: data.score,
-    });
-
-    const detail = await app.request(
-      `/api/essay/writing/submissions/${submissionId}`,
-      { headers: auth },
-      { ...env, DB: db },
-    );
-    expect(detail.status).toBe(200);
-    const detailPayload = (await detail.json()).data;
-    expect(detailPayload.content).toBe(content);
-    expect(detailPayload.dimensions).toHaveLength(4);
-    expect(detailPayload.suggestions.length).toBeGreaterThan(0);
   });
 
   it("exposes the dual-track quiz catalog", async () => {
