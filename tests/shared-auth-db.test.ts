@@ -6,8 +6,13 @@
  * 都有 id 列，不加表别名 SQLite 会直接报 "ambiguous column name: id"，
  * 而 mock 完全看不出来——线上才发现 /auth/me 500。
  *
- * 这里用 node:sqlite 建真实的表与数据，跑共享包的 authDb，
+ * 这里用 node:sqlite 建**本项目实际 schema**的表与数据，跑共享包的 authDb，
  * 验证 SQL 能真的执行、结果符合预期。
+ *
+ * 重点：本项目**不改数据库结构**——users 表的登录名归一化列是
+ * email_normalized（不是 username_normalized），没有 username 列，
+ * 展示名是 nickname。共享包通过 UserShape 声明这个形状，
+ * 因此无需 ALTER TABLE 就能对接。
  */
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
@@ -59,20 +64,24 @@ function createD1(db: DatabaseSync): D1Like {
   } as unknown as D1Like;
 }
 
-/** 建一套与统一契约一致的表（extra 列模拟项目特有列） */
+/**
+ * 建一套与**本项目实际 schema 一致**的表。
+ * 关键点：没有 username / username_normalized 列。
+ */
 function createDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE users (
       id TEXT PRIMARY KEY,
-      username TEXT NOT NULL,
-      username_normalized TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
+      invite_code_id INTEGER NOT NULL DEFAULT 1,
+      nickname TEXT NOT NULL,
+      nickname_normalized TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       last_login_at TEXT NOT NULL,
       email TEXT,
-      nickname TEXT,
-      status TEXT
+      email_normalized TEXT,
+      password_hash TEXT
     );
     CREATE TABLE sessions (
       id TEXT PRIMARY KEY,
@@ -92,53 +101,116 @@ function createDb(): DatabaseSync {
   return db;
 }
 
-describe("共享包 authDb（真实 SQLite）", () => {
-  it("插入用户后可按归一化登录名查到", async () => {
+/** 本项目的表形状（与 functions/api/auth.ts 保持一致） */
+const CIVIL_USER_SHAPE = {
+  usernameColumn: "email_normalized",
+  usernameDisplayColumn: null,
+  hasStatusColumn: true,
+};
+
+/** 本项目 users 表参与读写的额外列 */
+const CIVIL_EXTRA_COLUMNS = [
+  "email",
+  "nickname",
+  "nickname_normalized",
+  "status",
+  "invite_code_id",
+];
+
+describe("共享包 authDb（真实 SQLite，按本项目 schema）", () => {
+  it("插入用户后可按邮箱查到，且不写 username 列", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, {
-      id: "usr_1",
-      username: "Alice@Example.com",
-      passwordHash: "pbkdf2-sha256$100000$salt$hash",
-      extra: { email: "alice@example.com", nickname: "爱丽丝", status: "active" },
-    });
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "pbkdf2-sha256$100000$salt$hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
+
+    // 表里没有 username / username_normalized 列——插入若引用它们会直接报错
+    const columns = await d1
+      .prepare("PRAGMA table_info(users)")
+      .all<{ name: string }>();
+    const names = columns.results.map((row) => row.name);
+    expect(names).not.toContain("username");
+    expect(names).not.toContain("username_normalized");
+    expect(names).toContain("email_normalized");
 
     const found = await findUserByUsername(d1, "alice@example.com", {
-      userExtraColumns: ["email", "nickname", "status"],
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
     });
     expect(found).not.toBeNull();
     expect(found?.id).toBe("usr_1");
-    expect(found?.username).toBe("Alice@Example.com");
     expect(found?.nickname).toBe("爱丽丝");
+    expect(found?.email).toBe("alice@example.com");
   });
 
   it("会话解析走 JOIN，两表同名列不会引发歧义", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, {
-      id: "usr_1",
-      username: "alice@example.com",
-      passwordHash: "hash",
-      extra: { email: "alice@example.com", nickname: "爱丽丝", status: "active" },
-    });
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
 
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
     await createSession(d1, "usr_1", token, {
-      userExtraColumns: ["email", "nickname", "status"],
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
     });
 
     const session = await resolveSession(d1, token, tokenHash, {
-      userExtraColumns: ["email", "nickname", "status"],
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
     });
     expect(session).not.toBeNull();
     expect(session?.userId).toBe("usr_1");
+    // 项目特有列必须带出来（否则 /auth/me 的 nickname / email 是空的）
     expect(session?.user.nickname).toBe("爱丽丝");
     expect(session?.user.email).toBe("alice@example.com");
   });
 
   it("过期会话被删掉并返回 null", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, { id: "usr_1", username: "alice@example.com", passwordHash: "hash" });
-    // 手工插一条已过期的会话
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
     const tokenHash = await sha256Hex("stale");
     await d1
       .prepare(
@@ -147,10 +219,12 @@ describe("共享包 authDb（真实 SQLite）", () => {
       .bind("ses_old", "usr_1", tokenHash, "2000-01-01T00:00:00.000Z", new Date().toISOString())
       .run();
 
-    const session = await resolveSession(d1, "stale", tokenHash);
+    const session = await resolveSession(d1, "stale", tokenHash, {
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
+    });
     expect(session).toBeNull();
 
-    // 行已被删除
     const row = await d1
       .prepare("SELECT id FROM sessions WHERE token_hash = ?")
       .bind(tokenHash)
@@ -160,25 +234,34 @@ describe("共享包 authDb（真实 SQLite）", () => {
 
   it("status 被禁用时会话立即失效", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, {
-      id: "usr_1",
-      username: "alice@example.com",
-      passwordHash: "hash",
-      extra: { email: "alice@example.com", nickname: "爱丽丝", status: "active" },
-    });
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
     await createSession(d1, "usr_1", token, {
-      userExtraColumns: ["email", "nickname", "status"],
-      userShape: { hasStatusColumn: true },
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
     });
 
-    // 禁用账户
     await d1.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind("usr_1").run();
 
     const session = await resolveSession(d1, token, tokenHash, {
-      userExtraColumns: ["email", "nickname", "status"],
-      userShape: { hasStatusColumn: true },
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
     });
     expect(session).toBeNull();
   });
@@ -198,20 +281,59 @@ describe("共享包 authDb（真实 SQLite）", () => {
 
   it("登出删掉会话", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, { id: "usr_1", username: "alice@example.com", passwordHash: "hash" });
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
     const token = generateSessionToken();
     const tokenHash = await sha256Hex(token);
-    await createSession(d1, "usr_1", token);
+    await createSession(d1, "usr_1", token, {
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
+    });
 
     await deleteSession(d1, tokenHash);
-    const session = await resolveSession(d1, token, tokenHash);
+    const session = await resolveSession(d1, token, tokenHash, {
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
+    });
     expect(session).toBeNull();
   });
 
   it("更新最后登录时间", async () => {
     const d1 = createD1(createDb());
-    await insertUser(d1, { id: "usr_1", username: "alice@example.com", passwordHash: "hash" });
-    await touchLastLogin(d1, "usr_1");
+    await insertUser(
+      d1,
+      {
+        id: "usr_1",
+        username: "alice@example.com",
+        passwordHash: "hash",
+        extra: {
+          email: "alice@example.com",
+          nickname: "爱丽丝",
+          nickname_normalized: "爱丽丝",
+          status: "active",
+          invite_code_id: 1,
+        },
+      },
+      { userExtraColumns: CIVIL_EXTRA_COLUMNS, userShape: CIVIL_USER_SHAPE },
+    );
+    await touchLastLogin(d1, "usr_1", {
+      userExtraColumns: CIVIL_EXTRA_COLUMNS,
+      userShape: CIVIL_USER_SHAPE,
+    });
     const row = await d1
       .prepare("SELECT last_login_at FROM users WHERE id = ?")
       .bind("usr_1")

@@ -73,9 +73,18 @@ const USER_EXTRA_COLUMNS = [
 
 /**
  * 本项目的 users 表形状：
+ * - 登录名归一化列是 email_normalized（本项目以邮箱登录），不是 username_normalized
+ * - 没有 username 列（展示名是 nickname），因此 usernameDisplayColumn 置空
  * - 有 status 列（'active'/'disabled'）—— 禁用账户的会话立即失效
+ *
+ * **不改表结构**：沿用本项目原有的 email / email_normalized / nickname / status 列。
  */
-const USER_SHAPE = { ...DEFAULT_USER_SHAPE, hasStatusColumn: true };
+const USER_SHAPE = {
+  ...DEFAULT_USER_SHAPE,
+  usernameColumn: 'email_normalized',
+  usernameDisplayColumn: null,
+  hasStatusColumn: true,
+};
 
 // ==================== 会话 ====================
 

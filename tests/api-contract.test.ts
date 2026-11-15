@@ -41,14 +41,15 @@ class FakeStatement {
         token_hash: String(this.values[0]),
         expires_at: "2099-01-01T00:00:00Z",
         id: "usr_test",
-        username: "test@example.com",
-        username_normalized: "test@example.com",
+        email_normalized: "test@example.com",
         password_hash: "pbkdf2-sha256$100000$abc$def",
         created_at: "2026-01-01T00:00:00Z",
         last_login_at: "2026-01-01T00:00:00Z",
         email: "test@example.com",
         nickname: "测试用户",
+        nickname_normalized: "测试用户",
         status: "active",
+        invite_code_id: 1,
       } as T;
     }
     if (this.sql === "SELECT 1") return { ok: 1 } as T;
@@ -121,21 +122,22 @@ class FakeStatement {
       } as T;
     }
     if (this.sql.includes("FROM invite_codes")) return { id: 1 } as T;
-    if (flat.includes("FROM users WHERE username_normalized = ?")) {
-      const usernameNormalized = String(this.values[0]);
-      const user = this.db.users.get(usernameNormalized) ?? null;
+    if (flat.includes("FROM users WHERE email_normalized = ?")) {
+      const emailNormalized = String(this.values[0]);
+      const user = this.db.users.get(emailNormalized) ?? null;
       if (!user) return null;
-      // 共享包的统一用户行：标准列 + 项目特有列
+      // 本项目的登录名归一化列是 email_normalized（不改表结构）
       return {
         id: user.id,
-        username: user.email,
-        username_normalized: usernameNormalized,
+        email_normalized: emailNormalized,
         password_hash: user.passwordHash,
         created_at: "2026-01-01T00:00:00Z",
         last_login_at: "2026-01-01T00:00:00Z",
         email: user.email,
         nickname: user.nickname,
+        nickname_normalized: user.nickname,
         status: user.status ?? "active",
+        invite_code_id: 1,
       } as T;
     }
     if (flat.includes("FROM users WHERE email_normalized=?")) {
@@ -361,20 +363,18 @@ class FakeStatement {
     }
     if (
       flat.startsWith("INSERT INTO users (") &&
-      flat.includes("username_normalized")
+      flat.includes("email_normalized")
     ) {
-      // 共享包的统一插入语句，列顺序：
-      //   id, username, username_normalized, password_hash, created_at,
-      //   last_login_at, + 项目特有列（email, nickname, nickname_normalized,
-      //   status, invite_code_id）
+      // 共享包的插入语句，列顺序（本项目形状，没有 username / username_normalized）：
+      //   id, email_normalized, password_hash, created_at, last_login_at,
+      //   + 项目特有列（email, nickname, nickname_normalized, status, invite_code_id）
       const values = this.values.map(String);
       const id = values[0];
-      const username = values[1];
-      const usernameNormalized = values[2];
-      const passwordHash = values[3];
-      const email = values[6] ?? username;
-      const nickname = values[7] ?? username;
-      this.db.users.set(usernameNormalized, {
+      const emailNormalized = values[1];
+      const passwordHash = values[2];
+      const email = values[5] ?? emailNormalized;
+      const nickname = values[6] ?? emailNormalized;
+      this.db.users.set(emailNormalized, {
         id,
         nickname,
         email,
