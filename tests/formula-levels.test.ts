@@ -26,9 +26,10 @@ function materialOf(q: QuestionDraft): string {
   return q.material?.paragraphs.join("") ?? "";
 }
 
-/** growth-amount / base-amount / base-difference：材料直接写「下降」 */
+/** growth-amount / base-amount / base-difference：材料直接写「下降」（增长量入口写「减少」） */
 function isVerbalDecline(q: QuestionDraft): boolean {
-  return materialOf(q).includes("下降");
+  const text = materialOf(q);
+  return text.includes("下降") || text.includes("减少");
 }
 
 /**
@@ -81,7 +82,15 @@ describe("列式关：难度梯度", () => {
           randomSeed: `int-${topicId}-${i}`,
         });
         const matched = [...materialOf(q).matchAll(/(增长|下降)\s*(\d+(?:\.\d+)?)%/g)];
-        expect(matched.length, `${topicId} 材料缺少增长率`).toBeGreaterThan(0);
+        if (matched.length === 0) {
+          // 「给增长量」的入口材料里没有百分比，只有整数增长量（现期−增长量），
+          // 同样不能出现小数——否则 easy 档就不是纯心算了。
+          expect(
+            materialOf(q),
+            `${topicId} 既没有增长率、也没有整数增长量`,
+          ).toMatch(/(增加|减少)\s*\d+\s*(?:亿元|万吨|亿千瓦时|万人|元)/);
+          continue;
+        }
         for (const m of matched) {
           expect(m[2], `easy 档出现了小数增长率：${m[0]}`).not.toContain(".");
         }
@@ -120,6 +129,14 @@ describe("列式关：下降场景", () => {
           });
           if (!isVerbalDecline(q)) continue;
           const answer = q.options[q.answerIndex];
+          // 「给增长量」的入口（现期±增长量）没有增速因子，方向靠加减：
+          // 材料写「减少 A」→ 基期＝现期＋A；写「增加 A」→ 基期＝现期−A。
+          if (!answer.includes("(1")) {
+            const down = materialOf(q).includes("减少");
+            expect(answer, `${topicId} 增长量入口的加减方向反了：${answer}`).toContain(down ? "+" : "−");
+            checked += 1;
+            continue;
+          }
           expect(answer, `${topicId} 下降题标答无 (1−：${q.stem}`).toContain("(1−");
           // 基期差有两个增速，允许同时出现一正一负；其余模块不允许出现 (1+
           if (topicId !== "formula-base-difference") {

@@ -238,6 +238,13 @@ function genGrowthAmount(r: Rng): QuestionDraft {
 }
 
 /** ③ 基期量 */
+/**
+ * ⑤ 基期量（**两条入口**）
+ *   ① 材料给增速：基期＝现期÷(1+r)
+ *   ② 材料给增长量：基期＝现期−增长量
+ * 入口不同、式子完全不同。只会①的人，遇到「比上年增加 240 亿元」还去找增速，
+ * 结果在题干里根本找不到 r——这是这一关最典型的失分点。
+ */
 function genBaseAmount(r: Rng): QuestionDraft {
   const region = r.pick(REGIONS);
   const [metric, unit] = r.pick(METRICS);
@@ -245,18 +252,36 @@ function genBaseAmount(r: Rng): QuestionDraft {
   const base = baseAmount(r);
   const rate = rateOf(r);
   const current = currentOf(base, rate);
+  const gain = Math.round((base * Math.abs(rate)) / 100);
+  /** 题干里的行政层级要与材料一致（材料写「某省」，题干就不能叫「该地区」） */
+  const geo = region === "全国" ? "全国" : region.endsWith("省") ? "该省" : "该市";
+  // 增长量太小（会被四舍五入成 0）时走增速入口，否则「现期−0」这种题没有意义
+  if (gain >= 1 && r.integer(0, 1) === 1) {
+    // ② 给增长量的入口：直接相减（现期与增长量都是材料给的现成数）
+    const up = rate >= 0;
+    const sign = up ? "−" : "+";
+    return buildFormula(
+      r,
+      "formula-base-amount-diff",
+      `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${up ? "增加" : "减少"} ${gain} ${unit}。`,
+      `材料中，求 ${y - 1} 年${geo}${metric}，下列算式正确的是？`,
+      `${current}${sign}${gain}`,
+      [`${current}${up ? "+" : "−"}${gain}`, `${gain}`, `${current}÷${gain}`],
+      `材料给的是**增长量**（增加/减少了多少），不是增速：基期＝现期${up ? "−" : "+"}增长量＝${current}${sign}${gain}。错项：写成${up ? "加" : "减"}法是把方向搞反（那是再往后推一期）；只写 ${gain} 是拿增长量当基期；${current}÷${gain} 是把增长量误当成了倍数。只有当材料给的是增速时，才用「现期÷(1+r)」那条除法——入口看错，式子的起手就整个错了。`,
+    );
+  }
   return buildFormula(
     r,
     "formula-base-amount",
     `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${trend(rate)} ${pctAbs(rate)}。`,
-    `材料中，求 ${y - 1} 年该地区${metric}，下列算式正确的是？`,
+    `材料中，求 ${y - 1} 年${geo}${metric}，下列算式正确的是？`,
     `${current}÷${factor(rate)}`,
     [
       `${current}×${factor(rate)}`,
       `${current}÷${factor(-rate)}`,
       `${current}×${pctAbs(rate)}`,
     ],
-    `求过去用除：基期量＝现期÷${factor(rate)}。写成"×"是把方向搞反了（那是求未来）；写成"÷${factor(-rate)}"则把${rate >= 0 ? "增长" : "下降"}的符号弄反了。`,
+    `求过去用除：基期量＝现期÷${factor(rate)}。错项：写成"×"是把方向搞反了（那是求未来）；写成"÷${factor(-rate)}"则把${rate >= 0 ? "增长" : "下降"}的符号弄反了。若材料给的是**增长量**而不是增速，就不用除——直接「现期−增长量」，入口不同、式子也不同；本题只给了增速，所以走这条除法。`,
   );
 }
 
@@ -641,7 +666,7 @@ function genRatioChange(r: Rng): QuestionDraft {
         `${pct(a)}−${pct(b)}`,
         `(${share})×(${pct(b)}−${pct(a)})÷(1+${pct(a)})`,
       ],
-      `两期比重差＝现期比重×(部分增速−整体增速)÷(1+部分增速)。它问的是"几个**百分点**"；漏掉 ÷(1+${pct(a)}) 是常见近似错法，直接答"${pct(a)}−${pct(b)}"则混淆了百分点与百分数，减反了则方向错。同一个答案的另一种写法：现期比重−基期比重，两种都算对。`,
+      `两期比重差＝现期比重×(部分增速−整体增速)÷(1+部分增速)。它问的是"几个**百分点**"；漏掉 ÷(1+${pct(a)}) 是常见近似错法，直接答"${pct(a)}−${pct(b)}"则混淆了百分点与百分数，减反了则方向错。同一个答案的另一种写法：现期比重−基期比重，两种都算对。速算三步：① 先判方向——部分增速${a > b ? "快于" : "慢于"}整体，比重${a > b ? "上升" : "下降"}；② 用 |a−b|=${round1(Math.abs(a - b))} 个百分点卡上限，比重差一定比它小（还要乘一个小于 1 的现期比重、再除一个大于 1 的 1+a）；③ 要数值时先估——把 ÷(1+a) 省掉，直接 ${share}×(${pct(a)}−${pct(b)})，这样估出来的结果比真值大 a/(100+a)≈${round1((a / (100 + a)) * 100)}%，选项差 1 个百分点以上时随便省。`,
     );
   }
   return buildFormula(
@@ -655,7 +680,7 @@ function genRatioChange(r: Rng): QuestionDraft {
       `${pct(a)}−${pct(b)}`,
       `(${share})×(1+${pct(b)})÷(1+${pct(a)})`,
     ],
-    `两期比重差＝现期比重−基期比重，而基期比重＝${share}×(1+${pct(b)})÷(1+${pct(a)})，相减即可。错项：把增速因子写反的那一项（(1+${pct(a)})÷(1+${pct(b)})）算错的是基期比重；只算出基期比重、忘了减现期比重的那一项，答案就停在基期上；直接答"${pct(a)}−${pct(b)}"则混了百分点与百分数。同一个答案的另一种写法：现期比重×(a−b)÷(1+a)，两种都算对。`,
+    `两期比重差＝现期比重−基期比重，而基期比重＝${share}×(1+${pct(b)})÷(1+${pct(a)})，相减即可。错项：把增速因子写反的那一项（(1+${pct(a)})÷(1+${pct(b)})）算错的是基期比重；只算出基期比重、忘了减现期比重的那一项，答案就停在基期上；直接答"${pct(a)}−${pct(b)}"则混了百分点与百分数。同一个答案的另一种写法：现期比重×(a−b)÷(1+a)，两种都算对。速算三步同前：判方向（a${a > b ? "＞" : "＜"}b，比重${a > b ? "上升" : "下降"}）→ 用 |a−b|=${round1(Math.abs(a - b))} 卡上限 → 要数值时先省掉 ÷(1+a) 估一把，估出来偏大 a/(100+a)≈${round1((a / (100 + a)) * 100)}%。`,
   );
 }
 
@@ -665,6 +690,13 @@ function genRatioChange(r: Rng): QuestionDraft {
  *   ② (1+a)÷(1+b)−1        —— 定义式：现期平均数÷基期平均数−1
  * 两式恒等（①就是②通分的结果），考场上先写①，记不牢时用②推。
  */
+/**
+ * ⑮ 平均数增长率（**三种问法**）
+ *   ① (a−b)÷(1+b)        —— 增长率的主力式
+ *   ② (1+a)÷(1+b)−1      —— 定义式（增长后的平均÷原来的平均−1）
+ *   ③ (1+a)÷(1+b)        —— 问「是原来的多少倍」：倍数＝增长率＋1
+ * ③ 不是新公式，但问法一变、答案就变（差 1），只练①②会在「是多少倍」上直接答成增长率。
+ */
 function genAverageRate(r: Rng): QuestionDraft {
   const [metric, unit] = r.pick(TOTALS);
   const y = yearOf(r);
@@ -673,8 +705,25 @@ function genAverageRate(r: Rng): QuestionDraft {
   const total = r.integer(200, 9800) * 10;
   const [a, b] = twoRates(r); // a 总量（分子）增速、b 份数（分母）增速
   const materialLine = `${y} 年，某市${metric}为 ${total} ${unit}，比上年增长 ${pct(a)}；全市共有 ${n} 个${counter}，比上年增长 ${pct(b)}。`;
+  const route = r.integer(0, 2);
+  if (route === 2) {
+    // ③ 问「多少倍」：倍数 = 增长后的平均数 ÷ 原来的平均数
+    return buildFormula(
+      r,
+      "formula-average-rate-multiple",
+      materialLine,
+      `材料中，求 ${y} 年该市平均每个${counter}的${metric}是上年的多少倍，下列算式正确的是？`,
+      `(1+${pct(a)})÷(1+${pct(b)})`,
+      [
+        `(1+${pct(b)})÷(1+${pct(a)})`,
+        `(1+${pct(a)})×(1+${pct(b)})`,
+        `(${pct(a)}−${pct(b)})÷(1+${pct(b)})`,
+      ],
+      `问「是多少倍」＝增长后的平均数÷原来的平均数＝(1+a)÷(1+b)＝(1+${pct(a)})÷(1+${pct(b)})。它和平均数增长率的区别只差一个减 1：增长率＝(a−b)÷(1+b)，倍数＝增长率＋1。错项：分子分母放反，等于把「平均数的变化」算颠倒了；两个增速因子相乘——平均数＝总量÷份数，因子之间是相除关系，不能乘；直接给 (a−b)÷(1+b) 是答成了增长率，漏加 1（这是本题最容易踩的坑）。`,
+    );
+  }
   const stem = `材料中，求 ${y} 年该市平均每个${counter}的${metric}的同比增速，下列算式正确的是？`;
-  if (r.integer(0, 1) === 0) {
+  if (route === 0) {
     return buildFormula(
       r,
       "formula-average-rate",
@@ -682,7 +731,7 @@ function genAverageRate(r: Rng): QuestionDraft {
       stem,
       `(${pct(a)}−${pct(b)})÷(1+${pct(b)})`,
       [`(${pct(a)}−${pct(b)})÷(1+${pct(a)})`, `${pct(a)}−${pct(b)}`, `(${pct(a)}+${pct(b)})÷(1+${pct(b)})`],
-      `平均数增长率＝(总量增速−份数增速)÷(1+份数增速)，分母是**份数**那一项（b=${pct(b)}），不是总量那一项。错项：分母换成总量增速（那是两期比重差的分母，两回事）；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+b)；加减号写反则连方向都不对。同一个答案的另一种写法：(1+a)÷(1+b)−1，两种都算对。`,
+      `平均数增长率＝(总量增速−份数增速)÷(1+份数增速)，分母是**份数**那一项（b=${pct(b)}），不是总量那一项。错项：分母换成总量增速（那是两期比重差的分母，两回事）；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+b)；加减号写反则连方向都不对。速算口诀：先用 a−b 定方向和量级（差 ${round1(a - b)}% 上下），b 不大时 a−b 本身就够近了（误差是它再乘 b/(1+b)≈${round1(Math.abs(b) / (1 + b / 100))}%）。同一个答案的另一种写法：(1+a)÷(1+b)−1；问「是原来的多少倍」时则是 (1+a)÷(1+b)，比增长率多 1——问法一变答案就变，别看漏。`,
     );
   }
   return buildFormula(
@@ -692,7 +741,7 @@ function genAverageRate(r: Rng): QuestionDraft {
     stem,
     `(1+${pct(a)})÷(1+${pct(b)})−1`,
     [`(1+${pct(b)})÷(1+${pct(a)})−1`, `(1+${pct(a)})×(1+${pct(b)})−1`, `${pct(a)}−${pct(b)}`],
-    `定义式：增长后的平均数÷原来的平均数−1。分子是总量的增速因子 (1+${pct(a)})，分母是份数的增速因子 (1+${pct(b)})——分母放的是**份数**，因为平均数＝总量÷份数。错项：分子分母放反、或把两个因子相乘都会算错；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+份数增速)。同一个答案的另一种写法：(a−b)÷(1+b)，两种都算对。`,
+    `定义式：增长后的平均数÷原来的平均数−1。分子是总量的增速因子 (1+${pct(a)})，分母是份数的增速因子 (1+${pct(b)})——分母放的是**份数**，因为平均数＝总量÷份数。错项：分子分母放反、或把两个因子相乘都会算错；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+份数增速)。同一个答案的另一种写法：(a−b)÷(1+b)；而问「是原来的多少倍」时就是这条式子不减 1，即 (1+${pct(a)})÷(1+${pct(b)})——**倍数＝增长率＋1**，问法不同答案差 1。`,
   );
 }
 

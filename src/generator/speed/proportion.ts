@@ -349,6 +349,8 @@ export function generateRatioChange(r: Rng): QuestionDraft {
   }
   const exact = round((d.share * diff) / (100 + d.a), 2);
   const wrongDenom = round((d.share * diff) / (100 + d.b), 2);
+  // 速算：省掉 ÷(1+a)，直接「现期比重×增速差」，估出来偏大 a/(100+a)
+  const approx = round((d.share * diff) / 100, 2);
   const dir = diff > 0 ? "上升" : "下降";
   const set = options(Math.abs(exact), [Math.abs(wrongDenom), Math.abs(diff) - Math.abs(exact), Math.abs(exact) + 0.5], " 个百分点", random, 2);
   return {
@@ -357,7 +359,7 @@ export function generateRatioChange(r: Rng): QuestionDraft {
     stem: `根据材料，${d.year} 年${metricPart}占${metricWhole}的比重比上年约${dir}多少个百分点？`,
     ...set,
     material,
-    explanation: `比重差=现期占比×(部分增速−整体增速)÷(1+部分增速)=${fmt(d.share)}%×(${fmt(diff)}%)÷(1+${fmt(d.a)}%)=${fmt(Math.abs(exact), 2)} 个百分点，方向${dir}。干扰项 ${fmt(Math.abs(wrongDenom), 2)} 把分母错用成整体增速口径。`,
+    explanation: `比重差=现期占比×(部分增速−整体增速)÷(1+部分增速)=${fmt(d.share)}%×(${fmt(diff)}%)÷(1+${fmt(d.a)}%)=${fmt(Math.abs(exact), 2)} 个百分点，方向${dir}。速算：省掉 ÷(1+a) 直接 ${fmt(d.share)}%×${fmt(diff)}%=${fmt(Math.abs(approx), 2)} 个百分点，估出来偏大 a/(100+a)≈${round((d.a / (100 + d.a)) * 100, 1)}%，选项差 1 个百分点以上时够用；方向也顺带判掉（a${diff > 0 ? "＞" : "＜"}b → 比重${dir}）。干扰项 ${fmt(Math.abs(wrongDenom), 2)} 把分母错用成整体增速口径。`,
   };
 }
 

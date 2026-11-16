@@ -20,7 +20,13 @@ import type { QuestionDraft } from "../src/generator/types";
 const P = String.raw`\d+(?:\.\d+)?`;
 const shape = (body: string) => new RegExp(`^${body}$`);
 
-type RouteSpec = { template: string; pattern: RegExp; stemIncludes?: RegExp };
+type RouteSpec = {
+  template: string;
+  pattern: RegExp;
+  stemIncludes?: RegExp;
+  /** 覆盖 topic 级的 crossForbidden：问法不同（如「多少倍」vs「增长率」）时互为干扰项才是考点 */
+  crossForbidden?: boolean;
+};
 type TopicSpec = {
   topic: TopicId;
   label: string;
@@ -144,7 +150,7 @@ const TOPICS: TopicSpec[] = [
   },
   {
     topic: "formula-average-rate",
-    label: "平均数增长率",
+    label: "平均数增长率（增长率两种写法 / 问「多少倍」）",
     crossForbidden: true,
     routes: [
       {
@@ -154,6 +160,29 @@ const TOPICS: TopicSpec[] = [
       {
         template: "formula-average-rate-ratio",
         pattern: shape(`\\(1\\+${P}%\\)÷\\(1\\+${P}%\\)−1`),
+      },
+      {
+        // 问「是原来的多少倍」：倍数＝增长率＋1。增长率本身在这里是**合法干扰项**，放行
+        template: "formula-average-rate-multiple",
+        pattern: shape(`\\(1\\+${P}%\\)÷\\(1\\+${P}%\\)`),
+        stemIncludes: /的多少倍/,
+        crossForbidden: false,
+      },
+    ],
+  },
+  {
+    topic: "formula-base-amount",
+    label: "基期量（给增速 / 给增长量两条入口）",
+    // 两条入口对应两种材料，不是同一题的等价写法，各自成题
+    crossForbidden: false,
+    routes: [
+      {
+        template: "formula-base-amount",
+        pattern: shape(`${P}÷\\(1[+−]${P}%\\)`),
+      },
+      {
+        template: "formula-base-amount-diff",
+        pattern: shape(`${P}[+−]${P}`),
       },
     ],
   },
@@ -217,7 +246,7 @@ describe("列式关：一个考点的多条写法都要练到", () => {
           expect(question.stem, `${question.templateId} 的题干与路线问法不符`).toMatch(route!.stemIncludes);
         }
 
-        if (spec.crossForbidden) {
+        if (route!.crossForbidden ?? spec.crossForbidden) {
           for (const other of spec.routes) {
             if (other.template === question.templateId) continue;
             const leaked = question.options.filter(
@@ -239,7 +268,8 @@ describe("列式关：一个考点的多条写法都要练到", () => {
       for (const question of samples(spec.topic, 60)) {
         expect(question.explanation.length, `解析过短：${question.explanation}`).toBeGreaterThan(50);
         expect(question.explanation, `解析没有点名错项：${question.explanation}`).toMatch(/错法|错项/);
-        if (spec.crossForbidden) {
+        const route = spec.routes.find((item) => item.template === question.templateId);
+        if (route?.crossForbidden ?? spec.crossForbidden) {
           expect(
             question.explanation,
             `解析没交代等价写法：${question.explanation}`,
@@ -289,6 +319,20 @@ describe("基期比重的速算公式（拆 1 法）", () => {
       const viaFast = (part / whole) * (1 + diff / 100 / (1 + a / 100));
       const viaDefinition = part / (1 + a / 100) / (whole / (1 + b / 100));
       expect(viaFast, `拆 1 法算不回定义式：${answer} @ ${text}`).toBeCloseTo(viaDefinition, 6);
+    }
+  });
+});
+
+describe("两期比重差：解析讲清「判方向 → |a−b| 卡上限 → 估算」三步", () => {
+  /**
+   * 这一关只有两条恒等写法（现期比重×(a−b)÷(1+a)、现期比重−基期比重），
+   * 没有第三条式子；真正的「速算」是三步口诀，所以解析里必须点到——
+   * 只给一个式子，等于把「有上限、可以先估」这个考场主力丢了。
+   */
+  it("两条路线的解析都点到卡上限与估算", () => {
+    for (const question of samples("formula-ratio-change", 80)) {
+      expect(question.explanation, `缺「卡上限」：${question.explanation}`).toContain("卡上限");
+      expect(question.explanation, `缺「估算」：${question.explanation}`).toContain("估");
     }
   });
 });
