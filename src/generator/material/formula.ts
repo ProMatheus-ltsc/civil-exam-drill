@@ -163,7 +163,12 @@ function buildFormula(
 
 /* ────────────────────────── 18 个概念 ────────────────────────── */
 
-/** ① 增长率：由基期与现期求增速 */
+/**
+ * ① 增长率：由基期与现期求增速（**两种写法**）
+ *   ① 增长率＝增长量÷基期量＝(现期−基期)÷基期
+ *   ② 增长率＝现期÷基期−1（先算倍数再减 1）
+ * 两式恒等，真题解析里两种都在用，只练一种等于只认一张脸。
+ */
 function genGrowthRate(r: Rng): QuestionDraft {
   const region = r.pick(REGIONS);
   const [metric, unit] = r.pick(METRICS);
@@ -171,18 +176,33 @@ function genGrowthRate(r: Rng): QuestionDraft {
   const base = baseAmount(r);
   const rate = rateOf(r);
   const current = currentOf(base, rate);
+  const materialLine = `${region} ${y} 年${metric}为 ${base} ${unit}，${y + 1} 年为 ${current} ${unit}。`;
+  const stem = `材料中，求 ${y + 1} 年该地区${metric}的同比增速，下列算式正确的是？`;
+  const declineNote =
+    rate < 0 ? `本题现期低于基期，结果是**负数**（${rate}%）；若题干问“降幅”，答绝对值。` : "";
+  if (r.integer(0, 1) === 0) {
+    return buildFormula(
+      r,
+      "formula-growth-rate",
+      materialLine,
+      stem,
+      `(${current}−${base})÷${base}`,
+      [`(${current}−${base})÷${current}`, `${current}÷${base}`, `(${base}−${current})÷${base}`],
+      `增长率＝增长量÷基期量＝(${current}−${base})÷${base}，分母永远是**基期**（${base}）。错项：用现期作分母会把结果压向 0；只写"现期÷基期"得到的是倍数、还差一个减 1；把基期减现期则方向反了。同一个答案的另一种写法：现期÷基期−1＝${current}÷${base}−1，两种都算对。${declineNote}`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-growth-rate",
-    `${region} ${y} 年${metric}为 ${base} ${unit}，${y + 1} 年为 ${current} ${unit}。`,
-    `材料中，求 ${y + 1} 年该地区${metric}的同比增速，下列算式正确的是？`,
-    `(${current}−${base})÷${base}`,
-    [`(${current}−${base})÷${current}`, `${current}÷${base}`, `(${base}−${current})÷${base}`],
-    `增长率＝(现期−基期)÷基期，分母永远是**基期**（${base}）。用现期作分母会把结果压向 0；写成"现期÷基期"只是倍数，还差一个减 1。${rate < 0 ? `本题是**下降**，结果应为负数（${rate}%）；若题干问"降幅"，答绝对值。` : ""}`,
+    "formula-growth-rate-multiple",
+    materialLine,
+    stem,
+    `${current}÷${base}−1`,
+    [`${current}÷${base}`, `(${current}−${base})÷${current}`, `${base}÷${current}−1`],
+    `先算倍数再减 1：增长率＝现期÷基期−1＝${current}÷${base}−1。错项：只写 ${current}÷${base} 得到的是**倍数**（没减 1，不是增速）；分母用成现期会把结果压小；把基期当分子相除，方向整个反了。同一个答案的另一种写法：(现期−基期)÷基期，两种都算对。${declineNote}`,
   );
 }
 
-/** ② 增长量 */
+/** ② 增长量（**两种写法**） */
 function genGrowthAmount(r: Rng): QuestionDraft {
   const region = r.pick(REGIONS);
   const [metric, unit] = r.pick(METRICS);
@@ -190,18 +210,30 @@ function genGrowthAmount(r: Rng): QuestionDraft {
   const base = baseAmount(r);
   const rate = rateOf(r);
   const current = currentOf(base, rate);
+  const materialLine = `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${trend(rate)} ${pctAbs(rate)}。`;
+  const stem = `材料中，求 ${y} 年该地区${metric}的同比${rate >= 0 ? "增量" : "减少量"}，下列算式正确的是？`;
+  const label = rate >= 0 ? "增长率" : "降幅";
+  const baseForm = `${current}÷${factor(rate)}`;
+  const declineNote = rate < 0 ? "注意：下降时分母是 (1−降幅)，不是 (1+降幅)。" : "";
+  if (r.integer(0, 1) === 0) {
+    return buildFormula(
+      r,
+      "formula-growth-amount",
+      materialLine,
+      stem,
+      `${current}×${pctAbs(rate)}÷${factor(rate)}`,
+      [`${current}×${pctAbs(rate)}`, baseForm, `${current}×${pctAbs(rate)}×${factor(rate)}`],
+      `${rate >= 0 ? "增长量" : "减少量"}＝现期×${label}÷${factor(rate)}。错项：**绝不能用「现期×${label}」**——那个比率是相对基期算的，拿现期直接乘会把基数放大一档；只写 ${baseForm} 得到的是基期量；再乘一次 (1±r) 则重复修正了两次。同一个答案的另一种写法：现期−基期＝${current}−${baseForm}，两种都算对。${declineNote}`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-growth-amount",
-    `${region} ${y} 年${metric}为 ${current} ${unit}，比上年${trend(rate)} ${pctAbs(rate)}。`,
-    `材料中，求 ${y} 年该地区${metric}的同比${rate >= 0 ? "增量" : "减少量"}，下列算式正确的是？`,
-    `${current}×${pctAbs(rate)}÷${factor(rate)}`,
-    [
-      `${current}×${pctAbs(rate)}`,
-      `${current}÷${factor(rate)}`,
-      `${current}×${pctAbs(rate)}×${factor(rate)}`,
-    ],
-    `${rate >= 0 ? "增长量" : "减少量"}＝现期×${rate >= 0 ? "增长率" : "降幅"}÷${factor(rate)}。**绝不能用「现期×${rate >= 0 ? "增长率" : "降幅"}」**——那个比率是相对基期算的，拿现期直接乘会把基数放大一档。${rate < 0 ? "注意：下降时分母是 (1−降幅)，不是 (1+降幅)。" : ""}`,
+    "formula-growth-amount-diff",
+    materialLine,
+    stem,
+    `${current}−${baseForm}`,
+    [`${current}+${baseForm}`, baseForm, `${current}×${pctAbs(rate)}`],
+    `${rate >= 0 ? "增长量" : "减少量"}＝现期−基期，基期＝现期÷${factor(rate)}，所以＝${current}−${baseForm}。错项：写成加法是把方向搞反了（那不是现期＋基期）；只写 ${baseForm} 得到的是基期量本身；现期×${pctAbs(rate)} 是经典错法——它把"相对基期的比率"乘到了现期上。同一个答案的另一种写法：现期×${label}÷${factor(rate)}，两种都算对。${declineNote}`,
   );
 }
 
@@ -228,7 +260,12 @@ function genBaseAmount(r: Rng): QuestionDraft {
   );
 }
 
-/** ④ 倍数与翻番 */
+/**
+ * ④ 倍数与翻番（**两种问法都考**）
+ *   "是几倍"＝现期÷基期、"多几倍（增长了几倍）"＝现期÷基期−1。
+ * 以前只问"是几倍"，"多几倍"永远只当干扰项出现——可它同样是标准问法，
+ * 差的就是那一个 −1，考生练不到就会在真考里多算一倍。
+ */
 function genMultiples(r: Rng): QuestionDraft {
   const region = r.pick(REGIONS);
   const [metric, unit] = r.pick(METRICS);
@@ -236,14 +273,27 @@ function genMultiples(r: Rng): QuestionDraft {
   const base = baseAmount(r);
   const rate = rateOf(r);
   const current = currentOf(base, rate);
+  const materialLine = `${region} ${y} 年${metric}为 ${current} ${unit}，${y - 1} 年为 ${base} ${unit}。`;
+  // 「增长了几倍」只在正增长时成立（下降时说"增长了几倍"是病句）
+  if (rate > 0 && r.integer(0, 1) === 1) {
+    return buildFormula(
+      r,
+      "formula-multiples-more",
+      materialLine,
+      `材料中，求 ${y} 年该地区${metric}比 ${y - 1} 年多了多少倍，下列算式正确的是？`,
+      `${current}÷${base}−1`,
+      [`${current}÷${base}`, `(${current}−${base})÷${current}`, `${current}÷${base}+1`],
+      `"多几倍"＝增长了几倍＝增长量÷基期量＝现期÷基期−1＝${current}÷${base}−1。错项：只写 ${current}÷${base} 是"是几倍"（含本身，多算了 1 倍）；再加 1 就更远了；分母用成现期会把结果压小。同一个答案的另一种写法：(现期−基期)÷基期，两种都算对。`,
+    );
+  }
   return buildFormula(
     r,
     "formula-multiples",
-    `${region} ${y} 年${metric}为 ${current} ${unit}，${y - 1} 年为 ${base} ${unit}。`,
+    materialLine,
     `材料中，求 ${y} 年该地区${metric}是 ${y - 1} 年的多少倍，下列算式正确的是？`,
     `${current}÷${base}`,
     [`${base}÷${current}`, `(${current}−${base})÷${base}`, `(${current}−${base})÷${current}`],
-    `"是几倍"＝现期÷基期，直接相除即可。注意区分：问"增长了几倍"才是 (现期−基期)÷基期——那个选项是经典干扰项。${rate < 0 ? "本题现期低于基期，倍数小于 1，属正常（问的是倍数不是增速）。" : ""}`,
+    `"是几倍"＝现期÷基期，直接相除即可。错项：基期÷现期把分子分母颠倒；用现期作分母会把结果压小；另外"多几倍/增长了几倍"是另一个问法（要再减 1），别混进来。${rate < 0 ? "本题现期低于基期，倍数小于 1，属正常（问的是倍数不是增速）。" : ""}`,
   );
 }
 
@@ -359,21 +409,37 @@ function genAnnualRate(r: Rng): QuestionDraft {
   );
 }
 
-/** ⑩ 比重与整体量 */
+/**
+ * ⑩ 比重与整体量（**三量互求里的两问都考**）
+ *   求比重＝部分÷整体；求整体＝部分÷比重。
+ * 以前只考求比重，"求整体"这一问在三量互求里从未作为答案出现过，
+ * 而它是最容易把除法方向搞反的一问。
+ */
 function genRatioBasic(r: Rng): QuestionDraft {
   const y = yearOf(r);
   const [part, whole, unit] = r.pick(PART_WHOLE);
   const w = baseAmount(r) * 3;
   const p = r.integer(8, 88);
   const a = Math.round((w * p) / 100);
+  if (r.integer(0, 1) === 0) {
+    return buildFormula(
+      r,
+      "formula-ratio-basic",
+      `${y} 年，某市${whole}为 ${w} ${unit}，其中${part}为 ${a} ${unit}。`,
+      `材料中，求 ${y} 年该市${part}占${whole}的比重，下列算式正确的是？`,
+      `${a}÷${w}`,
+      [`${w}÷${a}`, `${a}÷${w - a}`, `(${w}−${a})÷${w}`],
+      `比重＝部分量÷整体量（${a}÷${w}）。分子是"其中的那一项"，分母是"能包含它的总口径"。错项：颠倒分子分母（${w}÷${a}）是最常见的错；除以"其余部分"、或算其余部分的占比，都是把对象换掉了。`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-ratio-basic",
-    `${y} 年，某市${whole}为 ${w} ${unit}，其中${part}为 ${a} ${unit}。`,
-    `材料中，求 ${y} 年该市${part}占${whole}的比重，下列算式正确的是？`,
-    `${a}÷${w}`,
-    [`${w}÷${a}`, `${a}÷${w - a}`, `(${w}−${a})÷${w}`],
-    `比重＝部分量÷整体量（${a}÷${w}）。分子是"其中的那一项"，分母是"能包含它的总口径"——颠倒过来是最常见的错。`,
+    "formula-ratio-basic-whole",
+    `${y} 年，某市${part}为 ${a} ${unit}，占${whole}的 ${pct(p)}。`,
+    `材料中，求 ${y} 年该市${whole}，下列算式正确的是？`,
+    `${a}÷${pct(p)}`,
+    [`${a}×${pct(p)}`, `${a}÷(1−${pct(p)})`, `${pct(p)}÷${a}`],
+    `求整体用除法：整体＝部分÷比重＝${a}÷${pct(p)}。错项：写成乘法是把"已知整体求部分"的式子拿反了；除以 (1−占比) 算的是"其余部分"对应的整体，跟本题要的整体不是一回事；把比重除以部分，方向整个颠倒。`,
   );
 }
 
@@ -394,21 +460,51 @@ function genPartQuantity(r: Rng): QuestionDraft {
   );
 }
 
-/** ⑫ 平均数基础 */
+/**
+ * ⑫ 平均数基础（**三量互求的三问都考**）
+ *   求平均数＝总量÷份数；求总量＝平均数×份数；求份数＝总量÷平均数。
+ * 以前只考求平均数，另两问从未作为答案出现过——而"谁是总量、谁是份数"
+ * 恰恰是这一节的考点，只考一问等于只练半个基本功。
+ */
 function genAverageBasic(r: Rng): QuestionDraft {
   const [metric, unit] = r.pick(TOTALS);
   const y = yearOf(r);
   const [counter, , lo, hi] = r.pick(COUNTERS);
   const n = r.integer(lo, hi);
-  const total = r.integer(200, 9800) * 10;
+  // 先定份数与平均值、再回算总量：保证三量自洽，材料里怎么读都对得上
+  const avg = Math.max(5, Math.round((r.integer(200, 9800) * 10) / n));
+  const total = avg * n;
+  const way = r.integer(0, 2);
+  if (way === 0) {
+    return buildFormula(
+      r,
+      "formula-average-basic",
+      `${y} 年，某市完成${metric} ${total} ${unit}，全市共有 ${n} 个${counter}。`,
+      `材料中，求 ${y} 年该市平均每个${counter}完成的${metric}，下列算式正确的是？`,
+      `${total}÷${n}`,
+      [`${n}÷${total}`, `${total}×${n}`, `${total}÷(${n}−1)`],
+      `平均数＝总量÷份数＝${total}÷${n}。错项：颠倒成分数÷总量是把对象换了；乘起来不是平均数；分母减 1 是把"间隔年数"的习惯误搬过来。判断"这是平均数还是比重"，看分母是不是"份数"（${counter}）——带个数单位就是平均数。`,
+    );
+  }
+  if (way === 1) {
+    return buildFormula(
+      r,
+      "formula-average-basic-total",
+      `${y} 年，某市平均每个${counter}完成${metric} ${avg} ${unit}，全市共有 ${n} 个${counter}。`,
+      `材料中，求 ${y} 年该市${metric}的总量，下列算式正确的是？`,
+      `${avg}×${n}`,
+      [`${avg}÷${n}`, `${n}÷${avg}`, `${avg}+${n}`],
+      `总量＝平均数×份数＝${avg}×${n}。错项：除以份数是"反过来求每个分到多少"；用份数除以平均数则方向整个颠倒；平均数和份数相加没有任何口径含义。三量互求只用一条总公式回推：平均数＝总量÷份数，已知哪两个就求第三个。`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-average-basic",
-    `${y} 年，某市完成${metric} ${total} ${unit}，全市共有 ${n} 个${counter}。`,
-    `材料中，求 ${y} 年该市平均每个${counter}完成的${metric}，下列算式正确的是？`,
-    `${total}÷${n}`,
-    [`${n}÷${total}`, `${total}×${n}`, `${total}÷(${n}−1)`],
-    `平均数＝总量÷份数＝${total}÷${n}。判断"这是平均数还是比重"，看分母是不是"份数"（${counter}）——带单位个数就是平均数。`,
+    "formula-average-basic-count",
+    `${y} 年，某市完成${metric} ${total} ${unit}，平均每个${counter}完成 ${avg} ${unit}。`,
+    `材料中，求 ${y} 年该市${counter}的个数，下列算式正确的是？`,
+    `${total}÷${avg}`,
+    [`${avg}÷${total}`, `${total}×${avg}`, `${total}−${avg}`],
+    `份数＝总量÷平均数＝${total}÷${avg}。错项：颠倒分子分母是最常见的错（那算出来是"每个单位量的倒数"，不是个数）；相乘、相减都不成口径。三量互求先认出谁是总量、谁是份数，再用"平均数＝总量÷份数"回推。`,
   );
 }
 
@@ -488,51 +584,100 @@ function genBaseRatio(r: Rng): QuestionDraft {
   );
 }
 
-/** ⑭ 两期比重差 */
+/**
+ * ⑭ 两期比重差（**两种写法**）
+ *   ① 现期比重×(a−b)÷(1+a)  —— 考场主力，一步算完
+ *   ② 现期比重 − 基期比重    —— 定义式，最不容易记错
+ * 两式恒等（把①里的乘积减掉就是②），但列式时的起手完全不同。
+ */
 function genRatioChange(r: Rng): QuestionDraft {
   const y = yearOf(r);
   const [part, whole, unit] = r.pick(PART_WHOLE);
-  const [r1, r2] = twoRates(r);
+  const [a, b] = twoRates(r); // a 部分增速、b 整体增速
   const wb = baseAmount(r) * 3;
-  const wc = currentOf(wb, r2);
+  const wc = currentOf(wb, b);
   const p = r.integer(10, 80);
   const ab = Math.round((wb * p) / 100);
-  const ac = currentOf(ab, r1);
+  const ac = currentOf(ab, a);
+  const materialLine = `${y} 年，某市${part}为 ${ac} ${unit}，比上年增长 ${pct(a)}；${whole}为 ${wc} ${unit}，比上年增长 ${pct(b)}。`;
+  const stem = `材料中，求 ${y} 年该市${part}占${whole}的比重与上年相比的变化，下列算式正确的是？`;
+  const share = `${ac}÷${wc}`;
+  if (r.integer(0, 1) === 0) {
+    return buildFormula(
+      r,
+      "formula-ratio-change",
+      materialLine,
+      stem,
+      `(${share})×(${pct(a)}−${pct(b)})÷(1+${pct(a)})`,
+      [
+        `(${share})×(${pct(a)}−${pct(b)})`,
+        `${pct(a)}−${pct(b)}`,
+        `(${share})×(${pct(b)}−${pct(a)})÷(1+${pct(a)})`,
+      ],
+      `两期比重差＝现期比重×(部分增速−整体增速)÷(1+部分增速)。它问的是"几个**百分点**"；漏掉 ÷(1+${pct(a)}) 是常见近似错法，直接答"${pct(a)}−${pct(b)}"则混淆了百分点与百分数，减反了则方向错。同一个答案的另一种写法：现期比重−基期比重，两种都算对。`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-ratio-change",
-    `${y} 年，某市${part}为 ${ac} ${unit}，比上年增长 ${pct(r1)}；${whole}为 ${wc} ${unit}，比上年增长 ${pct(r2)}。`,
-    `材料中，求 ${y} 年该市${part}占${whole}的比重与上年相比的变化，下列算式正确的是？`,
-    `(${ac}÷${wc})×(${pct(r1)}−${pct(r2)})÷(1+${pct(r1)})`,
+    "formula-ratio-change-sub",
+    materialLine,
+    stem,
+    `(${share})−(${share})×(1+${pct(b)})÷(1+${pct(a)})`,
     [
-      `(${ac}÷${wc})×(${pct(r1)}−${pct(r2)})`,
-      `${pct(r1)}−${pct(r2)}`,
-      `(${ac}÷${wc})×(${pct(r2)}−${pct(r1)})÷(1+${pct(r1)})`,
+      `(${share})−(${share})×(1+${pct(a)})÷(1+${pct(b)})`,
+      `${pct(a)}−${pct(b)}`,
+      `(${share})×(1+${pct(b)})÷(1+${pct(a)})`,
     ],
-    `两期比重差＝现期比重×(部分增速−整体增速)÷(1+部分增速)。它问的是"几个**百分点**"；漏掉 ÷(1+r₁) 是常见近似错法，直接答"${pct(r1)}−${pct(r2)}"则混淆了百分点与百分数。`,
+    `两期比重差＝现期比重−基期比重，而基期比重＝${share}×(1+${pct(b)})÷(1+${pct(a)})，相减即可。错项：把增速因子写反的那一项（(1+${pct(a)})÷(1+${pct(b)})）算错的是基期比重；只算出基期比重、忘了减现期比重的那一项，答案就停在基期上；直接答"${pct(a)}−${pct(b)}"则混了百分点与百分数。同一个答案的另一种写法：现期比重×(a−b)÷(1+a)，两种都算对。`,
   );
 }
 
-/** ⑮ 平均数增长率 */
+/**
+ * ⑮ 平均数增长率（**两种写法**）
+ *   ① (a−b)÷(1+b)          —— 口诀式：增速差除以（1+份数增速）
+ *   ② (1+a)÷(1+b)−1        —— 定义式：现期平均数÷基期平均数−1
+ * 两式恒等（①就是②通分的结果），考场上先写①，记不牢时用②推。
+ */
 function genAverageRate(r: Rng): QuestionDraft {
   const [metric, unit] = r.pick(TOTALS);
   const y = yearOf(r);
   const [counter, , lo, hi] = r.pick(COUNTERS);
   const n = r.integer(lo, hi);
   const total = r.integer(200, 9800) * 10;
-  const [a, b] = twoRates(r);
+  const [a, b] = twoRates(r); // a 总量（分子）增速、b 份数（分母）增速
+  const materialLine = `${y} 年，某市${metric}为 ${total} ${unit}，比上年增长 ${pct(a)}；全市共有 ${n} 个${counter}，比上年增长 ${pct(b)}。`;
+  const stem = `材料中，求 ${y} 年该市平均每个${counter}的${metric}的同比增速，下列算式正确的是？`;
+  if (r.integer(0, 1) === 0) {
+    return buildFormula(
+      r,
+      "formula-average-rate",
+      materialLine,
+      stem,
+      `(${pct(a)}−${pct(b)})÷(1+${pct(b)})`,
+      [`(${pct(a)}−${pct(b)})÷(1+${pct(a)})`, `${pct(a)}−${pct(b)}`, `(${pct(a)}+${pct(b)})÷(1+${pct(b)})`],
+      `平均数增长率＝(总量增速−份数增速)÷(1+份数增速)，分母是**份数**那一项（b=${pct(b)}），不是总量那一项。错项：分母换成总量增速（那是两期比重差的分母，两回事）；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+b)；加减号写反则连方向都不对。同一个答案的另一种写法：(1+a)÷(1+b)−1，两种都算对。`,
+    );
+  }
   return buildFormula(
     r,
-    "formula-average-rate",
-    `${y} 年，某市${metric}为 ${total} ${unit}，比上年增长 ${pct(a)}；全市共有 ${n} 个${counter}，比上年增长 ${pct(b)}。`,
-    `材料中，求 ${y} 年该市平均每个${counter}的${metric}的同比增速，下列算式正确的是？`,
-    `(${pct(a)}−${pct(b)})÷(1+${pct(b)})`,
-    [`(${pct(a)}−${pct(b)})÷(1+${pct(a)})`, `${pct(a)}−${pct(b)}`, `(${pct(a)}+${pct(b)})÷(1+${pct(b)})`],
-    `平均数增长率＝(总量增速−份数增速)÷(1+份数增速)，分母是**份数**那一项（b=${pct(b)}）。它问的是"百分之几"，不是百分点。`,
+    "formula-average-rate-ratio",
+    materialLine,
+    stem,
+    `(1+${pct(a)})÷(1+${pct(b)})−1`,
+    [`(1+${pct(b)})÷(1+${pct(a)})−1`, `(1+${pct(a)})×(1+${pct(b)})−1`, `${pct(a)}−${pct(b)}`],
+    `定义式：增长后的平均数÷原来的平均数−1。分子是总量的增速因子 (1+${pct(a)})，分母是份数的增速因子 (1+${pct(b)})——分母放的是**份数**，因为平均数＝总量÷份数。错项：分子分母放反、或把两个因子相乘都会算错；直接相减 ${pct(a)}−${pct(b)} 漏掉了 ÷(1+份数增速)。同一个答案的另一种写法：(a−b)÷(1+b)，两种都算对。`,
   );
 }
 
-/** ⑯ 差值增长率 */
+/**
+ * ⑯ 差值增长率
+ *
+ * ⚠️ 这里修过一处错：原来标答是 `(现期×R − 现期×r)÷(现期差)`，那是小增速下的**近似**——
+ * 分子把「增量」写成了「现期×增速」（真增量是现期÷(1+r)×r），分母把「基期差」写成了「现期差」。
+ * 两个近似叠起来，r 稍大就会差出好几个百分点，而这一关问的恰恰是「该怎么列式」，不能教近似。
+ * 现在标答是标准的两步法：先分别还原两期差值，再 (本期差值−基期差值)÷基期差值；
+ * 那个近似式降级成错项，解析里点明它为什么只在小增速时才敢用。
+ */
 function genDiffRate(r: Rng): QuestionDraft {
   const y = yearOf(r);
   const [part, whole, unit] = r.pick(PART_WHOLE);
@@ -543,14 +688,21 @@ function genDiffRate(r: Rng): QuestionDraft {
   const ab = Math.round((wb * p) / 100);
   const rr = ratePositive(r);
   const ac = currentOf(ab, rr);
+  const baseWhole = `${wc}÷(1+${pct(R)})`;
+  const basePart = `${ac}÷(1+${pct(rr)})`;
+  const baseDiff = `${baseWhole}−${basePart}`;
   return buildFormula(
     r,
     "formula-diff-rate",
     `${y} 年，某市${whole}为 ${wc} ${unit}，比上年增长 ${pct(R)}；其中${part}为 ${ac} ${unit}，比上年增长 ${pct(rr)}。`,
     `材料中，求 ${y} 年该市"${whole}减去${part}"这一部分的同比增速，下列算式正确的是？`,
-    `(${wc}×${pct(R)}−${ac}×${pct(rr)})÷(${wc}−${ac})`,
-    [`${pct(R)}−${pct(rr)}`, `(${pct(R)}+${pct(rr)})÷2`, `(${wc}×${pct(R)}+${ac}×${pct(rr)})÷(${wc}−${ac})`],
-    `差值（整体−部分）的增速＝(整体增量−部分增量)÷整体的基期量近似值。**不能直接用两个增速相减**（${pct(R)}−${pct(rr)}）——那是两个不同分母的比率，不能这样比。`,
+    `((${wc}−${ac})−(${baseDiff}))÷(${baseDiff})`,
+    [
+      `${pct(R)}−${pct(rr)}`,
+      `(${wc}×${pct(R)}−${ac}×${pct(rr)})÷(${wc}−${ac})`,
+      `(${wc}×${pct(R)}−${ac}×${pct(rr)})÷(${baseDiff})`,
+    ],
+    `差值（整体−部分）的增速要走两步：先各自还原基期，整体基期 ${wc}÷(1+${pct(R)})、部分基期 ${ac}÷(1+${pct(rr)})，基期差值＝${baseDiff}；再用 (本期差值−基期差值)÷基期差值。错法一：直接相减 "${pct(R)}−${pct(rr)}"——两个比率的分母不同，不能这样比；错法二：把"现期×增速"当增量、把"现期差"当基期差（那是增速很小时的近似，本题增速不算小，会差出好几个点）；错法三：分子用现期×增速、分母却用基期差，两头口径不一致。`,
   );
 }
 
