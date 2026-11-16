@@ -265,7 +265,7 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
       stem: `根据材料，${d.year - 1} 年${metricPart}占${metricWhole}的比重约为多少？`,
       ...set,
       material,
-      explanation: `定义式（分子分母各自还原到基期）：基期${metricPart}=${fmt(d.part)}÷(1+${fmt(d.a)}%)≈${fmt(d.basePart)}，基期${metricWhole}=${fmt(d.whole)}÷(1+${fmt(d.b)}%)≈${fmt(d.baseWhole)}，两者相除=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。连乘式更快：现期比重×(1+b)/(1+a)，也就是现期比重−两期比重差，先判方向、用 |a−b| 卡上限就能定区间；选项挤到小数点后才需要回到定义式逐个还原。注意材料里的 ${fmt(d.share)}% 是四舍五入过的，直接拿它乘增速比会有零点几的偏差，答案以还原后的 ${answer}% 为准。干扰项：${explainDistractors(set, [
+      explanation: `定义式（分子分母各自还原到基期）：基期${metricPart}=${fmt(d.part)}÷(1+${fmt(d.a)}%)≈${fmt(d.basePart)}，基期${metricWhole}=${fmt(d.whole)}÷(1+${fmt(d.b)}%)≈${fmt(d.baseWhole)}，两者相除=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。连乘式更快：现期比重×(1+b)/(1+a)，也就是现期比重−两期比重差，先判方向、用 |a−b| 卡上限就能定区间；只想估个数时还能再省一步——把因子近似成 1+(b−a)，直接算现期比重×(1${diff >= 0 ? "+" : "−"}${fmt(span)}%)，误差约 现期比重×a(b−a)/(1+a)（增速越小越准），选项差距大时可一步到位；选项挤到小数点后才需要回到定义式逐个还原。注意材料里的 ${fmt(d.share)}% 是四舍五入过的，直接拿它乘增速比会有零点几的偏差，答案以还原后的 ${answer}% 为准。干扰项：${explainDistractors(set, [
         [d.share, "现期占比，漏掉了增速差"],
         [reverse, "把 (1+b)/(1+a) 写成了反比"],
         [over, "方向对但幅度拍大了，超过 |a−b|"],
@@ -276,6 +276,8 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
   if (variant === 1) {
     // 变形公式路线：不真算 (1+b)/(1+a)，用「方向 + 幅度上限」锁区间
     const answer = d.baseShare;
+    // 速算公式的因子：把 (1+b)/(1+a) 近似成 1+(b−a)，口算一步到位
+    const factorFast = `(1${diff >= 0 ? "+" : "−"}${fmt(span)}%)`;
     const over = round(span + Math.max(0.8, span * 0.4), 2);
     const beyond = round(d.share + (baseLarger ? over : -over), 2);
     const reversed = round(d.share + (baseLarger ? -over : over), 2);
@@ -287,7 +289,7 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
       stem: `根据材料，${d.year - 1} 年${metricPart}占${metricWhole}的比重约为多少？`,
       ...set,
       material,
-      explanation: `先判方向：部分增速 ${fmt(d.a)}% ${baseLarger ? "慢于" : "快于"}整体增速 ${fmt(d.b)}%，所以基期比重比现期比重 ${fmt(d.share)}% ${baseLarger ? "大" : "小"}。再卡幅度：两期比重差=现期比重×(a−b)/(1+a)，绝对值必小于 |a−b|=${fmt(span)} 个百分点，基期比重只能落在 ${baseLarger ? `${fmt(d.share)}%~${fmt(round(d.share + span, 2))}%` : `${fmt(round(d.share - span, 2))}%~${fmt(d.share)}%`} 的开区间内，答案是 ${answer}%。干扰项：${explainDistractors(set, [
+      explanation: `先判方向：部分增速 ${fmt(d.a)}% ${baseLarger ? "慢于" : "快于"}整体增速 ${fmt(d.b)}%，所以基期比重比现期比重 ${fmt(d.share)}% ${baseLarger ? "大" : "小"}。再卡幅度：两期比重差=现期比重×(a−b)/(1+a)，绝对值必小于 |a−b|=${fmt(span)} 个百分点，基期比重只能落在 ${baseLarger ? `${fmt(d.share)}%~${fmt(round(d.share + span, 2))}%` : `${fmt(round(d.share - span, 2))}%~${fmt(d.share)}%`} 的开区间内，答案是 ${answer}%。要出具体数值就用速算公式：把因子近似成 1+(b−a)，现期比重×${factorFast}＝${fmt(d.share)}×${factorFast}≈${answer}%，误差约 现期比重×a(b−a)/(1+a)（增速越小越准），选项差距大时一步到位。干扰项：${explainDistractors(set, [
         [d.share, "现期比重，没折回基期"],
         [reversed, "方向判反了"],
         [beyond, "方向对但幅度越过 |a−b| 的上限"],

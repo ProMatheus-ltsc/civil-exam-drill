@@ -509,21 +509,26 @@ function genAverageBasic(r: Rng): QuestionDraft {
 }
 
 /**
- * ⑬ 基期比重（**三种写法都要考**）
+ * ⑬ 基期比重（**四种写法都要考**）
  *
- * 同一个量有三种列法，真题里三种都出现过，而这一关以前只出第一种：
+ * 同一个量有四种列法，真题里四种都出现过，而这一关以前只出第一种：
  *   ① 定义式：分子分母各自还原到基期 —— (A÷(1+a))÷(B÷(1+b))
  *   ② 原始公式（连乘）：先算现期比重再乘增速因子 —— (A÷B)×(1+b)÷(1+a)
  *   ③ 变形公式（差值）：现期比重 − 两期比重差 —— (A÷B)−(A÷B)×(a−b)÷(1+a)
- * 三式恒等，区别只在「要不要精确值、愿不愿意算两次除法」。
+ *   ④ 速算公式（拆 1 法）：因子拆成「1 + 小量」—— (A÷B)×(1+(b−a)÷(1+a))
+ * 四式恒等，区别只在「要不要精确值、愿不愿意算两次除法、修正量好不好口算」。
  *
  * ⚠️ 同一题的选项里**绝不能**出现另一条等价写法：它同样正确，会被当成错项，
  * 等于把「认出公式」练成「猜出题人想要哪一种」。干扰项只取真错法。
+ * ④ 尤其要注意：拆 1 法的干扰项只能是「符号写反 / 修正量除以 1+b」，不能是连乘式/差值式。
  */
 function genBaseRatio(r: Rng): QuestionDraft {
   const y = yearOf(r);
   const [part, whole, unit] = r.pick(PART_WHOLE);
-  const [a, b] = twoRates(r); // a 部分增速、b 整体增速
+  const [a, bRaw] = twoRates(r); // a 部分增速、b 整体增速
+  // 两增速至少要差 1.5 个百分点：差太小时基期比重与现期比重几乎相等，
+  // 四种写法算出来是同一个数，「方向」「修正量」这些都考不出来。
+  const b = Math.abs(bRaw - a) >= 1.5 ? bRaw : round1(a + (bRaw > a ? 1.5 : -1.5));
   const wb = baseAmount(r) * 3;
   const wc = currentOf(wb, b);
   const p = r.integer(10, 80);
@@ -531,10 +536,10 @@ function genBaseRatio(r: Rng): QuestionDraft {
   const ac = currentOf(ab, a);
   const materialLine = `${y} 年，某市${part}为 ${ac} ${unit}，比上年增长 ${pct(a)}；${whole}为 ${wc} ${unit}，比上年增长 ${pct(b)}。`;
   const stem = `材料中，求 ${y - 1} 年该市${part}占${whole}的比重，下列算式正确的是？`;
-  /** 现期比重（三种写法的公共起点，也是最常见的错项） */
+  /** 现期比重（四种写法的公共起点，也是最常见的错项） */
   const share = `${ac}÷${wc}`;
   const bigger = b > a; // 整体增速更快 → 基期比重比现期比重大
-  const route = r.integer(0, 2);
+  const route = r.integer(0, 3);
 
   if (route === 0) {
     // ① 定义式：分子分母各自还原到基期
@@ -549,7 +554,7 @@ function genBaseRatio(r: Rng): QuestionDraft {
         `(${ac}÷(1+${pct(a)}))÷(${wc}×(1+${pct(b)}))`,
         `(${ac}×(1+${pct(a)}))÷(${wc}÷(1+${pct(b)}))`,
       ],
-      `定义式＝**分子分母各自还原到基期**：部分 ${ac}÷(1+${pct(a)})、整体 ${wc}÷(1+${pct(b)})，再相除。选项里另外三个都是错法：只写 ${share} 是现期比重（没折回基期）；把整体的增速因子写成乘号、或把部分的写成乘号，是把「还原到基期只能除、不能乘」记反了。同一个答案还有两种写法——连乘式 ${share}×(1+${pct(b)})÷(1+${pct(a)})、差值式「现期比重−两期比重差」，三式恒等，按选项精度挑一条即可。`,
+      `定义式＝**分子分母各自还原到基期**：部分 ${ac}÷(1+${pct(a)})、整体 ${wc}÷(1+${pct(b)})，再相除。选项里另外三个都是错法：只写 ${share} 是现期比重（没折回基期）；把整体的增速因子写成乘号、或把部分的写成乘号，是把「还原到基期只能除、不能乘」记反了。同一个答案另三种等价写法——连乘式 ${share}×(1+${pct(b)})÷(1+${pct(a)})、差值式「现期比重−两期比重差」、速算公式（拆 1 法：因子拆成 1+(b−a)÷(1+a)），四式恒等，按选项精度挑一条即可。`,
     );
   }
   if (route === 1) {
@@ -565,22 +570,44 @@ function genBaseRatio(r: Rng): QuestionDraft {
         `(${share})×(1+${pct(a)})÷(1+${pct(b)})`,
         `(${share})×(1+${pct(a)}−${pct(b)})`,
       ],
-      `原始公式（连乘）＝先算现期比重，再乘增速因子：${share}×${factor(b)}÷${factor(a)}。整体增速 ${pct(b)} ${bigger ? "快于" : "慢于"}部分增速 ${pct(a)}，因子${bigger ? "大于 1（基期比重比现期比重大）" : "小于 1（基期比重比现期比重小）"}——方向顺带就判掉了。错法：${share} 是现期比重；把因子写成 ${factor(a)}÷${factor(b)} 是增速比颠倒；写成 1+(${pct(a)}−${pct(b)}) 是把「增速比」当成了「1+增速差」，两者只在增速很小时才近似。另两种等价写法：定义式（各自还原）、差值式（现期比重−两期比重差）。`,
+      `原始公式（连乘）＝先算现期比重，再乘增速因子：${share}×${factor(b)}÷${factor(a)}。整体增速 ${pct(b)} ${bigger ? "快于" : "慢于"}部分增速 ${pct(a)}，因子${bigger ? "大于 1（基期比重比现期比重大）" : "小于 1（基期比重比现期比重小）"}——方向顺带就判掉了。错法：${share} 是现期比重；把因子写成 ${factor(a)}÷${factor(b)} 是增速比颠倒；写成 1+(${pct(a)}−${pct(b)}) 是把「增速比」当成了「1+增速差」，两者只在增速很小时才近似。另三种等价写法：定义式（各自还原）、差值式（现期比重−两期比重差）、速算公式（拆 1 法：因子拆成 1+(b−a)÷(1+a)）。`,
     );
   }
-  // ③ 变形公式（差值）：现期比重 − 两期比重差
+  if (route === 2) {
+    // ③ 变形公式（差值）：现期比重 − 两期比重差
+    return buildFormula(
+      r,
+      "formula-base-ratio-shift",
+      materialLine,
+      stem,
+      `(${share})−(${share})×(${pct(a)}−${pct(b)})÷(1+${pct(a)})`,
+      [
+        share,
+        `(${share})−(${pct(a)}−${pct(b)})`,
+        `(${share})−(${share})×(${pct(a)}−${pct(b)})`,
+      ],
+      `变形公式＝现期比重减去两期比重差：两期比重差 ${share}×(${pct(a)}−${pct(b)})÷(1+${pct(a)})，绝对值恒小于 |a−b|。整体增速 ${pct(b)} ${bigger ? "快于" : "慢于"}部分增速 ${pct(a)}，所以基期比重比现期比重${bigger ? "大" : "小"}，用「方向 + |a−b| 卡上限」就能先框住区间。错法：${share} 是现期比重（没折回基期）；${share}−(${pct(a)}−${pct(b)}) 直接把百分点差当比重差，漏乘现期比重；${share}−${share}×(${pct(a)}−${pct(b)}) 漏掉 ÷(1+${pct(a)})——比重差永远小于缩放前的那个乘积。另三种等价写法：定义式、连乘式、速算公式（拆 1 法）。`,
+    );
+  }
+  // ④ 速算公式（拆 1 法）：把增速因子拆成「1 + 一个小量」，修正量可以心算
+  const diff = round1(b - a); // b−a，可正可负
+  const sign = diff >= 0 ? "+" : "−";
+  const absDiff = Math.abs(diff);
+  const small = round1(diff / (1 + a / 100)); // 修正量（带符号）
+  // 再省一步（把 ÷(1+a) 也省掉）的误差：现期比重×a(b−a)/(1+a)，单位百分点
+  const approxErr = round1(Math.abs(((ac / wc) * a * diff) / (100 * (1 + a / 100))));
   return buildFormula(
     r,
-    "formula-base-ratio-shift",
+    "formula-base-ratio-fast",
     materialLine,
     stem,
-    `(${share})−(${share})×(${pct(a)}−${pct(b)})÷(1+${pct(a)})`,
+    `(${share})×(1${sign}${absDiff}%÷${factor(a)})`,
     [
+      `(${share})×(1${diff >= 0 ? "−" : "+"}${absDiff}%÷${factor(a)})`,
+      `(${share})×(1${sign}${absDiff}%÷${factor(b)})`,
       share,
-      `(${share})−(${pct(a)}−${pct(b)})`,
-      `(${share})−(${share})×(${pct(a)}−${pct(b)})`,
     ],
-    `变形公式＝现期比重减去两期比重差：两期比重差 ${share}×(${pct(a)}−${pct(b)})÷(1+${pct(a)})，绝对值恒小于 |a−b|。整体增速 ${pct(b)} ${bigger ? "快于" : "慢于"}部分增速 ${pct(a)}，所以基期比重比现期比重${bigger ? "大" : "小"}，用「方向 + |a−b| 卡上限」就能先框住区间。错法：${share} 是现期比重（没折回基期）；${share}−(${pct(a)}−${pct(b)}) 直接把百分点差当比重差，漏乘现期比重；${share}−${share}×(${pct(a)}−${pct(b)}) 漏掉 ÷(1+${pct(a)})——比重差永远小于缩放前的那个乘积。另两种等价写法：定义式、连乘式。`,
+    `速算公式（拆 1 法）＝把增速因子拆成「1 + 一个小量」：${factor(b)}÷${factor(a)}＝1+(${pct(b)}−${pct(a)})÷${factor(a)}＝1${sign}${absDiff}%÷${factor(a)}，所以基期比重＝现期比重×这个因子＝${share}×(1${sign}${absDiff}%÷${factor(a)})。修正量只有约 ${Math.abs(small)}%，心算「现期比重 ＋ 现期比重×小量」一步就出结果，不用真做两次除法；方向也顺带判掉——修正量${diff >= 0 ? "为正，基期比重比现期比重大" : "为负，基期比重比现期比重小"}。错法：把 b−a 写成 a−b 是方向反了；修正量的分母写成 ${factor(b)}，是把「除以 1+a」记成了「除以 1+b」；只写 ${share} 是现期比重。另三种等价写法：定义式（各自还原）、连乘式 ${share}×${factor(b)}÷${factor(a)}、差值式（现期比重−两期比重差）。选项差距大、|a−b| 又小时还能再省一步：把 ${absDiff}%÷${factor(a)} 近似成 ${absDiff}%，此时误差约 现期比重×a(b−a)/(1+a)≈${approxErr} 个百分点，增速越小心算越准。`,
   );
 }
 

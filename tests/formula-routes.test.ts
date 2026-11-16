@@ -118,6 +118,11 @@ const TOPICS: TopicSpec[] = [
         template: "formula-base-ratio-shift",
         pattern: shape(`\\(${P}÷${P}\\)−\\(${P}÷${P}\\)×\\(${P}%−${P}%\\)÷\\(1\\+${P}%\\)`),
       },
+      {
+        // 速算公式（拆 1 法）：因子拆成「1 + (b−a)÷(1+a)」，修正量可心算
+        template: "formula-base-ratio-fast",
+        pattern: shape(`\\(${P}÷${P}\\)×\\(1[+−]${P}%÷\\(1[+−]${P}%\\)\\)`),
+      },
     ],
   },
   {
@@ -238,11 +243,54 @@ describe("列式关：一个考点的多条写法都要练到", () => {
           expect(
             question.explanation,
             `解析没交代等价写法：${question.explanation}`,
-          ).toMatch(/另一种写法|另两种等价写法|还有两种写法/);
+          ).toMatch(/另一种写法|另两种等价写法|另三种等价写法|还有两种写法/);
         }
       }
     });
   }
+});
+
+describe("基期比重的速算公式（拆 1 法）", () => {
+  /**
+   * 速算公式是第四条写法，也是最容易被写成「近似」的一条：
+   * 因子拆成 1+(b−a)÷(1+a) 是**恒等**变形，把 ÷(1+a) 省掉才是近似。
+   * 这里直接把标答代回材料验算——列式题如果式子本身算不回答案，练的就不是公式了。
+   */
+  it("标答恒等于定义式，修正量就是 b−a、分母就是 1+a", () => {
+    const fast = samples("formula-base-ratio", 240).filter(
+      (question) => question.templateId === "formula-base-ratio-fast",
+    );
+    expect(fast.length, "速算公式一路没有出题").toBeGreaterThan(20);
+    for (const question of fast) {
+      const text = question.material?.paragraphs[0] ?? "";
+      const material = text.match(
+        /为 (\d+) \S+，比上年增长 ([\d.]+)%；.+?为 (\d+) \S+，比上年增长 ([\d.]+)%。/,
+      );
+      expect(material, `材料格式变了：${text}`).toBeTruthy();
+      const part = Number(material![1]);
+      const a = Number(material![2]);
+      const whole = Number(material![3]);
+      const b = Number(material![4]);
+
+      const answer = question.options[question.answerIndex];
+      const matched = answer.match(
+        /^\((\d+)÷(\d+)\)×\(1([+−])([\d.]+)%÷\(1\+([\d.]+)%\)\)$/,
+      );
+      expect(matched, `标答不像拆 1 法：${answer}`).toBeTruthy();
+      expect(Number(matched![1]), `标答分子不是部分量：${answer}`).toBe(part);
+      expect(Number(matched![2]), `标答分母不是整体量：${answer}`).toBe(whole);
+      // 修正量的分母必须是「部分的增速因子」1+a
+      expect(Number(matched![5]), `修正量除的不是 1+a：${answer}`).toBe(a);
+      // 修正量就是 b−a（符号带方向）
+      const diff = (matched![3] === "+" ? 1 : -1) * Number(matched![4]);
+      expect(Math.abs(diff - (b - a)), `修正量不是 b−a：${answer}`).toBeLessThan(0.06);
+
+      // 代回材料验算：拆 1 法与定义式必须给出同一个数
+      const viaFast = (part / whole) * (1 + diff / 100 / (1 + a / 100));
+      const viaDefinition = part / (1 + a / 100) / (whole / (1 + b / 100));
+      expect(viaFast, `拆 1 法算不回定义式：${answer} @ ${text}`).toBeCloseTo(viaDefinition, 6);
+    }
+  });
 });
 
 describe("列式关：差值增长率的标答必须是精确式", () => {
