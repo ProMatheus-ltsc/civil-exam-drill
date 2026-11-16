@@ -72,13 +72,18 @@ export function generateGrowthAmount(r: Rng): QuestionDraft {
   const variant = integer(0, 2);
   const hint = fractionHint(rate) ? `（${fractionHint(rate)}）` : "";
   if (variant === 0) {
-    const set = options(growth, [Math.round((current * rate) / 100), base, current - growth], " 亿元", random);
+    /**
+     * `base` 与 `current - growth` 恒等（current=base+growth），
+     * 两个干扰项撞在一起就会触发补数。改成三类真实错解：
+     * 现期×增长率、求成基期、直接把现期当增量。
+     */
+    const set = options(growth, [Math.round((current * rate) / 100), base, current], " 亿元", random);
     return {
       templateId: "amount-current-rate-v2",
       params: { base, rate, growth, current },
       stem: `某产业增加值为 ${current} 亿元，同比增长 ${rate}%${hint}。其同比增量约为多少亿元？`,
       ...set,
-      explanation: `题干给现期，增量=现期×r÷(1+r)。${fractionHint(rate) ? `把 ${rate}%≈1/${Math.round(100 / rate)}：` : ""}增量≈${current}÷${Math.round(100 / rate) + 1}=${fmt(round(current / (Math.round(100 / rate) + 1)))}≈${growth} 亿元（精确式 ${current}×${rate}%÷${1 + rate / 100}）。不能直接用现期乘增长率（${Math.round((current * rate) / 100)} 是错的）。`,
+      explanation: `题干给现期，增量=现期×r÷(1+r)。${fractionHint(rate) ? `把 ${rate}%≈1/${Math.round(100 / rate)}：` : ""}增量≈${current}÷${Math.round(100 / rate) + 1}=${fmt(round(current / (Math.round(100 / rate) + 1)))}≈${growth} 亿元（精确式 ${current}×${rate}%÷${1 + rate / 100}）。干扰项：${Math.round((current * rate) / 100)} 是直接拿现期乘增长率；${base} 是求成了基期；${current} 是把现期本身当增量。`,
     };
   }
   if (variant === 1) {

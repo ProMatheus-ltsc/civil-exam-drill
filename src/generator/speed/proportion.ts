@@ -66,6 +66,17 @@ export function generateRatioBasic(r: Rng): QuestionDraft {
   };
 }
 
+/**
+ * 「上年部分量」题的名词契约：整体、部分各只有一个名字，
+ * 题干、比重句、问句全部引用这两个常量。
+ *
+ * 踩过的坑：题干写「工业总产值 5000 亿元」（当整体）、比重分母写「地区生产总值」、
+ * 问「工业增加值」（当部分）——总产值≠增加值，比重分母≠总产值，严格按字面无解。
+ * 名词散落在三个模板字符串里时一定会再犯，所以提到模块级常量。
+ */
+const PART_QUANTITY_WHOLE = "地区生产总值";
+const PART_QUANTITY_PART = "工业增加值";
+
 export function generatePartQuantity(r: Rng): QuestionDraft {
   const { level, integer, pick, random } = r;
   const base = integer(20, 80) * (level === 1 ? 20 : level === 2 ? 10 : 5) * 10;
@@ -86,13 +97,22 @@ export function generatePartQuantity(r: Rng): QuestionDraft {
   }
   const wholeBase = base;
   const partBase = Math.round((wholeBase * share) / 100);
-  const set = options(partBase, [Math.round((wholeCurrent * share) / 100), Math.round(partBase * (1 + rate / 100)), Math.round((wholeBase * share) / 100 / 2)], " 亿元", random);
+  const partCurrent = Math.round((wholeCurrent * share) / 100);
+  const otherBase = Math.round((wholeBase * (100 - share)) / 100);
+  const halfBase = Math.round(partBase / 2);
+  /**
+   * 三个干扰项各对应一类真实错解，**不能有代数恒等的**：
+   * 原来的 `wholeCurrent×share` 与 `partBase×(1+rate)` 在 wholeCurrent=base×(1+rate)、
+   * partBase=base×share 下完全相等，去重后只剩 3 项，`options()` 只好补一个 answer×1.05
+   * 的凑数项（既不是常见错解，解析也解释不了）。
+   */
+  const set = options(partBase, [partCurrent, otherBase, halfBase], " 亿元", random);
   return {
-    templateId: "part-base-v2",
-    params: { wholeCurrent, wholeBase, share, rate, partBase },
-    stem: `某县本年工业总产值 ${wholeCurrent} 亿元，同比增长 ${rate}%；工业占地区生产总值的比重为 ${share}%。上年该县工业增加值约为多少亿元？`,
+    templateId: "part-base-v3",
+    params: { wholeCurrent, wholeBase, share, rate, partBase, partCurrent },
+    stem: `某县本年${PART_QUANTITY_WHOLE} ${wholeCurrent} 亿元，同比增长 ${rate}%；${PART_QUANTITY_PART}占${PART_QUANTITY_WHOLE}的比重为 ${share}%，与上年持平。上年该县${PART_QUANTITY_PART}约为多少亿元？`,
     ...set,
-    explanation: `上年整体=${wholeCurrent}÷(1+${rate}%)=${wholeBase}；上年工业=上年整体×占比=${wholeBase}×${share}%=${partBase}。干扰项 ${fmt((wholeCurrent * share) / 100)} 用现期整体乘占比（口径混淆：占比是本年口径还是上年口径，先判清）。`,
+    explanation: `上年整体=${wholeCurrent}÷(1+${rate}%)=${wholeBase} 亿元；比重与上年持平，上年${PART_QUANTITY_PART}=${wholeBase}×${share}%=${partBase} 亿元。干扰项 ${partCurrent} 是本年${PART_QUANTITY_PART}（忘了折回上年）；${otherBase} 是上年其余产业（占比对象搞错，用 100−${share}=${100 - share}% 算的）；${halfBase} 是把占比看成 ${share / 2}%（百分数减半）。`,
   };
 }
 
@@ -122,13 +142,18 @@ export function generateAverageBasic(r: Rng): QuestionDraft {
       explanation: `平均数=总量÷份数=${total}÷${count}=${average} 亿元。选项 ${total - count} 是“总量减份数”的无效换算。`,
     };
   }
-  const set = options(count, [count - 1, Math.round(total / (average + 10)), Math.round(average / 10)], " 个", random);
+  /**
+   * 干扰项原来是 `total÷(average+10)`：它在 average≥100 时恒等于 count（约等于 0.94~0.95 倍再四舍五入），
+   * 每条题都会撞答案、触发补数。改成「少算一个 / 多算一个 / 把平均数看成两倍」。
+   */
+  const halfCount = Math.max(1, Math.round(count / 2));
+  const set = options(count, [count - 1, count + 1, halfCount], " 个", random);
   return {
     templateId: "average-count-v3",
     params: { count, average, total },
     stem: `某专项资金共 ${total} 亿元，按每个项目平均 ${average} 亿元分配，可支持约多少个项目？`,
     ...set,
-    explanation: `份数=总量÷平均数=${total}÷${average}=${count} 个。单位项与总量、平均数的单位对齐后再除，避免用错量级。`,
+    explanation: `份数=总量÷平均数=${total}÷${average}=${count} 个。干扰项：${count - 1} 是少算一个项目，${count + 1} 是多算一个，${halfCount} 是把平均数看成两倍（${average * 2} 亿元）后份数减半。`,
   };
 }
 

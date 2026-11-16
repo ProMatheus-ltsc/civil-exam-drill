@@ -6,9 +6,36 @@ export type OptionSet = {
   answerIndex: 0 | 1 | 2 | 3;
 };
 
+/** 单次选项构造的诊断记录：deduped < 4 说明干扰项去重后不够，已触发自动补数 */
+export type OptionDiagnostic = { answer: number; distractors: number; deduped: number };
+
+const diagnostics: OptionDiagnostic[] = [];
+/** 只在回归测试里开启；生产常驻进程不记录，避免无限累积 */
+let diagnosticsEnabled = false;
+
+/**
+ * 执行一段生成逻辑并收集期间的选项诊断。
+ * 用法：`const { items } = collectOptionDiagnostics(() => generateQuestion(...))`
+ */
+export function collectOptionDiagnostics<T>(run: () => T): { result: T; items: OptionDiagnostic[] } {
+  const previous = diagnosticsEnabled;
+  diagnosticsEnabled = true;
+  diagnostics.length = 0;
+  try {
+    return { result: run(), items: [...diagnostics] };
+  } finally {
+    diagnostics.length = 0;
+    diagnosticsEnabled = previous;
+  }
+}
+
 /**
  * 通用数值选项：answer + 干扰项 → 去重 → 洗牌。
  * 干扰项不足 3 个时自动补（基于 answer 的步进），保证永远 4 个互异选项。
+ *
+ * 副作用要当心：**去重后不足 4 个就等于「干扰项设计失效」**——自动补出来的是
+ * answer±step×n 这种纯凑数的项，既不是常见错解，解析也没法解释它。
+ * 回归测试靠 `collectOptionDiagnostics` 把这种情况抓出来。
  */
 export function options(
   answer: number,
@@ -19,6 +46,9 @@ export function options(
 ): OptionSet {
   const values = [answer, ...distractors].map((value) => round(value, digits));
   const unique = [...new Set(values)];
+  if (diagnosticsEnabled) {
+    diagnostics.push({ answer, distractors: distractors.length, deduped: unique.length });
+  }
   const step = Math.max(10 ** -digits, Math.abs(answer) * 0.05);
   while (unique.length < 4) unique.push(round(answer + step * unique.length, digits));
   for (let index = unique.length - 1; index > 0; index -= 1) {

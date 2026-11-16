@@ -715,13 +715,18 @@ export function generateDecimal(r: Rng): QuestionDraft {
     const left = operation === "-" ? Math.max(a, b) : a;
     const right = operation === "-" ? Math.min(a, b) : b;
     const answer = round(operation === "+" ? left + right : left - right, digits);
-    const set = options(answer, [round(answer + 1 / factor, digits), round(answer - 1 / factor, digits), round(left + right, digits)], "", random, digits);
+    /**
+     * 第三个干扰项必须是「加减搞反」：原来是 `left + right`——
+     * 加法时它恒等于答案，去重后只剩 3 项，`options()` 便补一个无意义的凑数项。
+     */
+    const flipped = round(operation === "+" ? left - right : left + right, digits);
+    const set = options(answer, [round(answer + 1 / factor, digits), round(answer - 1 / factor, digits), flipped], "", random, digits);
     return {
       templateId: `decimal-${operation === "+" ? "add" : "subtract"}-v2`,
       params: { left, right, operation, digits },
       stem: `某表两项数值分别为 ${fmt(left, digits)} 和 ${fmt(right, digits)}，求二者${operation === "+" ? "合计" : "差值"}。`,
       ...set,
-      explanation: `对齐小数点逐位${operation === "+" ? "相加" : "相减"}：${fmt(left, digits)}${operation}${fmt(right, digits)}=${fmt(answer, digits)}。选项只差 ${1 / factor} 时务必保留 ${digits} 位小数核对。`,
+      explanation: `对齐小数点逐位${operation === "+" ? "相加" : "相减"}：${fmt(left, digits)}${operation}${fmt(right, digits)}=${fmt(answer, digits)}。${fmt(answer + 1 / factor, digits)} 与 ${fmt(answer - 1 / factor, digits)} 是末位没对齐（只差 ${1 / factor}），${fmt(flipped, digits)} 是${operation === "+" ? "把加法做成了减法" : "把减法做成了加法"}。`,
     };
   }
   const multiplier = pick([1.1, 1.2, 1.25, 1.5]);
