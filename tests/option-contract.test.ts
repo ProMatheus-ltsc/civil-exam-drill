@@ -60,6 +60,35 @@ function samplesOf(templateId: string, topicId: string, seeds = SEEDS) {
   return out;
 }
 
+/**
+ * 单个模板的「干净选项」底线：不补数、四项互异、没有非正数、解析逐项点名。
+ *
+ * 这三条一起抓的是同一类事故：`options()` 的自动补数会造出一个既不是常见错解、
+ * 解析也解释不了的凑数项（C 类），以及解析把干扰项归因写错（D 类）。
+ */
+function assertCleanOptions(samples: { question: GeneratedQuestion; padded: boolean }[], label: string) {
+  expect(samples.length, `没抽到 ${label} 的样本`).toBeGreaterThan(5);
+  for (const { question, padded } of samples) {
+    expect(padded, `${label} 干扰项去重后不足 4 项：${question.stem}`).toBe(false);
+    expect(new Set(question.options).size, `${label} 选项有重复：${question.options.join(" / ")}`).toBe(4);
+    // numbersOf 会把负号一起剥掉，所以负数要按原文判
+    for (const text of question.options) {
+      expect(text.includes("-"), `${label} 出现负数选项 ${text}：${question.stem}`).toBe(false);
+    }
+    const numbers = numbersOf(question);
+    expect(numbers).toHaveLength(4);
+    for (const [index, value] of numbers.entries()) {
+      // 资料分析里给负数选项等于白送分，必须一律排除
+      expect(Number(value), `${label} 出现非正数选项 ${value}：${question.stem}`).toBeGreaterThan(0);
+      if (index === question.answerIndex) continue;
+      expect(
+        question.explanation.includes(value),
+        `${label} 解析没有解释选项 ${value}：${question.explanation}`,
+      ).toBe(true);
+    }
+  }
+}
+
 describe("选项与解析的硬约束", () => {
   it("不许靠自动补数凑选项：干扰项去重后必须已经够 4 项（欠账只减不增）", () => {
     const offenders = new Set<string>();
@@ -110,5 +139,30 @@ describe("选项与解析的硬约束", () => {
         ).toBe(true);
       }
     }
+  });
+
+  /**
+   * 以下三条对应 2026-11-16 修掉的三个邻近模板缺陷：
+   * 单位错配（题干万吨/选项亿元）、负数干扰项、纯凑数的「总量减份数」。
+   */
+  it("growth-amount 求增产：题干与选项单位统一为万吨", () => {
+    const samples = samplesOf("amount-base-rate-v3", "growth-amount");
+    expect(samples.length).toBeGreaterThan(5);
+    for (const { question } of samples) {
+      expect(question.stem).toContain("万吨");
+      for (const option of question.options) {
+        expect(option.endsWith(" 万吨"), `选项单位不是万吨：${option}`).toBe(true);
+      }
+      expect(question.explanation).not.toContain("亿元");
+    }
+    assertCleanOptions(samples, "amount-base-rate-v3");
+  });
+
+  it("part-quantity 求现期部分：选项无负数，解析逐项点名", () => {
+    assertCleanOptions(samplesOf("part-current-v3", "part-quantity"), "part-current-v3");
+  });
+
+  it("average-basic 求平均数：干扰项都有出处，解析逐项点名", () => {
+    assertCleanOptions(samplesOf("average-value-v4", "average-basic"), "average-value-v4");
   });
 });

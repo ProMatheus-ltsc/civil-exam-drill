@@ -86,13 +86,19 @@ export function generatePartQuantity(r: Rng): QuestionDraft {
   const variant = integer(0, 1);
   if (variant === 0) {
     const part = Math.round((wholeCurrent * share) / 100);
-    const set = options(part, [Math.round((wholeCurrent * (100 - share)) / 100), Math.round(wholeCurrent / share), part - wholeCurrent], " 亿元", random);
+    const rest = Math.round((wholeCurrent * (100 - share)) / 100);
+    const shareAsDivisor = wholeCurrent / share;
+    /**
+     * 原来第三个干扰项是 `part − wholeCurrent`，恒为负数。资料分析里给一个负数选项，
+     * 考生一眼就能排除，等于把四选一降成三选一。换成「漏乘占比」：直接把整体当部分量。
+     */
+    const set = options(part, [rest, shareAsDivisor, wholeCurrent], " 亿元", random);
     return {
-      templateId: "part-current-v2",
+      templateId: "part-current-v3",
       params: { wholeCurrent, share, part },
-      stem: `某省全年生产总值 ${wholeCurrent} 亿元，其中高技术产业增加值占 ${share}%。高技术产业增加值约为多少亿元？`,
+      stem: `某省全年地区生产总值 ${wholeCurrent} 亿元，其中高技术产业增加值占地区生产总值的 ${share}%。高技术产业增加值约为多少亿元？`,
       ...set,
-      explanation: `部分量=整体×占比=${wholeCurrent}×${share}%=${part} 亿元。干扰项 ${fmt((wholeCurrent * (100 - share)) / 100)} 是“其余部分”，注意占比的对象是谁。`,
+      explanation: `部分量=整体×占比=${wholeCurrent}×${share}%=${part} 亿元。干扰项：${rest} 是其余产业（用 100−${share}=${100 - share}% 算的，占比对象搞错）；${fmt(shareAsDivisor)} 是把百分数当除数（${wholeCurrent}÷${share}）；${wholeCurrent} 是忘了乘占比，直接把整体当部分量。`,
     };
   }
   const wholeBase = base;
@@ -133,13 +139,17 @@ export function generateAverageBasic(r: Rng): QuestionDraft {
     };
   }
   if (variant === 1) {
-    const set = options(average, [total - count, Math.round(total / (count - 1)), Math.round(average / 10)], " 亿元", random);
+    /**
+     * 干扰项原来是 `total − count`：量纲上说不通（亿元减家），也不是常见错解，纯凑一个数。
+     * 换成三类真实错解：漏除份数、份数少算一个、小数点位置错。
+     */
+    const set = options(average, [total, Math.round(total / (count - 1)), Math.round(average / 10)], " 亿元", random);
     return {
-      templateId: "average-value-v3",
+      templateId: "average-value-v4",
       params: { count, average, total },
       stem: `某市 ${count} 家园区合计完成投资 ${total} 亿元，平均每家完成投资约多少亿元？`,
       ...set,
-      explanation: `平均数=总量÷份数=${total}÷${count}=${average} 亿元。选项 ${total - count} 是“总量减份数”的无效换算。`,
+      explanation: `平均数=总量÷份数=${total}÷${count}=${average} 亿元。干扰项：${total} 是把总量直接当平均数（漏了除以份数）；${Math.round(total / (count - 1))} 是把份数少算一个（${count}−1=${count - 1}）；${Math.round(average / 10)} 是小数点位置错（${average} 看成 ${average / 10}）。`,
     };
   }
   /**

@@ -87,13 +87,20 @@ export function generateGrowthAmount(r: Rng): QuestionDraft {
     };
   }
   if (variant === 1) {
-    const set = options(growth, [current - growth, Math.round((current * rate) / 100), Math.round(growth / 2)], " 亿元", random);
+    /**
+     * 两个坑：
+     * 1. 题干是「万吨」，选项后缀却挂着「 亿元」——同一题里出现两个单位；
+     * 2. 干扰项原本写 `current − growth`，在 current=base+growth 下恒等于 base，
+     *    而解析解释的却是「current − base」——那正好是本小题的答案。
+     * 改成三类真实错解，并在解析里逐项点名。
+     */
+    const set = options(growth, [base, Math.round((current * rate) / 100), Math.round(growth / 2)], " 万吨", random);
     return {
-      templateId: "amount-base-rate-v2",
+      templateId: "amount-base-rate-v3",
       params: { base, rate, growth, current },
       stem: `某地上年产量为 ${base} 万吨，今年同比增长 ${rate}%。今年增产多少万吨？`,
       ...set,
-      explanation: `增量=基期×增长率=${base}×${rate}%=${growth} 万吨（百化分${hint}心算更快）。干扰项 ${current}−${base}=${current - base} 出现在现期口径题干中才用。`,
+      explanation: `题干给的是基期，增量=基期×增长率=${base}×${rate}%=${growth} 万吨${hint ? `，用百化分${hint}心算更快` : ""}。干扰项：${base} 是把基期本身当增量（忘了乘增长率）；${Math.round((current * rate) / 100)} 是拿今年产量乘增长率（今年产量里已经含了增量）；${Math.round(growth / 2)} 是把增长率看成 ${rate / 2}%。`,
     };
   }
   const set = options(growth, [Math.round((current * rate) / 100), Math.round(base * 0.05), Math.round(growth * 1.5)], " 亿元", random);
