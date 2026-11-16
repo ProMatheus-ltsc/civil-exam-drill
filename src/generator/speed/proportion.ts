@@ -241,10 +241,10 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
   const diff = d.b - d.a;
   const span = Math.abs(diff);
   const baseLarger = diff > 0;
-  // 秒杀路线要求现期比重与基期比重拉得开，否则「方向 + 上限」卡不住，退回原始公式
+  // 秒杀路线要求现期比重与基期比重拉得开，否则「方向 + 上限」卡不住，退回定义式逐个还原
   const separable = round(Math.abs(d.baseShare - d.share), 2) >= 0.3;
   if (variant === 0 || (variant === 1 && !separable)) {
-    // 原始公式路线：分子分母各自还原到基期再相除；答案也来自这条路径，与材料完全自洽
+    // 定义式路线：分子分母各自还原到基期再相除；答案也来自这条路径，与材料完全自洽
     const answer = d.baseShare;
     const reverse = round((d.share * (100 + d.a)) / (100 + d.b), 2);
     const over = round(d.share + (baseLarger ? span + 0.8 : -(span + 0.8)), 2);
@@ -265,7 +265,7 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
       stem: `根据材料，${d.year - 1} 年${metricPart}占${metricWhole}的比重约为多少？`,
       ...set,
       material,
-      explanation: `原始公式=分子分母各自还原到基期：基期${metricPart}=${fmt(d.part)}÷(1+${fmt(d.a)}%)≈${fmt(d.basePart)}，基期${metricWhole}=${fmt(d.whole)}÷(1+${fmt(d.b)}%)≈${fmt(d.baseWhole)}，两者相除=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。变形式更快：现期比重×(1+b)/(1+a)，也就是现期比重−两期比重差，先判方向、用 |a−b| 卡上限就能定区间；选项挤到小数点后才需要回到原始公式。注意材料里的 ${fmt(d.share)}% 是四舍五入过的，直接拿它乘增速比会有零点几的偏差，答案以还原后的 ${answer}% 为准。干扰项：${explainDistractors(set, [
+      explanation: `定义式（分子分母各自还原到基期）：基期${metricPart}=${fmt(d.part)}÷(1+${fmt(d.a)}%)≈${fmt(d.basePart)}，基期${metricWhole}=${fmt(d.whole)}÷(1+${fmt(d.b)}%)≈${fmt(d.baseWhole)}，两者相除=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。连乘式更快：现期比重×(1+b)/(1+a)，也就是现期比重−两期比重差，先判方向、用 |a−b| 卡上限就能定区间；选项挤到小数点后才需要回到定义式逐个还原。注意材料里的 ${fmt(d.share)}% 是四舍五入过的，直接拿它乘增速比会有零点几的偏差，答案以还原后的 ${answer}% 为准。干扰项：${explainDistractors(set, [
         [d.share, "现期占比，漏掉了增速差"],
         [reverse, "把 (1+b)/(1+a) 写成了反比"],
         [over, "方向对但幅度拍大了，超过 |a−b|"],
@@ -292,7 +292,7 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
         [reversed, "方向判反了"],
         [beyond, "方向对但幅度越过 |a−b| 的上限"],
         [edge, "把幅度拉满到 |a−b|，实际比重差一定比它小"],
-      ])}。真要精确值再回到原始公式：基期${metricPart}÷基期${metricWhole}=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。`,
+      ])}。真要精确值再回到定义式（或连乘式）：基期${metricPart}÷基期${metricWhole}=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。`,
     };
   }
   // 逆向题：给基期占比、问现期占比（材料只给增速，否则本年占比可直接读出来）

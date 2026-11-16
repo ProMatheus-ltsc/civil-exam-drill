@@ -166,10 +166,10 @@ describe("选项与解析的硬约束", () => {
   });
 
   /**
-   * 基期比重：原始公式（A/B×(1+b)/(1+a) 出精确值）与变形公式（现期比重 − 两期比重差）
+   * 基期比重：定义式（分子分母各自还原，出精确值）与差值式（现期比重 − 两期比重差）
    * 必须都练到。只有前者时，考场上「判方向 + |a−b| 卡上限」的秒杀路线根本没被训练过。
    */
-  it("base-ratio：两条公式路线都在出题，不是只练原始公式", () => {
+  it("base-ratio：两条公式路线都在出题，不是只练定义式", () => {
     const templates = new Set<string>();
     for (const difficulty of difficulties) {
       for (const randomSeed of SEEDS) {

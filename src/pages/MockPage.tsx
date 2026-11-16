@@ -111,7 +111,7 @@ const MOCK_TOPIC_NOTES: Record<string, string> = {
   "formula-growth-rate": "由基期与现期还原同比增速",
   "formula-growth-amount": "现期 × r ÷ (1+r) 求增量",
   "formula-base-amount": "现期 ÷ (1+r) 还原基期",
-  "formula-base-ratio": "分子分母各自还原到基期",
+  "formula-base-ratio": "定义式 / 连乘式 / 差值式都要认",
   "formula-average-basic": "总量 ÷ 份数，分清比重与平均",
 };
 
