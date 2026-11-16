@@ -245,7 +245,7 @@ export const topics: TrainingTopic[] = [
   topic("ratio-basic", 2, "speed", false, "concept", ["sensitive", "divide"], "比重与整体量", "占比求整体/整体求占比与百分点表述"),
   topic("part-quantity", 2, "speed", false, "concept", ["ratio-basic"], "部分量", "整体×占比求部分，含基期口径换算"),
   topic("average-basic", 1, "speed", false, "concept", ["divide"], "平均数基础", "平均=总量÷份数，三量互求"),
-  topic("base-ratio", 3, "speed", true, "material", ["part-quantity", "base-amount"], "基期比重", "现期占比×整体与部分增速比（材料实战）"),
+  topic("base-ratio", 3, "speed", true, "material", ["part-quantity", "base-amount"], "基期比重", "原始公式算精确值 / 两期比重差卡区间（材料实战）"),
   topic("ratio-change", 3, "speed", true, "material", ["base-ratio"], "两期比重差", "方向判断 + 幅度上限/估算（材料实战）"),
   topic("average-rate", 3, "speed", true, "material", ["average-basic", "growth-rate"], "平均数增长率", "(a−b)÷(1+b) 比值型增速（材料实战）"),
   topic("diff-rate", 3, "speed", true, "material", ["base-difference", "part-quantity"], "差值增长率", "总量与部分增速已知，求差值（如顺差/逆差）的同比增速（材料实战）"),

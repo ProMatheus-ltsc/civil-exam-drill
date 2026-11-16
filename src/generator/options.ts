@@ -45,7 +45,9 @@ export function options(
   digits = 2,
 ): OptionSet {
   const values = [answer, ...distractors].map((value) => round(value, digits));
-  const unique = [...new Set(values)];
+  // 干扰项可以多给（多于 3 个时后面的当备胎）：与答案撞车的会被去重，备胎顶上；
+  // 这里必须截到 4，否则调用方多传一个就会出 5 个选项。
+  const unique = [...new Set(values)].slice(0, 4);
   if (diagnosticsEnabled) {
     diagnostics.push({ answer, distractors: distractors.length, deduped: unique.length });
   }

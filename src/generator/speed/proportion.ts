@@ -6,6 +6,22 @@ import type { MaterialSpec, QuestionDraft, Rng } from "../types";
 
 const pct = (value: number) => `${fmt(value, 1)}%`;
 
+/**
+ * 选项里实际采纳了哪个干扰项，解析就只说哪个。
+ * 干扰项与答案舍入后撞在一起时会被 options() 去重，写死的解析就会「解释一个不在选项里的数」。
+ */
+function explainDistractors(
+  set: { options: readonly string[] },
+  entries: [number, string][],
+  digits = 2,
+): string {
+  const values = set.options.map((text) => Number(text.replace(/[^\d.-]/g, "")));
+  return entries
+    .filter(([value]) => values.some((v) => Math.abs(v - round(value, digits)) < 1e-9))
+    .map(([value, note]) => `${fmt(round(value, digits))}% 是${note}`)
+    .join("；");
+}
+
 /** 现期部分/整体数据集合（比重线共用）：由现期整体与占比反推，保证整数 */
 function shareNumbers(r: Rng, level: number) {
   const whole = r.integer(12, 40) * (level === 1 ? 100 : level === 2 ? 50 : 25) * 10;
@@ -183,7 +199,7 @@ function growthShareSet(r: Rng) {
 function growthShareMaterial(d: ReturnType<typeof growthShareSet>, metricPart: string, metricWhole: string, unit: string): MaterialSpec {
   return miniMaterial(
     `${d.year} 年主要指标`,
-    `${d.year} 年，${metricWhole}实现 ${unit}${fmt(d.whole)}，同比增长 ${fmt(d.b)}%；其中${metricPart}完成 ${unit}${fmt(d.part)}，同比增长 ${fmt(d.a)}%，占比 ${fmt(d.share)}%。`,
+    `${d.year} 年，${metricWhole}为 ${fmt(d.whole)} ${unit}，同比增长 ${fmt(d.b)}%；其中${metricPart}为 ${fmt(d.part)} ${unit}，同比增长 ${fmt(d.a)}%，占比 ${fmt(d.share)}%。`,
     ["指标", `${d.year} 年${unit}`, "同比增速"],
     [
       [metricWhole, fmt(d.whole), pct(d.b)],
@@ -194,6 +210,25 @@ function growthShareMaterial(d: ReturnType<typeof growthShareSet>, metricPart: s
   );
 }
 
+/**
+ * 只给增速的材料（占比逆向题用）。
+ * 一旦把本年的量和占比写进材料，「本年占比」就能直接由「部分量÷整体量」读出，
+ * 公式题退化成读表题——所以这里一个量都不给。
+ */
+function growthRateMaterial(d: ReturnType<typeof growthShareSet>, metricPart: string, metricWhole: string): MaterialSpec {
+  return miniMaterial(
+    `${d.year} 年主要指标同比增速`,
+    `${d.year} 年，${metricWhole}同比增长 ${fmt(d.b)}%，其中${metricPart}同比增长 ${fmt(d.a)}%。`,
+    ["指标", "同比增速"],
+    [
+      [metricWhole, pct(d.b)],
+      [metricPart, pct(d.a)],
+    ],
+    "%",
+    { categories: [metricWhole, metricPart], series: [{ label: "同比增速（%）", values: [d.b, d.a] }] },
+  );
+}
+
 export function generateBaseRatio(r: Rng): QuestionDraft {
   const { integer, random } = r;
   const d = growthShareSet(r);
@@ -201,28 +236,83 @@ export function generateBaseRatio(r: Rng): QuestionDraft {
   const metricPart = r.pick(["高技术制造业增加值", "网上零售额", "机电产品出口"]);
   const unit = metricWhole.includes("零售") ? "亿元" : metricWhole.includes("出口") ? "亿美元" : "亿元";
   const material = growthShareMaterial(d, metricPart, metricWhole, unit);
-  const variant = integer(0, 1);
-  if (variant === 0) {
+  const variant = integer(0, 2);
+  // 整体增速 − 部分增速：>0 说明基期比重比现期大，差值幅度必小于 |a−b|
+  const diff = d.b - d.a;
+  const span = Math.abs(diff);
+  const baseLarger = diff > 0;
+  // 秒杀路线要求现期比重与基期比重拉得开，否则「方向 + 上限」卡不住，退回原始公式
+  const separable = round(Math.abs(d.baseShare - d.share), 2) >= 0.3;
+  if (variant === 0 || (variant === 1 && !separable)) {
+    // 原始公式路线：分子分母各自还原到基期再相除；答案也来自这条路径，与材料完全自洽
     const answer = d.baseShare;
-    const set = options(answer, [d.share, round((d.share * (100 + d.a)) / (100 + d.b), 2), round(d.share + Math.abs(d.a - d.b) * 0.5, 2)], "%", random, 2);
+    const reverse = round((d.share * (100 + d.a)) / (100 + d.b), 2);
+    const over = round(d.share + (baseLarger ? span + 0.8 : -(span + 0.8)), 2);
+    const rest = round(100 - d.share, 2);
+    const set = options(answer, [d.share, reverse, over, rest], "%", random, 2);
     return {
       templateId: "base-ratio-v3",
-      params: { share: d.share, a: d.a, b: d.b, baseShare: d.baseShare },
+      params: {
+        share: d.share,
+        a: d.a,
+        b: d.b,
+        baseShare: d.baseShare,
+        part: d.part,
+        whole: d.whole,
+        basePart: d.basePart,
+        baseWhole: d.baseWhole,
+      },
       stem: `根据材料，${d.year - 1} 年${metricPart}占${metricWhole}的比重约为多少？`,
       ...set,
       material,
-      explanation: `基期比重=现期占比×(1+整体增速)÷(1+部分增速)=${fmt(d.share)}%×${100 + d.b}÷${100 + d.a}=${answer}%。不能直接取现期占比 ${fmt(d.share)}%（漏掉增速差），也不能把 (1+b)/(1+a) 写成反比（${fmt((d.share * (100 + d.a)) / (100 + d.b), 2)}%）。`,
+      explanation: `原始公式=分子分母各自还原到基期：基期${metricPart}=${fmt(d.part)}÷(1+${fmt(d.a)}%)≈${fmt(d.basePart)}，基期${metricWhole}=${fmt(d.whole)}÷(1+${fmt(d.b)}%)≈${fmt(d.baseWhole)}，两者相除=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。变形式更快：现期比重×(1+b)/(1+a)，也就是现期比重−两期比重差，先判方向、用 |a−b| 卡上限就能定区间；选项挤到小数点后才需要回到原始公式。注意材料里的 ${fmt(d.share)}% 是四舍五入过的，直接拿它乘增速比会有零点几的偏差，答案以还原后的 ${answer}% 为准。干扰项：${explainDistractors(set, [
+        [d.share, "现期占比，漏掉了增速差"],
+        [reverse, "把 (1+b)/(1+a) 写成了反比"],
+        [over, "方向对但幅度拍大了，超过 |a−b|"],
+        [rest, "占比对象搞反，算成了其余部分"],
+      ])}。`,
     };
   }
+  if (variant === 1) {
+    // 变形公式路线：不真算 (1+b)/(1+a)，用「方向 + 幅度上限」锁区间
+    const answer = d.baseShare;
+    const over = round(span + Math.max(0.8, span * 0.4), 2);
+    const beyond = round(d.share + (baseLarger ? over : -over), 2);
+    const reversed = round(d.share + (baseLarger ? -over : over), 2);
+    const edge = round(d.share + (baseLarger ? span : -span), 2);
+    const set = options(answer, [d.share, beyond, reversed, edge], "%", random, 2);
+    return {
+      templateId: "base-ratio-bypass-v4",
+      params: { share: d.share, a: d.a, b: d.b, baseShare: d.baseShare, span, basePart: d.basePart, baseWhole: d.baseWhole },
+      stem: `根据材料，${d.year - 1} 年${metricPart}占${metricWhole}的比重约为多少？`,
+      ...set,
+      material,
+      explanation: `先判方向：部分增速 ${fmt(d.a)}% ${baseLarger ? "慢于" : "快于"}整体增速 ${fmt(d.b)}%，所以基期比重比现期比重 ${fmt(d.share)}% ${baseLarger ? "大" : "小"}。再卡幅度：两期比重差=现期比重×(a−b)/(1+a)，绝对值必小于 |a−b|=${fmt(span)} 个百分点，基期比重只能落在 ${baseLarger ? `${fmt(d.share)}%~${fmt(round(d.share + span, 2))}%` : `${fmt(round(d.share - span, 2))}%~${fmt(d.share)}%`} 的开区间内，答案是 ${answer}%。干扰项：${explainDistractors(set, [
+        [d.share, "现期比重，没折回基期"],
+        [reversed, "方向判反了"],
+        [beyond, "方向对但幅度越过 |a−b| 的上限"],
+        [edge, "把幅度拉满到 |a−b|，实际比重差一定比它小"],
+      ])}。真要精确值再回到原始公式：基期${metricPart}÷基期${metricWhole}=${fmt(d.basePart)}÷${fmt(d.baseWhole)}≈${answer}%。`,
+    };
+  }
+  // 逆向题：给基期占比、问现期占比（材料只给增速，否则本年占比可直接读出来）
   const answer = round((d.baseShare * (100 + d.a)) / (100 + d.b), 2);
-  const set = options(answer, [d.share, d.baseShare, round(d.share - Math.abs(d.a - d.b), 2)], "%", random, 2);
+  const swapped = round((d.baseShare * (100 + d.b)) / (100 + d.a), 2);
+  const plusDiff = round(d.baseShare + diff, 2);
+  const overshoot = round(answer + (diff > 0 ? span + 0.8 : -(span + 0.8)), 2);
+  const set = options(answer, [d.baseShare, swapped, plusDiff, overshoot], "%", random, 2);
   return {
     templateId: "base-ratio-current-v3",
     params: { share: d.share, a: d.a, b: d.b, baseShare: d.baseShare },
-    stem: `若 ${d.year - 1} 年${metricPart}占比为 ${fmt(d.baseShare)}%，在增速条件不变的情况下，${d.year} 年占比约为多少？`,
+    stem: `若 ${d.year - 1} 年${metricPart}占${metricWhole}的比重为 ${fmt(d.baseShare)}%，按材料中的增速，${d.year} 年占比约为多少？`,
     ...set,
-    material,
-    explanation: `现期比重=基期占比×(1+部分增速)÷(1+整体增速)=${fmt(d.baseShare)}%×${100 + d.a}÷${100 + d.b}=${answer}%。${d.a > d.b ? "部分快于整体，比重上升" : "部分慢于整体，比重回落"}。`,
+    material: growthRateMaterial(d, metricPart, metricWhole),
+    explanation: `现期比重=基期占比×(1+部分增速)÷(1+整体增速)=${fmt(d.baseShare)}%×${100 + d.a}÷${100 + d.b}=${answer}%。${d.a > d.b ? "部分快于整体，比重上升" : "部分慢于整体，比重回落"}——方向对了再乘增速比，别只把增速差加到占比上。干扰项：${explainDistractors(set, [
+      [d.baseShare, "没乘增速比的基期比重"],
+      [swapped, "增速比写反了（乘了 (1+b)/(1+a)）"],
+      [plusDiff, "把增速差当百分点直接加减，比重变化要乘现期比重再除以 1+a"],
+      [overshoot, "方向对但幅度拍大了，超过 |a−b|"],
+    ])}。`,
   };
 }
 

@@ -28,7 +28,6 @@ const PADDING_DEBT = new Set([
   "amount-drop-rate-v2",
   "average-rate-v3",
   "base-diff-v2",
-  "base-ratio-current-v3",
   "base-sum-v2",
   "decimal-multiply-split-v2",
   "interval-growth-back-v3",
@@ -164,5 +163,70 @@ describe("选项与解析的硬约束", () => {
 
   it("average-basic 求平均数：干扰项都有出处，解析逐项点名", () => {
     assertCleanOptions(samplesOf("average-value-v4", "average-basic"), "average-value-v4");
+  });
+
+  /**
+   * 基期比重：原始公式（A/B×(1+b)/(1+a) 出精确值）与变形公式（现期比重 − 两期比重差）
+   * 必须都练到。只有前者时，考场上「判方向 + |a−b| 卡上限」的秒杀路线根本没被训练过。
+   */
+  it("base-ratio：两条公式路线都在出题，不是只练原始公式", () => {
+    const templates = new Set<string>();
+    for (const difficulty of difficulties) {
+      for (const randomSeed of SEEDS) {
+        const question = generateQuestion({ topicId: "base-ratio", difficulty: difficulty.id, excludedFingerprints: [], randomSeed });
+        templates.add(question.templateId);
+      }
+    }
+    expect(templates.has("base-ratio-v3"), `原始公式题缺失，实际模板：${[...templates].join(", ")}`).toBe(true);
+    expect(templates.has("base-ratio-bypass-v4"), `变形公式题缺失，实际模板：${[...templates].join(", ")}`).toBe(true);
+  });
+
+  it("base-ratio 变形公式题：方向 + |a−b| 卡上限能唯一锁定答案", () => {
+    const samples = samplesOf("base-ratio-bypass-v4", "base-ratio");
+    assertCleanOptions(samples, "base-ratio-bypass-v4");
+    for (const { question } of samples) {
+      const share = Number(question.params.share);
+      const span = Number(question.params.span);
+      const numbers = numbersOf(question).map(Number);
+      const answer = numbers[question.answerIndex];
+      // 答案必须落进开区间：方向对（不等于现期比重）、幅度小于 |a−b|
+      expect(answer, `答案不在 (现期比重 ± |a−b|) 内：${question.explanation}`).not.toBe(share);
+      expect(Math.abs(answer - share), `答案幅度越界：${question.explanation}`).toBeLessThan(span + 1e-9);
+      // 且是唯一一个落进区间的选项——否则「卡上限」这一步推不出答案
+      const inside = numbers.filter((value) => value !== share && Math.abs(value - share) < span);
+      expect(inside, `区间内不止一个选项：${question.options.join(" / ")}`).toEqual([answer]);
+      // 解析要把两条路线的关系讲清楚，而不是只报一个数
+      expect(question.explanation).toContain("两期比重差");
+      expect(question.explanation).toContain("|a−b|");
+    }
+  });
+
+  it("base-ratio 原始公式题：分母分子各自还原到基期，解析同时给出变形路线", () => {
+    const samples = samplesOf("base-ratio-v3", "base-ratio");
+    assertCleanOptions(samples, "base-ratio-v3");
+    for (const { question } of samples) {
+      const basePart = Number(question.params.basePart);
+      const baseWhole = Number(question.params.baseWhole);
+      // 答案来自「基期部分 ÷ 基期整体」，与材料给的现期量、增速自洽
+      const expected = Math.round((basePart / baseWhole) * 100 * 100) / 100;
+      const answer = Number(numbersOf(question)[question.answerIndex]);
+      expect(Math.abs(answer - expected), `答案与「基期部分÷基期整体」不符：${question.explanation}`).toBeLessThan(0.02);
+      // 解析必须给出还原过程的两个中间量，否则「原始公式」只是嘴上说说
+      expect(question.explanation).toContain(String(basePart));
+      expect(question.explanation).toContain(String(baseWhole));
+      // 同时点出更快的变形路线，否则做题人只会硬算
+      expect(question.explanation).toContain("两期比重差");
+    }
+  });
+
+  it("base-ratio 逆向题：材料不出现占比，否则本年占比可直接由量相除读出", () => {
+    const samples = samplesOf("base-ratio-current-v3", "base-ratio");
+    assertCleanOptions(samples, "base-ratio-current-v3");
+    for (const { question } of samples) {
+      const paragraphs = question.material?.paragraphs ?? [];
+      for (const text of paragraphs) {
+        expect(text, `材料泄漏了占比：${text}`).not.toContain("占比");
+      }
+    }
   });
 });
