@@ -27,8 +27,6 @@ const SEEDS = Array.from({ length: 24 }, (_, index) => `audit-${index}`);
 const PADDING_DEBT = new Set([
   "amount-drop-rate-v2",
   "average-rate-v3",
-  "base-diff-v2",
-  "base-sum-v2",
   "decimal-multiply-split-v2",
   "interval-growth-back-v3",
   "interval-growth-v3",
@@ -104,6 +102,54 @@ describe("选项与解析的硬约束", () => {
     }
     const unexpected = [...offenders].filter((id) => !PADDING_DEBT.has(id)).sort();
     expect(unexpected, `这些模板的干扰项去重后不够 4 项，只能靠 options() 补数：${unexpected.join(", ")}`).toEqual([]);
+  });
+
+  /**
+   * 基期差/基期合计：选项差距按真题口径落位。
+   *
+   * 反馈来源：「高级的选项差距太小了」。差距 <2% 时截位、判方向全用不上，
+   * 只能精确到个位硬算，和速算训练目标相反；差到一倍以上又成了白送分。
+   * 现在由 `spacedDistractors` 统一落位：**所有选项 ≥2%，每题至少 2 个 ≥5%**，
+   * 2%~5% 的窄差项每题最多一个（宽差项不够时才顶上）。
+   */
+  it("base-difference：选项相对差距 ≥2%，且多数在 5% 以上", () => {
+    const bands = { narrow: 0, wide: 0 };
+    for (const difficulty of difficulties) {
+      for (let seed = 0; seed < 80; seed += 1) {
+        const question = generateQuestion({
+          topicId: "base-difference",
+          difficulty: difficulty.id,
+          excludedFingerprints: [],
+          randomSeed: `bd-gap-${difficulty.id}-${seed}`,
+        });
+        // 方向判断题的选项是「扩大/收窄」，没有数值差距可言
+        if (question.templateId === "base-diff-direction-v2") continue;
+        const numbers = numbersOf(question).map(Number);
+        expect(new Set(question.options).size, `选项重复：${question.options.join(" / ")}`).toBe(4);
+        const answer = numbers[question.answerIndex];
+        const gaps = numbers
+          .filter((_, index) => index !== question.answerIndex)
+          .map((value) => Math.abs(value - answer) / answer);
+        for (const gap of gaps) {
+          expect(gap, `选项挨太近（${(gap * 100).toFixed(1)}%）：${question.stem} → ${question.options.join(" / ")}`)
+            .toBeGreaterThanOrEqual(0.02);
+          // 2%~5% 是「个别」：每题最多一个
+          if (gap < 0.05) bands.narrow += 1;
+          else bands.wide += 1;
+        }
+        expect(gaps.filter((gap) => gap < 0.05).length, `窄差项不止一个：${question.options.join(" / ")}`).toBeLessThanOrEqual(1);
+        expect(gaps.filter((gap) => gap >= 0.05).length, `宽差项不足 2 个：${question.options.join(" / ")}`).toBeGreaterThanOrEqual(2);
+        for (const [index, value] of numbers.entries()) {
+          if (index === question.answerIndex) continue;
+          expect(
+            question.explanation.includes(String(value)),
+            `解析没有点名干扰项 ${value}：${question.explanation}`,
+          ).toBe(true);
+        }
+      }
+    }
+    // 整体分布：5% 以上的应占绝大多数
+    expect(bands.wide / (bands.wide + bands.narrow), `窄差项占比过高：${JSON.stringify(bands)}`).toBeGreaterThan(0.85);
   });
 
   it("part-quantity 高难题：整体=地区生产总值、部分=工业增加值，比重分母与整体同名", () => {

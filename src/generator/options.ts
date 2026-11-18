@@ -69,6 +69,72 @@ export function options(
   };
 }
 
+/** 干扰项候选：`value` 是数值本身，`why` 是它在解析里的「错在哪」（解析要能逐项点名） */
+export type DistractorCandidate = { value: number; why: string };
+
+/** 选项相对差距的硬底线：低于 2% 的项一律不要 */
+const MIN_RELATIVE_GAP = 0.02;
+/** 舒适区：真实考试里选项大多差 5% 以上，估到首位有效数字就能定答案 */
+const COMFORT_RELATIVE_GAP = 0.05;
+/** 上限：差一倍以上的干扰项等于白送分（数量级都错了，不用算也能排除），只当备胎 */
+const MAX_RELATIVE_GAP = 0.45;
+
+/**
+ * 按「相对差距」挑选干扰项——资料分析真题口径。
+ *
+ * 背景：选项挨得太近（<2%）时，估算、截位、判方向这些方法全部失效，
+ * 题目退化成「精确到个位」的硬算，和「速算」这个训练目标自相矛盾；
+ * 而选项离得太远（>50%）又等于白送分。这里统一按差距落位：
+ *
+ * - **2% 是硬底线**：低于 2% 的候选直接弃用；
+ * - **5%~45% 是主力**：至少要有 2 个候选落在这里，否则返回 `null` 让调用方换数据重出；
+ * - **2%~5% 只留一个**：默认不用，偶尔（约三成）替换一个宽差项，作为高难题「多看一位」的保留节目；
+ * - **超过 45% 的降级为备胎**：只有主力不够 3 个时才顶上（口径错到数量级的那种错解）。
+ *
+ * 返回 `null` 而不是硬补数：`options()` 的自动补数是 `answer±5%·k` 这种纯凑数项，
+ * 解析里没法逐项点名，等于把一个错误的干扰项塞进卷子。
+ */
+export function spacedDistractors(
+  answer: number,
+  candidates: DistractorCandidate[],
+  random: () => number,
+  digits = 0,
+): DistractorCandidate[] | null {
+  if (!Number.isFinite(answer) || answer <= 0) return null;
+  const used = new Set<number>([round(answer, digits)]);
+  const comfort: DistractorCandidate[] = [];
+  const narrow: DistractorCandidate[] = [];
+  const far: DistractorCandidate[] = [];
+  for (const candidate of candidates) {
+    const value = round(candidate.value, digits);
+    if (!Number.isFinite(value) || value <= 0 || used.has(value)) continue;
+    used.add(value);
+    const gap = Math.abs(value - answer) / answer;
+    if (gap < MIN_RELATIVE_GAP) continue;
+    const item = { value, why: candidate.why };
+    if (gap < COMFORT_RELATIVE_GAP) narrow.push(item);
+    else if (gap > MAX_RELATIVE_GAP) far.push(item);
+    else comfort.push(item);
+  }
+  // 主力项不足 2 个：这组数据的选项天生挤在一起（或只能靠数量级错解凑数），换数据重出比硬凑更诚实
+  if (comfort.length < 2) return null;
+  const shuffle = (list: DistractorCandidate[]) => {
+    for (let index = list.length - 1; index > 0; index -= 1) {
+      const target = Math.floor(random() * (index + 1));
+      [list[index], list[target]] = [list[target], list[index]];
+    }
+    return list;
+  };
+  const picked = [...shuffle(comfort), ...shuffle(far)].slice(0, 3);
+  if (picked.length < 3) {
+    // 主力不够才动用窄差项，且最多一个（2%~5% 是「个别」，不能成了主力）
+    picked.push(...shuffle(narrow).slice(0, 3 - picked.length));
+  } else if (narrow.length > 0 && random() < 0.3) {
+    picked[2] = narrow[0];
+  }
+  return picked.length === 3 ? picked : null;
+}
+
 /** 整数选项（数字推理等无后缀场景） */
 export function integerOptions(
   answer: number,

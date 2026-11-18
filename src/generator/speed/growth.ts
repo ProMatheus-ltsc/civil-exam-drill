@@ -1,6 +1,6 @@
 /** 资料速算 · 增长线模块：增长率/增长量/基期量/倍数翻番/基期差/间隔/混合/年均 */
 import { fmt, round } from "../random";
-import { options } from "../options";
+import { options, spacedDistractors } from "../options";
 import { directionOptions, tableBlock, chartBlock } from "./material";
 import type { MaterialSpec, QuestionDraft, Rng } from "../types";
 
@@ -10,15 +10,21 @@ function rateSet(answer: number, random: () => number) {
   return options(answer, [answer + 2, answer - 1, round(answer / 2, 1)], "%", random, 1);
 }
 
-/** 两个对象的基期/现期数据集合（材料题共用） */
+/**
+ * 两个对象的基期/现期数据集合（基期差三问共用）。
+ *
+ * 三条硬约束，都是为了「差值」这个考点本身站得住：
+ * 1. 两个对象的基期量必须在同一量级（B 是 A 的 45%~80%）——否则差值几乎等于大的那个对象，
+ *    还原不还原看不出区别，也就无所谓「先还原再相减」；
+ * 2. 两个增速至少差 3 个百分点——差太小时现期差与基期差几乎相同，「方向判断」那问无从作答；
+ * 3. B0 取整到 10：基期差是整数才好按 2%/5% 的刻度摆选项，避免四舍五入把差距吃掉。
+ */
 function pairDataset(r: Rng, level: number) {
   const scale = level >= 3 ? 100 : level === 2 ? 50 : 20;
   const rA = r.integer(level === 3 ? 8 : level === 2 ? 6 : 3, level === 3 ? 26 : level === 2 ? 20 : 14);
-  const rB = r.integer(2, Math.max(1, rA - (level === 3 ? 4 : 2)));
-  const baseA = r.integer(10, 30) * scale;
-  const baseB = r.integer(4, Math.max(5, Math.round(baseA * 0.5))) * (scale / 5 >= 1 ? Math.max(1, Math.round(scale / 5)) : 1);
-  const A0 = baseA;
-  const B0 = Math.max(10, baseB);
+  const rB = Math.max(2, rA - r.integer(3, level >= 3 ? 7 : 5));
+  const A0 = r.integer(12, 30) * scale;
+  const B0 = Math.max(10, Math.round((A0 * r.integer(45, 80)) / 1000) * 10);
   const A1 = Math.round(A0 * (1 + rA / 100));
   const B1 = Math.round(B0 * (1 + rB / 100));
   const year = r.pick([2022, 2023]);
@@ -188,11 +194,11 @@ function buildPairMaterial(
 ): MaterialSpec {
   return {
     paragraphs: [
-      `${year + 1} 年，${labelA}完成 ${unit}${fmt(dataset.A1)}，同比增长 ${fmt(dataset.rA)}%；${labelB}完成 ${unit}${fmt(dataset.B1)}，同比增长 ${fmt(dataset.rB)}%。`,
+      `${year + 1} 年，${labelA}完成 ${fmt(dataset.A1)} ${unit}，同比增长 ${fmt(dataset.rA)}%；${labelB}完成 ${fmt(dataset.B1)} ${unit}，同比增长 ${fmt(dataset.rB)}%。`,
     ],
     table: tableBlock(
-      `${year + 1} 年主要指标`,
-      ["指标", `${year + 1} 年${unit}`, `同比增速`],
+      `${year + 1} 年主要指标（单位：${unit}）`,
+      ["指标", `${year + 1} 年`, "同比增速"],
       [
         [labelA, fmt(dataset.A1), pct(dataset.rA)],
         [labelB, fmt(dataset.B1), pct(dataset.rB)],
@@ -200,43 +206,81 @@ function buildPairMaterial(
     ),
     chart: chartBlock("bar", unit, [labelA, labelB], [
       { label: `${year + 1} 年`, values: [dataset.A1, dataset.B1] },
-      { label: `${year} 年`, values: [dataset.A0, dataset.B0] },
     ]),
   };
 }
 
+/** 两个对象必须是同一组口径（投资对投资、出口对出口），否则「两者之差」在材料里读不出意义 */
+const PAIR_THEMES = [
+  { labelA: "东部地区投资", labelB: "中部地区投资", unit: "亿元" },
+  { labelA: "甲省出口额", labelB: "乙省出口额", unit: "亿美元" },
+  { labelA: "城镇零售额", labelB: "乡村零售额", unit: "亿元" },
+  { labelA: "货物出口额", labelB: "货物进口额", unit: "亿美元" },
+];
+
 export function generateBaseDifference(r: Rng): QuestionDraft | null {
   const { level, integer, random } = r;
-  const labelA = r.pick(["东部地区投资", "甲省出口额", "城镇零售额", "货物出口"]);
-  const labelB = r.pick(["中部地区投资", "乙省出口额", "乡村零售额", "货物进口"]);
-  const unit = labelA.includes("投资") ? "亿元" : labelA.includes("零售") ? "亿元" : "亿美元";
+  const theme = r.pick(PAIR_THEMES);
+  const { labelA, labelB, unit } = theme;
   const dataset = pairDataset(r, level);
   const d0 = dataset.A0 - dataset.B0;
-  if (d0 <= 0) return null;
   const d1 = dataset.A1 - dataset.B1;
-  const diffGrowth = Math.round(((d1 - d0) / d0) * 100);
   const material = buildPairMaterial(labelA, labelB, dataset.year, dataset, unit);
   const variant = integer(0, 2);
   if (variant === 0) {
-    const set = options(d0, [d1, Math.round(d0 * (1 + (dataset.rA - dataset.rB) / 100)), Math.round(d1 / 2)], ` ${unit}`, random);
+    /**
+     * 干扰项只放「真的会犯的错」，且相互差距按真题口径落位（见 spacedDistractors）：
+     * 现期差（忘了还原）、误用增速差折算、只还原了一方。
+     */
+    const picked = spacedDistractors(
+      d0,
+      [
+        { value: d1, why: `是现期差（两个对象都没还原到 ${dataset.year} 年）` },
+        {
+          value: Math.round(d0 * (1 + (dataset.rA - dataset.rB) / 100)),
+          why: `拿两个增速之差 ${dataset.rA - dataset.rB} 个百分点直接折算基期差`,
+        },
+        { value: dataset.A0 - dataset.B1, why: `只把${labelA}还原成基期、${labelB}用了现期` },
+        { value: dataset.A1 - dataset.B0, why: `只把${labelB}还原成基期、${labelA}用了现期` },
+      ],
+      random,
+    );
+    if (!picked) return null;
+    const set = options(d0, picked.map((item) => item.value), ` ${unit}`, random, 0);
     return {
       templateId: "base-diff-v2",
       params: { ...dataset, d0, d1 },
       stem: `根据材料，${dataset.year} 年两者之差约为多少${unit}？`,
       ...set,
       material,
-      explanation: `基期差=两部分别还原到 ${dataset.year} 年再作差：${labelA}基期=${fmt(dataset.A1)}÷(1+${dataset.rA}%)=${fmt(dataset.A0)}，${labelB}基期=${fmt(dataset.B1)}÷(1+${dataset.rB}%)=${fmt(dataset.B0)}；基期差=${fmt(dataset.A0)}−${fmt(dataset.B0)}=${d0}。干扰项 ${d1} 是现期差（未还原年份），${Math.round(d0 * (1 + (dataset.rA - dataset.rB) / 100))} 是误用增速差直接折算基期差。`,
+      explanation: `基期差=两部分别还原到 ${dataset.year} 年再作差：${labelA}基期=${fmt(dataset.A1)}÷(1+${fmt(dataset.rA)}%)=${fmt(dataset.A0)}，${labelB}基期=${fmt(dataset.B1)}÷(1+${fmt(dataset.rB)}%)=${fmt(dataset.B0)}；基期差=${fmt(dataset.A0)}−${fmt(dataset.B0)}=${d0}。干扰项：${picked.map((item) => `${item.value} ${item.why}`).join("；")}。`,
     };
   }
   if (variant === 1) {
-    const set = options(dataset.A0 + dataset.B0, [dataset.A1 + dataset.B1, Math.round((dataset.A1 + dataset.B1) / (1 + (dataset.rA + dataset.rB) / 200)), dataset.A0 + dataset.B1], ` ${unit}`, random);
+    const answer = dataset.A0 + dataset.B0;
+    const current = dataset.A1 + dataset.B1;
+    const picked = spacedDistractors(
+      answer,
+      [
+        { value: current, why: `是现期直接相加（把今年的量当成了基期量）` },
+        {
+          value: Math.round(current / (1 + (dataset.rA + dataset.rB) / 100)),
+          why: `把两个增速直接相加当合计增速去折算（增速不能相加，合计增速是被量加权的）`,
+        },
+        { value: dataset.A1 + dataset.B0, why: `只把${labelB}还原成基期、${labelA}用了现期` },
+        { value: dataset.A0 + dataset.B1, why: `只把${labelA}还原成基期、${labelB}用了现期` },
+      ],
+      random,
+    );
+    if (!picked) return null;
+    const set = options(answer, picked.map((item) => item.value), ` ${unit}`, random, 0);
     return {
       templateId: "base-sum-v2",
       params: { ...dataset, d0, d1 },
       stem: `根据材料，${dataset.year} 年两者合计约为多少${unit}？`,
       ...set,
       material,
-      explanation: `基期合计=${labelA}基期+${labelB}基期=${fmt(dataset.A0)}+${fmt(dataset.B0)}=${dataset.A0 + dataset.B0}。干扰项 ${dataset.A1 + dataset.B1} 是现期直接相加（口径错误）；更不能拿两个增速简单平均折算（增速的平均不等于合计的增速）。`,
+      explanation: `基期合计=${labelA}基期+${labelB}基期=${fmt(dataset.A0)}+${fmt(dataset.B0)}=${answer}。干扰项：${picked.map((item) => `${item.value} ${item.why}`).join("；")}。`,
     };
   }
   const answer = d1 > d0 ? "扩大" : "收窄";
