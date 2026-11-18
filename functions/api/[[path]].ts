@@ -166,6 +166,54 @@ interface RunAgg {
   durationMs: number;
 }
 
+/**
+ * 单局成绩：满 RUN_LENGTH 题才算完成。
+ * 抽成函数是因为**幂等重放也要算**——第一次提交写库成功但响应在网络上丢了时，
+ * 客户端会带着同一个 idempotencyKey 重试；如果这里只回「已作答」不带 run，
+ * 第 10 题就永远进不了结算页，用户只能重开一局。
+ */
+async function runSummaryOf(
+  c: { env: Bindings },
+  userId: string,
+  runId: string | null,
+) {
+  if (!runId) return null;
+  const agg = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs,MAX(q.topic_id) AS topicId,MAX(q.difficulty) AS difficulty
+     FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
+     WHERE a.user_id=? AND a.run_id=?`,
+  )
+    .bind(userId, runId)
+    .first<{
+      total: number;
+      correct: number;
+      durationMs: number;
+      topicId: string;
+      difficulty: RunDifficulty;
+    }>();
+  if (!agg) return null;
+  const total = Number(agg.total);
+  if (total < RUN_LENGTH) return null;
+  const data = {
+    topicId: String(agg.topicId),
+    difficulty: agg.difficulty ?? "hard",
+    total,
+    correct: Number(agg.correct),
+    durationMs: Number(agg.durationMs),
+  };
+  const stars = runStars(data);
+  return {
+    finished: true,
+    difficulty: data.difficulty,
+    total,
+    correct: data.correct,
+    accuracy: data.correct / total,
+    durationMs: data.durationMs,
+    passed: stars > 0,
+    stars,
+  };
+}
+
 async function loadQuizStatus(c: { env: Bindings; get(key: string): string }) {
   const userId = c.get("userId");
   const [runRows, statRows] = await Promise.all([
@@ -1454,7 +1502,7 @@ app.post("/quiz/answers", async (c) => {
   );
   const [previous, question] = await Promise.all([
     c.env.DB.prepare(
-      "SELECT a.id AS attemptId,a.correct,q.answer_index AS answerIndex,q.explanation,a.created_at AS savedAt FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.idempotency_key=?",
+      "SELECT a.id AS attemptId,a.correct,q.answer_index AS answerIndex,q.explanation,a.created_at AS savedAt,q.run_id AS runId FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id WHERE a.user_id=? AND a.idempotency_key=?",
     )
       .bind(c.get("userId"), body.idempotencyKey)
       .first<Record<string, unknown>>(),
@@ -1464,7 +1512,25 @@ app.post("/quiz/answers", async (c) => {
       .bind(body.questionId, c.get("userId"))
       .first<{ answerIndex: number; explanation: string; expiresAt: string; runId: string | null; topicId: string; difficulty: RunDifficulty }>(),
   ]);
-  if (previous) return c.json(ok(previous));
+  if (previous) {
+    // 重放：同一次作答（客户端重试 / 双发）只算一条记录，但局次判定要重新算，
+    // 否则「第 10 题响应丢失 + 重试」会卡在答题页拿不到成绩
+    const run = await runSummaryOf(
+      c,
+      c.get("userId"),
+      (previous.runId as string | null) ?? null,
+    );
+    return c.json(
+      ok({
+        attemptId: previous.attemptId,
+        correct: Boolean(previous.correct),
+        answerIndex: previous.answerIndex,
+        explanation: previous.explanation,
+        savedAt: previous.savedAt,
+        run,
+      }),
+    );
+  }
   if (!question) return c.json(fail("NOT_FOUND", "题目不存在或无权访问"), 404);
   if (new Date(question.expiresAt).getTime() < Date.now())
     return c.json(fail("QUESTION_EXPIRED", "题目已过期"), 410);
@@ -1493,37 +1559,7 @@ app.post("/quiz/answers", async (c) => {
     )
     .run();
   // 局次完成时回传通关判定（该难度局正确率与总用时均达标）
-  let run = null;
-  if (question.runId) {
-    const agg = await c.env.DB.prepare(
-      `SELECT COUNT(*) AS total,SUM(a.correct) AS correct,SUM(a.duration_ms) AS durationMs,MAX(q.topic_id) AS topicId,MAX(q.difficulty) AS difficulty
-       FROM quiz_attempts a JOIN generated_questions q ON q.id=a.question_id
-       WHERE a.user_id=? AND a.run_id=?`,
-    )
-      .bind(c.get("userId"), question.runId)
-      .first<{ total: number; correct: number; durationMs: number; topicId: string; difficulty: RunDifficulty }>();
-    if (agg && Number(agg.total) >= RUN_LENGTH) {
-      const total = Number(agg.total);
-      const aggData = {
-        topicId: String(agg.topicId),
-        difficulty: agg.difficulty ?? "hard",
-        total,
-        correct: Number(agg.correct),
-        durationMs: Number(agg.durationMs),
-      };
-      const stars = runStars(aggData);
-      run = {
-        finished: true,
-        difficulty: aggData.difficulty,
-        total,
-        correct: aggData.correct,
-        accuracy: aggData.correct / total,
-        durationMs: aggData.durationMs,
-        passed: stars > 0,
-        stars,
-      };
-    }
-  }
+  const run = await runSummaryOf(c, c.get("userId"), question.runId);
   return c.json(
     ok({
       attemptId,

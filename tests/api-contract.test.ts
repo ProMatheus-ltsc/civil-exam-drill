@@ -158,7 +158,17 @@ class FakeStatement {
         answerIndex: 1,
         explanation: "测试讲解",
         expiresAt: "2099-01-01T00:00:00Z",
+        // 带 run_id 才能走到「局次成绩」这条分支
+        runId: "run_test",
       } as T;
+    // 幂等重放：按 idempotency_key 回查已写入的作答
+    if (this.sql.includes("a.idempotency_key=?")) {
+      const record = this.db.attemptsByKey.get(String(this.values[1]));
+      return (record ? { ...record } : null) as T | null;
+    }
+    // 局次成绩聚合：默认 null（不满 10 题），需要时由用例填 runAgg
+    if (this.sql.includes("COUNT(*) AS total,SUM(a.correct)"))
+      return (this.db.runAgg ? { ...this.db.runAgg } : null) as T | null;
     if (
       this.sql.startsWith("SELECT id FROM quiz_attempts") &&
       this.sql.includes("correct=0")
@@ -275,6 +285,18 @@ class FakeStatement {
   async run() {
     this.db.writes.push(this.sql);
     const flat = this.sql.replace(/\s+/g, " ");
+    if (this.sql.startsWith("INSERT INTO quiz_attempts")) {
+      // 列顺序：id,user_id,question_id,selected_index,correct,duration_ms,idempotency_key,created_at,run_id
+      const [id, , , , correct, , key, createdAt, runId] = this.values;
+      this.db.attemptsByKey.set(String(key), {
+        attemptId: String(id),
+        correct: Number(correct),
+        answerIndex: 1,
+        explanation: "测试讲解",
+        savedAt: String(createdAt),
+        runId: runId == null ? null : String(runId),
+      });
+    }
     if (this.sql.startsWith("UPDATE quiz_attempts SET mastered=?")) {
       const [mastered, reviewStage] = this.values as [number, number];
       this.db.mistakeStage = Number(reviewStage);
@@ -397,6 +419,26 @@ class FakeDb {
   >();
   /** 记录所有写语句，用来断言「重复请求不该再插入新题」 */
   writes: string[] = [];
+  /** 已写入的作答：idempotencyKey → 记录（重放断言用） */
+  attemptsByKey = new Map<
+    string,
+    {
+      attemptId: string;
+      correct: number;
+      answerIndex: number;
+      explanation: string;
+      savedAt: string;
+      runId: string | null;
+    }
+  >();
+  /** 按局聚合的结果；默认 null 表示该局未满 10 题 */
+  runAgg: {
+    total: number;
+    correct: number;
+    durationMs: number;
+    topicId: string;
+    difficulty: string;
+  } | null = null;
   /** 错题复习状态（单题模拟）：当前阶段 / 是否出清 / 错因 */
   mistakeStage = 0;
   mistakeMastered = false;
@@ -1301,6 +1343,60 @@ describe("API contract guards", () => {
     const payload = await response.json();
     expect(payload.data.correct).toBe(true);
     expect(payload.data).toHaveProperty("run");
+  });
+
+  it("同一 idempotencyKey 重放：只写一条作答，且照样返回局次成绩", async () => {
+    const db = new FakeDb();
+    // 模拟第 10 题：本局已满 10 题、答对 9 题（用时远低于预算）
+    db.runAgg = {
+      total: 10,
+      correct: 9,
+      durationMs: 1000,
+      topicId: "addition",
+      difficulty: "hard",
+    };
+    const idempotencyKey = crypto.randomUUID();
+    const body = JSON.stringify({
+      questionId: "q_test",
+      selectedIndex: 1,
+      elapsedMs: 800,
+      idempotencyKey,
+    });
+    const send = async () => {
+      const response = await app.request(
+        "/api/quiz/answers",
+        {
+          method: "POST",
+          headers: { ...auth, "content-type": "application/json" },
+          body,
+        },
+        { ...env, DB: db },
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()).data;
+    };
+
+    const first = await send();
+    const second = await send();
+
+    // 重放拿到的必须是同一条作答，而不是新增一条
+    expect(second.attemptId).toBe(first.attemptId);
+    // correct 在 D1 里是 0/1，接口必须回布尔，否则重试后前端会判成答错
+    expect(first.correct).toBe(true);
+    expect(second.correct).toBe(true);
+    // 关键：第一次响应若在网络上丢了，客户端会重试；重试也必须带 run，
+    // 否则第 10 题永远进不了结算页（用户只能重开一局）
+    expect(first.run).toMatchObject({
+      finished: true,
+      total: 10,
+      correct: 9,
+      passed: true,
+      stars: 2,
+    });
+    expect(second.run).toEqual(first.run);
+    expect(
+      db.writes.filter((sql) => sql.startsWith("INSERT INTO quiz_attempts")),
+    ).toHaveLength(1);
   });
 
   it("aggregates a personal profile summary", async () => {

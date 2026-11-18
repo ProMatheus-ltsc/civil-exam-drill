@@ -63,6 +63,8 @@ export function DocPractice({ docId }: { docId: string }) {
   const [picked, setPicked] = useState<number | null>(null);
   const [score, setScore] = useState(0);
   const started = useRef(0);
+  /** 每题一个提交幂等键：网络重试沿用同一个 key，服务端才认得出是同一次提交 */
+  const keys = useRef(new Map<string, string>());
   const { busy, run } = useAsync();
 
   useEffect(() => {
@@ -72,6 +74,7 @@ export function DocPractice({ docId }: { docId: string }) {
     setIndex(0);
     setPicked(null);
     setScore(0);
+    keys.current.clear();
   }, [docId]);
 
   useEffect(() => {
@@ -117,16 +120,23 @@ export function DocPractice({ docId }: { docId: string }) {
     if (!question || picked !== null) return;
     setPicked(option);
     void run(async () => {
+      // 每题一个幂等键：网络失败后用户重点同一个选项，必须复用同一个 key，
+      // 否则服务端会按「该题已有作答」回 409，用户永远拿不到对错与解析
+      const key =
+        keys.current.get(question.questionId) ?? crypto.randomUUID();
+      keys.current.set(question.questionId, key);
       try {
         const next = await api<AnswerResult>("/quiz/answers", {
           method: "POST",
+          idempotent: true,
           body: JSON.stringify({
             questionId: question.questionId,
             selectedIndex: option,
             elapsedMs: Math.round(performance.now() - started.current),
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: key,
           }),
         });
+        keys.current.delete(question.questionId);
         setItems((previous) =>
           previous.map((item, itemIndex) =>
             itemIndex === index ? { ...item, result: next } : item,

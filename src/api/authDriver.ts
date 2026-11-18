@@ -68,6 +68,21 @@ function mapUser(raw: AuthUserPayload): AuthUser {
 }
 
 /**
+ * 共享包在 `errorMode: 'boolean'` 下只把成败告诉调用方，服务端的原因会丢，
+ * 登录页就只能显示「操作失败，请稍后重试」——用户根本不知道是密码错、账号不存在还是网络断了。
+ * 这里把**登录/注册**这条路径的原始文案暂存一下，由登录页在 `!ok` 时取走。
+ *
+ * 只记登录与注册：会话探测的 401（未登录）是正常流程，记进来会污染提示。
+ */
+let lastAuthError = "";
+
+export function takeAuthError(): string {
+  const message = lastAuthError;
+  lastAuthError = "";
+  return message;
+}
+
+/**
  * 请求适配：把共享包统一契约的字段名翻译成本项目后端认的字段名。
  *
  * - 登录：共享包发 `{ username, password }` → 本项目后端认 `{ email, password }`
@@ -77,16 +92,24 @@ function mapUser(raw: AuthUserPayload): AuthUser {
  */
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
-  if (body && typeof body.username === "string") {
-    const email = typeof body.email === "string" ? body.email : body.username;
-    const translated: Record<string, unknown> = { ...body, email };
-    // 本项目后端不认 username，只认 email
-    delete translated.username;
-    return unwrapUserEnvelope(
-      await api<T>(path, { ...init, body: JSON.stringify(translated) }),
-    );
+  try {
+    if (body && typeof body.username === "string") {
+      const email = typeof body.email === "string" ? body.email : body.username;
+      const translated: Record<string, unknown> = { ...body, email };
+      // 本项目后端不认 username，只认 email
+      delete translated.username;
+      return unwrapUserEnvelope(
+        await api<T>(path, { ...init, body: JSON.stringify(translated) }),
+      );
+    }
+    return unwrapUserEnvelope(await api<T>(path, init ?? {}));
+  } catch (error) {
+    if (/\/(login|register)/.test(path)) {
+      lastAuthError =
+        error instanceof Error && error.message ? error.message : "";
+    }
+    throw error;
   }
-  return unwrapUserEnvelope(await api<T>(path, init ?? {}));
 }
 
 /** 本项目的服务端认证驱动 */

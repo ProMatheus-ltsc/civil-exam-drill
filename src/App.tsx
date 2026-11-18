@@ -23,6 +23,7 @@ import { Stack } from "@shared/core/components/responsive/Stack";
 import { ToastContainer } from "@shared/core/components/Toast";
 import { useAuth } from "@shared/core/auth";
 import { api } from "./api/client";
+import { takeAuthError } from "./api/authDriver";
 import { PublicLayout } from "./components/PublicLayout";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { CommunityPage } from "./pages/CommunityPage";
@@ -87,6 +88,8 @@ function Login({
       return;
     }
     setError("");
+    // 清掉上一次失败残留的文案，避免把旧错误显示成这次的
+    takeAuthError();
     setBusy(true);
     try {
       const ok =
@@ -94,7 +97,8 @@ function Login({
           ? await registerWith({ username: trimmedEmail, password, displayName: nickname.trim() || undefined })
           : await login(trimmedEmail, password);
       if (!ok) {
-        setError("操作失败，请稍后重试");
+        // 共享包的 boolean 模式只回成败，服务端原因靠驱动暂存的那条文案补回来
+        setError(takeAuthError() || "操作失败，请稍后重试");
         return;
       }
       onLogin();

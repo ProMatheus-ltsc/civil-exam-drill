@@ -29,7 +29,7 @@ import { EmptyState } from "@shared/core/components/EmptyState";
 import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
-import { api } from "../api/client";
+import { api, isNetworkError } from "../api/client";
 import { openKnowledgeDoc } from "../lib/doc-link";
 import { perQuestionBudgetSeconds } from "../generator/catalog";
 import type { MaterialSpec } from "../generator/types";
@@ -254,6 +254,8 @@ export function QuizPage() {
       if (cached) return cached;
       const request = api<QuestionData>("/quiz/questions", {
         method: "POST",
+        // 服务端按 (runId, index) 复用同一题：网络抖动重放不会多生成、也不会打乱序号
+        idempotent: true,
         body: JSON.stringify({
           topicId: run.topicId,
           difficulty: run.difficulty,
@@ -383,6 +385,9 @@ export function QuizPage() {
     try {
       const grade = await api<Grade>("/quiz/answers", {
         method: "POST",
+        // 服务端按 idempotencyKey 去重：同一次作答重放拿到的是同一条记录，
+        // 不会写出两条作答、也不会把「第 10 题」的完成判定漏掉
+        idempotent: true,
         body: JSON.stringify({
           questionId,
           selectedIndex,
@@ -400,7 +405,12 @@ export function QuizPage() {
         void loadProgress();
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "提交失败，请重试", "error");
+      // 网络层失败是可恢复的：幂等键还留着，同一个选项再点一次就会复用同一次提交
+      const message = error instanceof Error ? error.message : "提交失败，请重试";
+      showToast(
+        isNetworkError(error) ? `${message}（再点一次选项即可重试）` : message,
+        "error",
+      );
       setPendingIndex(null);
     } finally {
       submittingRef.current = false;
