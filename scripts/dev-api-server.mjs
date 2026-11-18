@@ -640,12 +640,80 @@ const server = http.createServer(async (req, res) => {
     if (delay) await delay()
     const body = await readBody(req)
     try {
-      const { topicId, runId, index = 0, difficulty = 'medium' } = JSON.parse(body)
+      const { topicId, runId, index = 0, difficulty = 'medium', count = 1 } = JSON.parse(body)
       // 未知/已拆分的模块：与线上一致地拒绝（线上还会提示「已拆分为独立关卡」，
       // 本地没有 legacyTopics 文案，这里只保证不会给已下线的 id 出题）
       if (!topicOfId(topicId)) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_RETIRED', message: `${topicId} 不是有效模块，请从「专项训练」关卡地图进入` } }))
+        return
+      }
+      /**
+       * 一局一次取全（与线上 /quiz/questions 的 count 分支同形）：
+       * 客户端开局只发一次请求，题目里带回答案与解析供本地判分。
+       * mock 必须支持，否则本地开发时页面会拿不到 questions 而报「题目加载失败」。
+       */
+      const buildMock = (at) => {
+        const questionId = `q_${crypto.randomUUID()}`
+        const stem = topicId.startsWith('seq-')
+          ? `模拟数推题（${topicOfId(topicId)?.title ?? topicId}）：3、7、11、15、（ ），求括号中的数。`
+          : `模拟${topicOfId(topicId)?.title ?? topicId}题（${difficulty}局）：请选出正确选项。`
+        const options = topicId.startsWith('seq-') ? ['19', '21', '17', '18'] : ['选项 A', '选项 B', '选项 C', '选项 D']
+        const answerIndex = topicId.startsWith('seq-') ? 0 : at % 4
+        const generatedAt = new Date().toISOString()
+        const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString()
+        quizState.questions.set(questionId, {
+          topicId, difficulty, runId: runId ?? null, answerIndex,
+          explanation: '这是本地开发环境生成的模拟题目与解析。',
+          options, stem, generatedAt, expiresAt,
+        })
+        return {
+          questionId, topicId, difficulty, runId: runId ?? null, index: at,
+          runLength: RUN_LENGTH, stem, options, material: null,
+          answerIndex, explanation: '这是本地开发环境生成的模拟题目与解析。',
+          generatedAt, expiresAt,
+        }
+      }
+      if (runId && count > 1) {
+        if (!quizState.runs.has(runId)) quizState.runs.set(runId, { topicId, difficulty, answered: [], questions: [] })
+        const run = quizState.runs.get(runId)
+        run.questions ??= []
+        if (run.questions.length === 0) {
+          const starsByKey = passedRuns()
+          const topic = topicOfId(topicId)
+          const locked = topic && (topic.unlock || []).filter((u) => (starsByKey.get(`${u}|hard`) ?? 0) < 1)
+          if (locked && locked.length) {
+            res.writeHead(409, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, data: null, error: { code: 'TOPIC_LOCKED', message: `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join('、')}` } }))
+            return
+          }
+        } else {
+          const firstQ = quizState.questions.get(run.questions[0])
+          if (firstQ && (firstQ.topicId !== topicId || firstQ.difficulty !== difficulty)) {
+            res.writeHead(409, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, data: null, error: { code: 'RUN_STATE', message: '本局已切换到其它模块，请重新开始本局' } }))
+            return
+          }
+        }
+        const questions = []
+        for (let at = 0; at < Math.min(count, RUN_LENGTH); at += 1) {
+          const existingId = run.questions[at]
+          const existing = existingId ? quizState.questions.get(existingId) : null
+          if (existing) {
+            questions.push({
+              questionId: existingId, topicId: existing.topicId, difficulty: existing.difficulty,
+              runId, index: at, runLength: RUN_LENGTH, stem: existing.stem, options: existing.options,
+              material: null, answerIndex: existing.answerIndex, explanation: existing.explanation,
+              generatedAt: existing.generatedAt, expiresAt: existing.expiresAt, reused: true,
+            })
+            continue
+          }
+          const built = buildMock(at)
+          run.questions[at] = built.questionId
+          questions.push(built)
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, data: { runId, runLength: RUN_LENGTH, questions }, error: null }))
         return
       }
       if (runId) {

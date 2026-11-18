@@ -36,6 +36,13 @@ import {
 import type { TopicId } from "../../src/generator";
 import type { GeneratedQuestion, MaterialSpec } from "../../src/generator/types";
 import {
+  RUN_LENGTH,
+  RUN_DIFFICULTIES,
+  diffKey,
+  runStars,
+} from "../../src/quiz/rules";
+import type { RunDifficulty } from "../../src/quiz/rules";
+import {
   initialProgress,
   scheduleReview,
   type ReviewRating,
@@ -132,30 +139,9 @@ async function loadSearch(c: {
 }
 
 // ==================== 闯关题库：难度局/通关/星级 ====================
-export const RUN_LENGTH = 10;
-export const RUN_DIFFICULTIES = ["easy", "medium", "hard"] as const;
-type RunDifficulty = (typeof RUN_DIFFICULTIES)[number];
-
-/** 难度局 key：topicId|difficulty */
-const diffKey = (topicId: string, difficulty: RunDifficulty) => `${topicId}|${difficulty}`;
-
-/** 单局判定：完整 10 题、答对 ≥8、总用时不超过该难度局预算 */
-function runStars(agg: {
-  topicId: string;
-  difficulty: RunDifficulty;
-  total: number;
-  correct: number;
-  durationMs: number;
-}): number {
-  if (agg.total < RUN_LENGTH) return 0;
-  const topic = topicById.get(agg.topicId as TopicId);
-  if (topic && agg.durationMs > difficultyBudgetMs(topic, agg.difficulty)) return 0;
-  const accuracy = agg.correct / agg.total;
-  if (accuracy >= 1) return 3;
-  if (accuracy >= 0.9) return 2;
-  if (accuracy >= 0.8) return 1;
-  return 0;
-}
+// 判定规则抽到 src/quiz/rules.ts，与客户端共用：答题改为本地判分后，
+// 前端要能**离线算出星级**，两边口径必须同一份代码。
+export { RUN_LENGTH, RUN_DIFFICULTIES };
 
 interface RunAgg {
   topicId: string;
@@ -1307,6 +1293,12 @@ app.post("/quiz/questions", async (c) => {
       difficulty: z.enum(["easy", "medium", "hard"]),
       runId: z.string().uuid().optional(),
       index: z.number().int().min(0).max(RUN_LENGTH - 1).optional(),
+      /**
+       * 一局一次取全：count>1 时一次返回本局从 index 起的全部题目（含答案与解析）。
+       * 速算一局原本要发 10 次跨境请求，单次成功率 97% 时「一局至少失败一次」就有四成，
+       * 压成 1 次后同样的成功率下一次失败只剩 3%。文档小练仍走单题模式（不带 count）。
+       */
+      count: z.number().int().min(1).max(RUN_LENGTH).optional(),
     }),
   );
   const topic = topicById.get(body.topicId as TopicId);
@@ -1331,6 +1323,7 @@ app.post("/quiz/questions", async (c) => {
   const fetched = await c.env.DB.prepare(
     `SELECT id,topic_id AS topicId,difficulty,run_id AS runId,fingerprint,stem,
             options_json AS optionsJson,material_json AS materialJson,
+            answer_index AS answerIndex,explanation,
             created_at AS generatedAt,expires_at AS expiresAt
      FROM generated_questions
      WHERE user_id=? AND topic_id=? AND difficulty=? AND (run_id=? OR expires_at>?)
@@ -1347,12 +1340,205 @@ app.post("/quiz/questions", async (c) => {
       stem: string;
       optionsJson: string;
       materialJson: string | null;
+      answerIndex: number;
+      explanation: string;
       generatedAt: string;
       expiresAt: string;
     }>();
   const runQuestions = body.runId
     ? fetched.results.filter((row) => row.runId === body.runId).reverse()
     : [];
+
+  /**
+   * 批量模式：一局一次取全。
+   *
+   * 为什么要有这条路：速算一局原本是「取 1 题 × 10 + 提交 × 10」，再叠加客户端预取，
+   * 单次成功率 97% 时一局至少失败一次的概率是 46%，用户看到的就是「提交经常报错/加载失败」。
+   * 压成 1 次请求后，同样的链路质量下失败面只剩这一次——客户端还能带着退避重试它。
+   *
+   * 答案与解析随题一起下发：客户端据此**本地判分**，答题过程完全不依赖网络；
+   * 成绩仍逐题异步上报，网络抖动只会让统计延迟，不会打断答题。
+   */
+  if (body.runId && (body.count ?? 1) > 1) {
+    const want = Math.min(body.count ?? RUN_LENGTH, RUN_LENGTH);
+    const shape = (row: (typeof fetched.results)[number], index: number) => ({
+      questionId: row.id,
+      topicId: row.topicId,
+      difficulty: row.difficulty,
+      runId: body.runId,
+      index,
+      runLength: RUN_LENGTH,
+      stem: row.stem,
+      options: JSON.parse(row.optionsJson) as string[],
+      material: row.materialJson
+        ? (JSON.parse(row.materialJson) as MaterialSpec)
+        : null,
+      answerIndex: row.answerIndex,
+      explanation: row.explanation,
+      generatedAt: row.generatedAt,
+      expiresAt: row.expiresAt,
+      reused: true,
+    });
+    if (runQuestions.length > 0) {
+      // 重放（同一 runId 再取一次）：原样返回本局已生成的题，绝不重复插库
+      if (
+        runQuestions[0].topicId !== body.topicId ||
+        runQuestions[0].difficulty !== difficulty
+      )
+        return c.json(
+          fail("RUN_STATE", "本局已切换到其它模块，请重新开始本局"),
+          409,
+        );
+      return c.json(
+        ok({
+          runId: body.runId,
+          runLength: RUN_LENGTH,
+          questions: runQuestions.slice(0, want).map(shape),
+        }),
+      );
+    }
+    // 新开一局：解锁校验（只看前置模块的高难度局，不跑全量聚合）
+    const prereqStars = await loadPrereqStars(c, topic.unlock);
+    const locked = topic.unlock.filter(
+      (prereq) => (prereqStars.get(prereq) ?? 0) < 1,
+    );
+    if (locked.length > 0)
+      return c.json(
+        fail(
+          "TOPIC_LOCKED",
+          `请先通过前置关卡的高难度局（实战）：${locked.map(titleOf).join("、")}`,
+        ),
+        409,
+      );
+    if (!allowGeneration(`q:${c.get("userId")}:${body.topicId}:${difficulty}`))
+      return c.json(fail("RATE_LIMITED", "生成请求过于频繁，请稍后再试"), 429);
+    const nowIso = iso();
+    const expiresAt = iso(new Date(Date.now() + 7 * 86400000));
+    // 去重池：未过期的最多 50 条；本局新生成的题也要逐题加进去，避免一局内撞题
+    const pool = fetched.results
+      .filter((row) => row.expiresAt > nowIso)
+      .slice(0, 50)
+      .map((row) => row.fingerprint);
+    const rows: Array<{
+      id: string;
+      topicId: string;
+      difficulty: RunDifficulty;
+      templateId: string;
+      templateVersion: number;
+      fingerprint: string;
+      seed: string;
+      stem: string;
+      optionsJson: string;
+      answerIndex: number;
+      explanation: string;
+      paramsJson: string;
+      generatedAt: string;
+      expiresAt: string;
+      materialJson: string | null;
+      runId: string;
+    }> = [];
+    for (let index = 0; index < want; index += 1) {
+      const seed = crypto.randomUUID();
+      let generatedQuestion: GeneratedQuestion | null = null;
+      // 与单题模式同样逐级放宽：题池小于去重池时必须能出题，不能卡死
+      for (const tier of [
+        pool,
+        pool.slice(0, Math.floor(pool.length / 2)),
+        pool.slice(0, 5),
+        [],
+      ]) {
+        try {
+          generatedQuestion = generateQuestion({
+            topicId: body.topicId as TopicId,
+            difficulty,
+            excludedFingerprints: tier,
+            randomSeed: seed,
+          });
+          break;
+        } catch {
+          // 该档无解，继续放宽
+        }
+      }
+      if (!generatedQuestion)
+        return c.json(
+          fail("GENERATION_FAILED", "暂时无法生成合法新题，请重试"),
+          503,
+        );
+      pool.push(generatedQuestion.fingerprint);
+      const questionId = uuid("q");
+      const generatedAt = iso();
+      rows.push({
+        id: questionId,
+        topicId: body.topicId,
+        difficulty,
+        templateId: generatedQuestion.templateId,
+        templateVersion: generatedQuestion.templateVersion,
+        fingerprint: generatedQuestion.fingerprint,
+        seed,
+        stem: generatedQuestion.stem,
+        optionsJson: JSON.stringify(generatedQuestion.options),
+        answerIndex: generatedQuestion.answerIndex,
+        explanation: generatedQuestion.explanation,
+        paramsJson: JSON.stringify(generatedQuestion.params),
+        generatedAt,
+        expiresAt,
+        materialJson: generatedQuestion.material
+          ? JSON.stringify(generatedQuestion.material)
+          : null,
+        runId: body.runId,
+      });
+    }
+    // 一次 batch 落库：10 条 INSERT 单独跑就是 10 次 D1 往返，batch 只算一次
+    await c.env.DB.batch(
+      rows.map((row) =>
+        c.env.DB.prepare(
+          "INSERT INTO generated_questions(id,user_id,topic_id,difficulty,template_id,template_version,fingerprint,seed,stem,options_json,answer_index,explanation,params_json,created_at,expires_at,material_json,run_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ).bind(
+          row.id,
+          c.get("userId"),
+          row.topicId,
+          row.difficulty,
+          row.templateId,
+          row.templateVersion,
+          row.fingerprint,
+          row.seed,
+          row.stem,
+          row.optionsJson,
+          row.answerIndex,
+          row.explanation,
+          row.paramsJson,
+          row.generatedAt,
+          row.expiresAt,
+          row.materialJson,
+          row.runId,
+        ),
+      ),
+    );
+    return c.json(
+      ok({
+        runId: body.runId,
+        runLength: RUN_LENGTH,
+        questions: rows.map((row, index) => ({
+          questionId: row.id,
+          topicId: row.topicId,
+          difficulty,
+          runId: body.runId,
+          index,
+          runLength: RUN_LENGTH,
+          stem: row.stem,
+          options: JSON.parse(String(row.optionsJson)) as string[],
+          material: row.materialJson
+            ? (JSON.parse(String(row.materialJson)) as MaterialSpec)
+            : null,
+          answerIndex: row.answerIndex,
+          explanation: row.explanation,
+          generatedAt: row.generatedAt,
+          expiresAt: row.expiresAt,
+        })),
+      }),
+    );
+  }
+
   if (body.runId !== undefined) {
     if (body.index === undefined)
       return c.json(fail("INVALID_PARAM", "闯关模式需要题目序号 index"), 400);

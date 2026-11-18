@@ -1224,6 +1224,88 @@ describe("API contract guards", () => {
     expect(payload.data.index).toBe(0);
   });
 
+  it("一局一次取全：count 返回本局全部题目，带答案与解析，且只落库一次 batch", async () => {
+    const db = new FakeDb();
+    const runId = crypto.randomUUID();
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "addition",
+          difficulty: "easy",
+          runId,
+          index: 0,
+          count: 10,
+        }),
+      },
+      { ...env, DB: db },
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    const questions = payload.data.questions as Array<{
+      index: number;
+      options: string[];
+      answerIndex: number;
+      explanation: string;
+      questionId: string;
+    }>;
+    expect(questions).toHaveLength(10);
+    for (const [position, question] of questions.entries()) {
+      expect(question.index).toBe(position);
+      // 客户端要能**本地判分**：答案与解析必须随题下发
+      expect(typeof question.answerIndex).toBe("number");
+      expect(question.answerIndex).toBeGreaterThanOrEqual(0);
+      expect(question.answerIndex).toBeLessThan(4);
+      expect(question.explanation.length).toBeGreaterThan(0);
+      expect(new Set(question.options).size).toBe(4);
+      expect(question.questionId).toMatch(/^q/);
+    }
+    // 10 条 INSERT 走一次 batch：单独跑就是 10 次 D1 往返，弱网下最容易超时
+    expect(db.batches).toHaveLength(1);
+    expect(db.batches[0]).toHaveLength(10);
+  });
+
+  it("同一 runId 重取一局：原样返回已生成的题，不再插库", async () => {
+    const db = new FakeDb();
+    const runId = crypto.randomUUID();
+    db.runQuestionRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `q-run-${index}`,
+      topicId: "addition",
+      difficulty: "easy",
+      runId,
+      fingerprint: `fp-${index}`,
+      stem: `第 ${index} 题`,
+      optionsJson: JSON.stringify(["1", "2", "3", "4"]),
+      materialJson: null,
+      answerIndex: 1,
+      explanation: "解析",
+      generatedAt: "2026-11-18T00:00:00Z",
+      expiresAt: "2099-01-01T00:00:00Z",
+    }));
+    const response = await app.request(
+      "/api/quiz/questions",
+      {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          topicId: "addition",
+          difficulty: "easy",
+          runId,
+          index: 0,
+          count: 10,
+        }),
+      },
+      { ...env, DB: db },
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data.questions).toHaveLength(10);
+    // 重放（网络抖动后客户端重试）绝不能多生成一批题
+    expect(db.batches).toHaveLength(0);
+  });
+
   it("rejects retired legacy composite topics with a hint", async () => {
     const response = await app.request(
       "/api/quiz/questions",

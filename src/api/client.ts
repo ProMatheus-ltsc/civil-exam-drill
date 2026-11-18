@@ -68,7 +68,9 @@ export async function api<T>(
 ): Promise<T> {
   const {
     idempotent,
-    timeoutMs = 20_000,
+    // 12s：线上实测热请求 0.7s、冷启动 4.87s，留一倍余量即可。
+    // 原来给 20s 时，弱网下一次失败要干等 20 秒才重试，用户只会觉得「卡死了」。
+    timeoutMs = 12_000,
     attempts = 3,
     retryDelayMs = 400,
     ...init
@@ -84,7 +86,9 @@ export async function api<T>(
 
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (attempt > 0) await wait(retryDelayMs * 2 ** (attempt - 1));
+    // 指数退避 + 抖动：多个请求同时失败时别在同一毫秒一起重试，那会把弱网再压垮一次
+    if (attempt > 0)
+      await wait(retryDelayMs * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5));
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);

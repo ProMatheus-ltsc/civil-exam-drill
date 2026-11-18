@@ -188,6 +188,27 @@ updatedAt: 2026-09-02
 4. 文档 `module` 必须与轨道匹配：`speed`（资料速算）→ `data_analysis`，`sequence`（数字推理）→ `quantitative`；
 5. 除 `overview` 分组外，`data_analysis` 里不允许出现“没人引用”的模块专文（测试里有一条孤儿检查）。
 
+### 弱网与接口韧性
+
+`pages.dev` 在国内线路上单次往返约 0.7s、冷启动到过 4.9s，手机端（iOS Safari / 微信）会直接掐断连接
+（浏览器抛 `Load failed` / `Failed to fetch`）。速算一局原本是「取题 ×10 + 提交 ×10」共 20 次跨境请求，
+单次成功率 97% 时「一局至少失败一次」的概率约 46%——用户感受就是「提交经常报错」。
+
+现在的做法：
+
+1. **一局一次取全**：`POST /api/quiz/questions` 带 `count=RUN_LENGTH` 时返回本局全部题目，并**随题下发
+   `answerIndex` / `explanation`** 供客户端本地判分；多条 INSERT 走一次 D1 `batch`。同一 `runId` 重放
+   原样返回已生成的题，不会多生成一批。文档小练仍走单题模式（不带 `count`）。
+2. **本地判分 + 后台上报**：答题过程不依赖网络；作答先进 `localStorage` 队列
+   （`src/api/answerQueue.ts`）串行上报——网络失败保留、业务错（该题已提交 / 已过期）丢弃，
+   进入页面或触发 `online` 时补传。
+3. **结算不等服务端**：星级规则抽到 `src/quiz/rules.ts`，前后端共用同一份实现，前端先算先显示。
+4. **请求层**（`src/api/client.ts`）：12s 超时、幂等请求指数退避 + 抖动重试、4xx 不重试，
+   `Load failed` / 网关 HTML 错误页统一换成能看懂的中文。
+5. **避免旧版本滞留**：`public/sw.js` 的 `CACHE` 升版本，导航请求用 `cache: 'reload'` 绕过 HTTP 缓存；
+   `src/main.tsx` 在 `controllerchange` 时刷新一次。**代码上线后如果用户还看到已经被替换掉的旧文案，
+   先怀疑这一条**——改 `sw.js` 必须同时升 `CACHE` 版本号。
+
 ### 账号与学习数据
 
 - **邮箱注册/登录**：密码以 PBKDF2-SHA256（12 万次、每用户随机盐）存哈希；会话是 HttpOnly + SameSite=Strict Cookie，`sessions` 表只存 token 的 SHA-256。

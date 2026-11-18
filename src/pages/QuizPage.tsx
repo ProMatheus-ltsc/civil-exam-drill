@@ -30,6 +30,13 @@ import { LoadingSpinner } from "@shared/core/components/LoadingSpinner";
 import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api, isNetworkError } from "../api/client";
+import {
+  enqueueAnswer,
+  flushAnswers,
+  pendingAnswers,
+  type AnswerResult,
+} from "../api/answerQueue";
+import { RUN_LENGTH, summarizeRun, type RunSummary } from "../quiz/rules";
 import { openKnowledgeDoc } from "../lib/doc-link";
 import { perQuestionBudgetSeconds } from "../generator/catalog";
 import type { MaterialSpec } from "../generator/types";
@@ -80,26 +87,17 @@ type QuestionData = {
   stem: string;
   options: string[];
   material: MaterialSpec | null;
+  /** 一局一次取全时随题下发：客户端据此**本地判分**，答题过程不再依赖网络 */
+  answerIndex?: number;
+  explanation?: string;
 };
-type Grade = {
-  correct: boolean;
-  answerIndex: number;
-  explanation: string;
-  run: {
-    finished: boolean;
-    difficulty: Difficulty;
-    total: number;
-    correct: number;
-    accuracy: number;
-    durationMs: number;
-    passed: boolean;
-    stars: number;
-  } | null;
-};
+type Grade = AnswerResult;
 type RunItem = {
   q: QuestionData;
   selectedIndex: number;
   grade: Grade;
+  /** 本题耗时：本局总用时由本地累加，结算不再依赖服务端汇总 */
+  elapsedMs?: number;
 };
 
 const RATING_LABEL = ["", "基础", "进阶", "高阶"] as const;
@@ -129,7 +127,7 @@ export function QuizPage() {
   const [fetching, setFetching] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [questionStartedAt, setQuestionStartedAt] = useState(0);
-  const [summary, setSummary] = useState<Grade["run"] | null>(null);
+  const [summary, setSummary] = useState<RunSummary | null>(null);
   /** 下一题是否已就绪（只用于按钮文案；真正的去重靠 questionCache） */
   const [prefetchReady, setPrefetchReady] = useState(false);
   /** 刚点下的选项：服务端判定回来之前先把选中态画出来，点下去不能「没反应」 */
@@ -162,6 +160,29 @@ export function QuizPage() {
       new Map(list.map((item) => [`${item.topicId}:${item.difficulty}`, item])),
     );
   }, []);
+
+  /**
+   * 进入页面先把上次没传成功的作答补传一遍：答题改为本地判分后，
+   * 网络中断只会让统计延迟，不该让成绩永久丢失。
+   */
+  useEffect(() => {
+    if (pendingAnswers().length === 0) return;
+    void flushAnswers().then(() => {
+      void loadProgress().catch(() => undefined);
+    });
+  }, [loadProgress]);
+
+  // 网络恢复时立刻补传，不用等用户刷新
+  useEffect(() => {
+    const onOnline = () => {
+      if (pendingAnswers().length === 0) return;
+      void flushAnswers().then(() => {
+        void loadProgress().catch(() => undefined);
+      });
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [loadProgress]);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,7 +304,7 @@ export function QuizPage() {
    */
   const prefetch = useCallback(
     (index: number) => {
-      if (index >= 10 || !runRef.current) return;
+      if (index >= RUN_LENGTH || !runRef.current) return;
       if (questionCache.current.has(index)) {
         setPrefetchReady(true);
         return;
@@ -350,17 +371,39 @@ export function QuizPage() {
         difficulty: nextDifficulty,
       };
       setScreen("run");
-      const q = await api<QuestionData>("/quiz/questions", {
-        method: "POST",
-        body: JSON.stringify({
-          topicId: nextTopic.id,
-          difficulty: nextDifficulty,
-          runId: nextRunId,
-          index: 0,
-        }),
-      }).catch(() => null);
-      if (q) openQuestion(q);
-      else setLoadError("题目加载失败，请检查网络后重试");
+      /**
+       * 一局一次取全（count=RUN_LENGTH）：原本 10 题要发 10 次跨境请求，
+       * 加上客户端预取还会再多几次；单次成功率 97% 时一局至少失败一次的概率就有四成，
+       * 用户看到的就是「取题/提交经常报错」。压成 1 次后失败面只剩这一次。
+       * 题目里带回答案与解析，后面答题全程不需要网络。
+       */
+      try {
+        const result = await api<{ questions: QuestionData[] }>("/quiz/questions", {
+          method: "POST",
+          // 服务端按 runId 复用：重放不会重复生成，也不会打乱序号
+          idempotent: true,
+          body: JSON.stringify({
+            topicId: nextTopic.id,
+            difficulty: nextDifficulty,
+            runId: nextRunId,
+            index: 0,
+            count: RUN_LENGTH,
+          }),
+        });
+        const questions = result.questions ?? [];
+        for (const question of questions) {
+          questionCache.current.set(question.index, Promise.resolve(question));
+        }
+        if (questions.length === 0) {
+          setLoadError("题目加载失败，请重试");
+          return;
+        }
+        openQuestion(questions[0]);
+      } catch (error) {
+        setLoadError(
+          error instanceof Error ? error.message : "题目加载失败，请检查网络后重试",
+        );
+      }
     },
     [openQuestion],
   );
@@ -371,9 +414,8 @@ export function QuizPage() {
   }, [screen, items.length, summary, prefetch]);
 
   const answer = async (selectedIndex: number) => {
-    // 用 ref 兜同步连点：submitting 是 state，同一 tick 里的两次点击都会看到 false，
-    // 会发出两个不同 idempotencyKey 的提交，后一个被服务端判为该题已提交。
-    if (!current || submittingRef.current || items.length !== current.index) return;
+    // 用 ref 兜同步连点：itemsRef 在 setState 之后立刻更新，同一 tick 的第二次点击挡得住
+    if (!current || submittingRef.current || itemsRef.current.length !== current.index) return;
     const elapsedMs = Math.max(0, Date.now() - questionStartedAt);
     const questionId = current.questionId;
     const idempotencyKey =
@@ -381,46 +423,89 @@ export function QuizPage() {
     idempotencyKeys.current.set(questionId, idempotencyKey);
     submittingRef.current = true;
     setPendingIndex(selectedIndex);
-    setSubmitting(true);
-    try {
-      const grade = await api<Grade>("/quiz/answers", {
-        method: "POST",
-        // 服务端按 idempotencyKey 去重：同一次作答重放拿到的是同一条记录，
-        // 不会写出两条作答、也不会把「第 10 题」的完成判定漏掉
-        idempotent: true,
-        body: JSON.stringify({
-          questionId,
-          selectedIndex,
-          elapsedMs,
-          idempotencyKey,
-        }),
-      });
-      idempotencyKeys.current.delete(questionId);
-      const nextItems = [...itemsRef.current, { q: current, selectedIndex, grade }];
-      setItems(nextItems);
-      setPendingIndex(null);
-      if (grade.run?.finished) {
-        setSummary(grade.run);
-        setScreen("result");
-        void loadProgress();
+
+    /** ① 本地判分：答案随题下发，点下选项立刻出对错与解析，不等跨境往返 */
+    let grade: Grade | null = null;
+    if (typeof current.answerIndex === "number") {
+      grade = {
+        correct: current.answerIndex === selectedIndex,
+        answerIndex: current.answerIndex,
+        explanation: current.explanation ?? "",
+        run: null,
+      };
+    } else {
+      // 兜底：题目没带答案（旧接口 / 文档小练的单题模式）时仍走服务端判定
+      setSubmitting(true);
+      try {
+        grade = await api<Grade>("/quiz/answers", {
+          method: "POST",
+          // 服务端按 idempotencyKey 去重：同一次作答重放拿到的是同一条记录
+          idempotent: true,
+          body: JSON.stringify({ questionId, selectedIndex, elapsedMs, idempotencyKey }),
+        });
+        idempotencyKeys.current.delete(questionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "提交失败，请重试";
+        showToast(
+          isNetworkError(error) ? `${message}（再点一次选项即可重试）` : message,
+          "error",
+        );
+        setPendingIndex(null);
+        submittingRef.current = false;
+        setSubmitting(false);
+        return;
+      } finally {
+        setSubmitting(false);
       }
-    } catch (error) {
-      // 网络层失败是可恢复的：幂等键还留着，同一个选项再点一次就会复用同一次提交
-      const message = error instanceof Error ? error.message : "提交失败，请重试";
-      showToast(
-        isNetworkError(error) ? `${message}（再点一次选项即可重试）` : message,
-        "error",
-      );
-      setPendingIndex(null);
-    } finally {
+    }
+    if (!grade) {
       submittingRef.current = false;
-      setSubmitting(false);
+      setPendingIndex(null);
+      return;
+    }
+
+    const nextItems = [...itemsRef.current, { q: current, selectedIndex, grade, elapsedMs }];
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+    setPendingIndex(null);
+    submittingRef.current = false;
+
+    /**
+     * ② 后台上报：只记账，不阻塞答题。
+     * 网络抖动时进 localStorage 队列，下次进页面 / 网络恢复时自动补传；
+     * 用户不会再看到「提交失败」，统计最多延迟一会儿。
+     */
+    if (typeof current.answerIndex === "number") {
+      enqueueAnswer({ questionId, selectedIndex, elapsedMs, idempotencyKey });
+    }
+
+    /** ③ 答满一局：本地直接结算（星级用前后端共用的同一份规则算） */
+    if (nextItems.length >= (current.runLength || RUN_LENGTH)) {
+      const correct = nextItems.filter((item) => item.grade.correct).length;
+      const durationMs = nextItems.reduce(
+        (sum, item) => sum + (item.elapsedMs ?? 0),
+        0,
+      );
+      setSummary(
+        summarizeRun({
+          topicId: current.topicId,
+          difficulty: current.difficulty,
+          total: nextItems.length,
+          correct,
+          durationMs,
+        }),
+      );
+      setScreen("result");
+      // 队列清完再刷新进度，否则刚答的题还没落库，星级会显示成 0
+      void flushAnswers()
+        .then(() => loadProgress())
+        .catch(() => undefined);
     }
   };
 
   const goNext = async () => {
     const index = itemsRef.current.length;
-    if (index >= 10 || !topic) return;
+    if (index >= RUN_LENGTH || !topic) return;
     const q = await ensureQuestion(index);
     openQuestion(q);
   };
@@ -914,7 +999,7 @@ function ResultView({
   topic: TopicMeta;
   difficulty: Difficulty;
   items: RunItem[];
-  summary: NonNullable<Grade["run"]>;
+  summary: RunSummary;
   onRestart: () => void;
   onMap: () => void;
 }) {

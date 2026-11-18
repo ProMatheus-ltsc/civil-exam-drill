@@ -16,4 +16,23 @@ ReactDOM.createRoot(document.getElementById('app')!).render(
     </AuthProvider>
   </ToastProvider></HashRouter></React.StrictMode>,
 )
-if ('serviceWorker' in navigator && import.meta.env.PROD) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'))
+/**
+ * Service Worker 注册 + 版本接管。
+ *
+ * 为什么需要 controllerchange 这一段：sw.js 里用了 skipWaiting + clients.claim，
+ * 新版本会立刻接管，但**当前页面跑的还是旧 JS 包**。代码上线后用户仍然看到旧版报错
+ * （例如已经被替换掉的 `Load failed` 原文），就是这个原因。新 SW 接管后刷新一次即可。
+ * 首次访问时 controller 本来是 null，这次接管不能刷新——会打断刚进站的用户。
+ */
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    const hadController = Boolean(navigator.serviceWorker.controller)
+    let reloading = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return
+      reloading = true
+      window.location.reload()
+    })
+    void navigator.serviceWorker.register('/sw.js')
+  })
+}
