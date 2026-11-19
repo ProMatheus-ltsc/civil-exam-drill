@@ -31,8 +31,8 @@ import { Stack } from "@shared/core/components/responsive/Stack";
 import { useToast } from "@shared/core/hooks/useToast";
 import { api, isNetworkError } from "../api/client";
 import {
+  drainAnswers,
   enqueueAnswer,
-  flushAnswers,
   pendingAnswers,
   type AnswerResult,
 } from "../api/answerQueue";
@@ -162,27 +162,39 @@ export function QuizPage() {
   }, []);
 
   /**
+   * 等队列清空后再拉进度：本局成绩由服务端按 `run_id` 聚合，少一条作答就整局不算数
+   * （`runStars` 要求 total ≥ 10）——先拉进度会读到「9 题、0 星」的旧状态。
+   * 弱网下 drainAnswers 会重试几轮；仍有残留（断网）时隔几秒再补一次。
+   */
+  const syncProgressWhenSettled = useCallback(async () => {
+    await drainAnswers();
+    await loadProgress().catch(() => undefined);
+    if (pendingAnswers().length === 0) return;
+    window.setTimeout(() => {
+      void drainAnswers()
+        .then(() => loadProgress())
+        .catch(() => undefined);
+    }, 4000);
+  }, [loadProgress]);
+
+  /**
    * 进入页面先把上次没传成功的作答补传一遍：答题改为本地判分后，
    * 网络中断只会让统计延迟，不该让成绩永久丢失。
    */
   useEffect(() => {
     if (pendingAnswers().length === 0) return;
-    void flushAnswers().then(() => {
-      void loadProgress().catch(() => undefined);
-    });
-  }, [loadProgress]);
+    void syncProgressWhenSettled();
+  }, [syncProgressWhenSettled]);
 
   // 网络恢复时立刻补传，不用等用户刷新
   useEffect(() => {
     const onOnline = () => {
       if (pendingAnswers().length === 0) return;
-      void flushAnswers().then(() => {
-        void loadProgress().catch(() => undefined);
-      });
+      void syncProgressWhenSettled();
     };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
-  }, [loadProgress]);
+  }, [syncProgressWhenSettled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -497,9 +509,7 @@ export function QuizPage() {
       );
       setScreen("result");
       // 队列清完再刷新进度，否则刚答的题还没落库，星级会显示成 0
-      void flushAnswers()
-        .then(() => loadProgress())
-        .catch(() => undefined);
+      void syncProgressWhenSettled();
     }
   };
 
@@ -517,7 +527,8 @@ export function QuizPage() {
     runRef.current = null;
     questionCache.current.clear();
     idempotencyKeys.current.clear();
-    void loadProgress();
+    // 回地图前也要等队列落库，否则关卡卡片上显示的是少了最后几题的旧成绩
+    void syncProgressWhenSettled();
   };
 
   if (!catalog) return <LoadingSpinner message="关卡加载中…" />;

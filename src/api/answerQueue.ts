@@ -73,6 +73,25 @@ export function enqueueAnswer(item: PendingAnswer) {
   void flushAnswers();
 }
 
+/**
+ * 出队**只能按「这一条」删**，绝不能把整份数组写回去。
+ *
+ * 原实现把队列读进局部数组，每发完一条就 `write(items)` 把旧快照写回 localStorage。
+ * 但用户答题的速度总是快于一次跨境往返（0.3~1s）：这一条在途时下一条已经入队，
+ * 旧快照一写回就把新作答抹掉了。实测「连答 10 题」只上报了 3 条——
+ * 用户看到的就是「答完 10 题、结算三星，刷新后只有 9 题、星级归零」
+ * （`runStars` 要求 total≥10，少一条整局就不算数）。
+ */
+function removeItem(target: PendingAnswer) {
+  write(
+    read().filter(
+      (item) =>
+        item.questionId !== target.questionId ||
+        item.idempotencyKey !== target.idempotencyKey,
+    ),
+  );
+}
+
 let flushing: Promise<AnswerRun> | null = null;
 
 /** 串行清队；返回最后一次拿到的局次成绩（服务端可能尚未收齐，返回 null） */
@@ -80,28 +99,32 @@ export function flushAnswers(): Promise<AnswerRun> {
   if (flushing) return flushing;
   flushing = (async () => {
     let lastRun: AnswerRun = null;
-    let items = read();
-    while (items.length > 0) {
-      const item = items[0];
+    /** 本次已经发过的条目：localStorage 不可写时队列删不掉，靠它避免原地打转 */
+    const attempted = new Set<string>();
+    for (;;) {
+      // 每轮**重新读队列**：上一题的请求在途时，用户可能已经答了下一题
+      const item = read()[0];
+      if (!item) break;
+      const mark = `${item.questionId}:${item.idempotencyKey}`;
+      if (attempted.has(mark)) break;
+      attempted.add(mark);
       try {
         const result = await api<AnswerResult>("/quiz/answers", {
           method: "POST",
           // 服务端按 idempotencyKey 去重：重放只记一条，且会重算局次成绩
           idempotent: true,
-          attempts: 2,
+          attempts: 3,
           body: JSON.stringify(item),
         });
         if (result.run) lastRun = result.run;
-        items = items.slice(1);
-        write(items);
+        removeItem(item);
       } catch (error) {
         if (isNetworkError(error)) {
-          // 网络还没恢复：本轮到此为止，队列留着等下次触发
+          // 网络还没恢复：本轮到此为止，队列留着等下次触发（本轮后续的作答也还在队列里）
           break;
         }
         // 该题已提交 / 已过期这类业务错：留着永远不会成功，丢掉让后面的继续
-        items = items.slice(1);
-        write(items);
+        removeItem(item);
       }
     }
     return lastRun;
@@ -109,4 +132,21 @@ export function flushAnswers(): Promise<AnswerRun> {
     flushing = null;
   });
   return flushing;
+}
+
+/**
+ * 清空队列再返回：某一轮撞上网络错误就歇一会儿再试，最多 `rounds` 轮。
+ *
+ * 一局结束必须用它而不是只调一次 `flushAnswers`——一次调用只发到失败的那条为止，
+ * 剩下的留在队列里，此时去拉 `/quiz/progress` 拿到的就是「9 题、0 星」的旧成绩。
+ */
+export async function drainAnswers(rounds = 3): Promise<AnswerRun> {
+  let lastRun: AnswerRun = null;
+  for (let round = 0; round < rounds; round += 1) {
+    const result = await flushAnswers();
+    if (result) lastRun = result;
+    if (read().length === 0) return lastRun;
+    await new Promise<void>((resolve) => setTimeout(resolve, 600 * (round + 1)));
+  }
+  return lastRun;
 }
