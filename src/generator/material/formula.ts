@@ -348,19 +348,68 @@ function genBaseDifference(r: Rng): QuestionDraft {
 }
 
 /** ⑥ 间隔增长率 */
+/**
+ * ⑥ 间隔增长率（**三条路线**）
+ *   ① 正向：R＝r₁+r₂+r₁×r₂（两期增速 → 累计增速）
+ *   ② 反解（差值式）：r₂＝(R−r₁)÷(1+r₁)
+ *   ③ 反解（倍数式）：r₂＝(1+R)÷(1+r₁)−1
+ *
+ * ②③ 恒等，是同一个答案的两种写法；① 与 ②③ 问法相反（求 R vs 由 R 求 r），
+ * 互为干扰项反而是考点。这里只出算式、不出结果，考的是「该列哪个式子」。
+ */
 function genIntervalGrowth(r: Rng): QuestionDraft {
   const region = r.pick(REGIONS);
   const [metric] = r.pick(METRICS);
   const y = yearOf(r);
   const [r1, r2] = twoRates(r);
+  if (r.integer(0, 1) === 0) {
+    const product = round1((r1 * r2) / 100);
+    return buildFormula(
+      r,
+      "formula-interval-growth",
+      `${region}${metric} ${y} 年比 ${y - 1} 年增长 ${pct(r1)}，${y - 1} 年比 ${y - 2} 年增长 ${pct(r2)}。`,
+      `材料中，求 ${y} 年该地区${metric}比 ${y - 2} 年的增速，下列算式正确的是？`,
+      `${pct(r1)}+${pct(r2)}+${pct(r1)}×${pct(r2)}`,
+      [`${pct(r1)}+${pct(r2)}`, `${pct(r1)}×${pct(r2)}`, `${pct(r1)}+${pct(r2)}−${pct(r1)}×${pct(r2)}`],
+      `间隔增长率 R＝r₁+r₂+r₁×r₂。错法：只写 ${pct(r1)}+${pct(r2)} 是把两次增长当成**简单相加**，漏掉乘积项——本题漏掉的就是 ${product} 个百分点，增速越大差得越多；${pct(r1)}×${pct(r2)} 只留交叉项、把两个主项都丢了；把乘积项写成减号，是把「叠乘放大」记成了「净值收窄」。另一种写法：先算两年倍数再减 1，即 (1+${pct(r1)})×(1+${pct(r2)})−1，与本式恒等。同一考点还会反过来考——给累计增速 R 和其中一期增速反求另一期，用 r₂＝(R−r₁)÷(1+r₁)，别直接相减。`,
+    );
+  }
+  /**
+   * 反解：材料给「末年同比增速 r₁」与「两年累计增速 R」，求中间那一年的增速。
+   * 阈值上 R 必然大于 r₁（r₂ 为正），所以 (R−r₁) 恒为正，不会出负数。
+   */
+  const total = round1(r1 + r2 + (r1 * r2) / 100);
+  const materialLine = `${region}${metric} ${y} 年比 ${y - 1} 年增长 ${pct(r1)}，比 ${y - 2} 年增长 ${pct(total)}。`;
+  const stem = `材料中，求 ${y - 1} 年该地区${metric}的同比增速，下列算式正确的是？`;
+  if (r.integer(0, 1) === 0) {
+    // ② 差值式：先折回同一个基数再相减
+    return buildFormula(
+      r,
+      "formula-interval-growth-back",
+      materialLine,
+      stem,
+      `(${pct(total)}−${pct(r1)})÷${factor(r1)}`,
+      [
+        `${pct(total)}−${pct(r1)}`,
+        `(${pct(total)}−${pct(r1)})÷${factor(total)}`,
+        `(${pct(total)}−${pct(r1)})×${factor(r1)}`,
+      ],
+      `反解要先**把两个增速折回同一个基数**：${pct(total)} 是相对 ${y - 2} 年算的，${pct(r1)} 是相对 ${y - 1} 年算的，基数不同，不能直接相减。由 1+R＝(1+r₁)(1+r₂) 得 1+r₂＝(1+R)÷(1+r₁)，展开即 r₂＝(R−r₁)÷(1+r₁)＝(${pct(total)}−${pct(r1)})÷${factor(r1)}。错法：${pct(total)}−${pct(r1)} 直接相减，漏掉「÷(1+r₁)」这一步（r₁ 越大错得越多）；分母写成 ${factor(total)}，是拿累计增速去折；×(1+r₁) 把该除的写成了乘，方向整个反了。另一种写法：先算倍数再减 1，(1+${pct(total)})÷${factor(r1)}−1，两式恒等。`,
+    );
+  }
+  // ③ 倍数式：先算两年倍数，再折回单年倍数、减 1
   return buildFormula(
     r,
-    "formula-interval-growth",
-    `${region}${metric} ${y} 年比 ${y - 1} 年增长 ${pct(r1)}，${y - 1} 年比 ${y - 2} 年增长 ${pct(r2)}。`,
-    `材料中，求 ${y} 年该地区${metric}比 ${y - 2} 年的增速，下列算式正确的是？`,
-    `${pct(r1)}+${pct(r2)}+${pct(r1)}×${pct(r2)}`,
-    [`${pct(r1)}+${pct(r2)}`, `${pct(r1)}×${pct(r2)}`, `${pct(r1)}+${pct(r2)}−${pct(r1)}×${pct(r2)}`],
-    `间隔增长率 R＝r₁+r₂+r₁×r₂。**不是简单相加**：两次增长是叠乘关系，漏掉乘积项在增速较大时会差好几个百分点。`,
+    "formula-interval-growth-back-ratio",
+    materialLine,
+    stem,
+    `(1+${pct(total)})÷${factor(r1)}−1`,
+    [
+      `(1+${pct(total)})÷${factor(r1)}`,
+      `${pct(total)}÷${factor(r1)}`,
+      `(1+${pct(total)})×${factor(r1)}−1`,
+    ],
+    `反解走「先算倍数再减 1」：两年倍数 1+R＝(1+r₁)(1+r₂)，所以 1+r₂＝(1+R)÷(1+r₁)＝(1+${pct(total)})÷${factor(r1)}，**再减 1 才是增速**。错法：只写到 (1+${pct(total)})÷${factor(r1)} 得到的是倍数（1+r₂），还差一个减 1；${pct(total)}÷${factor(r1)} 分子漏了那个 1，量级直接错；×(1+r₁)−1 是把「除以 1+r₁」记成了乘。另一种写法：先相减再折回，(R−r₁)÷(1+r₁)，两式恒等。`,
   );
 }
 

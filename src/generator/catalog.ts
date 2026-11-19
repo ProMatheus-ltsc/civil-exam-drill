@@ -269,7 +269,7 @@ export const topics: TrainingTopic[] = [
   topic("formula-base-amount", 2, "material", true, "concept", ["formula-growth-rate"], "基期量", "现期÷(1+r) 还原过去 / 给增长量时直接相减，两条入口都要认——只列式不算", "base-amount"),
   topic("formula-multiples", 2, "material", true, "concept", ["formula-growth-rate"], "倍数与翻番", "是几倍 / 增长几倍 / 翻番——只列式不算", "multiples"),
   topic("formula-base-difference", 2, "material", true, "concept", ["formula-base-amount"], "基期差", "两对象先还原基期再相减——只列式不算", "base-difference"),
-  topic("formula-interval-growth", 2, "material", true, "concept", ["formula-growth-rate"], "间隔增长率", "R=r₁+r₂+r₁×r₂——只列式不算", "interval-growth"),
+  topic("formula-interval-growth", 2, "material", true, "concept", ["formula-growth-rate"], "间隔增长率", "R=r₁+r₂+r₁×r₂，以及给 R 反解另一期增速——只列式不算", "interval-growth"),
   topic("formula-mixed-growth", 2, "material", true, "concept", ["formula-growth-rate"], "混合增长率", "整体增速介于部分之间并偏向体量大者", "mixed-growth"),
   topic("formula-annual-amount", 2, "material", true, "concept", ["formula-growth-amount"], "年均增长量", "增量除以间隔年数——只列式不算", "annual-amount"),
   topic("formula-annual-rate", 2, "material", true, "concept", ["formula-multiples"], "年均增长率", "(1+r)ⁿ 开方还原——只列式不算", "annual-rate"),

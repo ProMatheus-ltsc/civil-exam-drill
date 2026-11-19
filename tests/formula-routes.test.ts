@@ -187,6 +187,32 @@ const TOPICS: TopicSpec[] = [
     ],
   },
   {
+    topic: "formula-interval-growth",
+    label: "间隔增长率（正向复合 / 反解两种写法）",
+    // 正向问「求累计增速」、反解问「求其中一期增速」，问法相反，互为干扰项是考点；
+    // 但反解的两条写法（差值式 / 倍数式）恒等，选项里不许互相出现
+    crossForbidden: false,
+    routes: [
+      {
+        template: "formula-interval-growth",
+        pattern: shape(`${P}%\\+${P}%\\+${P}%×${P}%`),
+        stemIncludes: /比 \d{4} 年的增速/,
+      },
+      {
+        template: "formula-interval-growth-back",
+        pattern: shape(`\\(${P}%−${P}%\\)÷\\(1\\+${P}%\\)`),
+        stemIncludes: /的同比增速/,
+        crossForbidden: true,
+      },
+      {
+        template: "formula-interval-growth-back-ratio",
+        pattern: shape(`\\(1\\+${P}%\\)÷\\(1\\+${P}%\\)−1`),
+        stemIncludes: /的同比增速/,
+        crossForbidden: true,
+      },
+    ],
+  },
+  {
     topic: "formula-diff-rate",
     label: "差值增长率（只有一条正确写法：两期差值相减再除基期差）",
     crossForbidden: false,
@@ -354,6 +380,55 @@ describe("列式关：差值增长率的标答必须是精确式", () => {
       if (approximate) {
         expect(question.explanation).toContain("近似");
       }
+    }
+  });
+});
+
+describe("间隔增长率：反解出来的那一期增速必须能复原累计增速", () => {
+  /**
+   * 反解最容易被写成「直接相减」（R−r₁）——它看起来很像，但漏掉了「两个增速基数不同」这一步。
+   * 这里把标答按字面算出来，再代回 R＝r₁+r₂+r₁×r₂：只有真正反解对了，才能复原材料给的 R。
+   */
+  it("标答卷子代回 1+R=(1+r₁)(1+r₂)，误差不超过 R 的一位小数舍入", () => {
+    const samples = Array.from({ length: 200 }, (_, index) =>
+      generateQuestion({
+        topicId: "formula-interval-growth",
+        difficulty: "medium",
+        excludedFingerprints: [],
+        randomSeed: `interval-back-${index}`,
+      }),
+    ).filter((question) => question.templateId.startsWith("formula-interval-growth-back"));
+    expect(samples.length, "反解一路没有出题").toBeGreaterThan(40);
+
+    for (const question of samples) {
+      const text = question.material?.paragraphs[0] ?? "";
+      const material = text.match(/增长 ([\d.]+)%，比 \d{4} 年增长 ([\d.]+)%。/);
+      expect(material, `材料格式变了：${text}`).toBeTruthy();
+      const r1 = Number(material![1]);
+      const total = Number(material![2]);
+
+      const answer = question.options[question.answerIndex];
+      // 两种写法分别解析：差值式 (R−r₁)÷(1+r₁) / 倍数式 (1+R)÷(1+r₁)−1
+      const diffForm = answer.match(/^\(([\d.]+)%−([\d.]+)%\)÷\(1\+([\d.]+)%\)$/);
+      const ratioForm = answer.match(/^\(1\+([\d.]+)%\)÷\(1\+([\d.]+)%\)−1$/);
+      let recovered: number;
+      if (diffForm) {
+        expect(Number(diffForm![1]), `分子不是累计增速：${answer}`).toBe(total);
+        expect(Number(diffForm![2]), `减数不是当年增速：${answer}`).toBe(r1);
+        // 分母必须是 1+r₁（该年的基数），不是 1+R
+        expect(Number(diffForm![3]), `分母不是 1+r₁：${answer}`).toBe(r1);
+        recovered = (total - r1) / (1 + r1 / 100);
+      } else if (ratioForm) {
+        expect(Number(ratioForm![1]), `分子不是 1+R：${answer}`).toBe(total);
+        expect(Number(ratioForm![2]), `分母不是 1+r₁：${answer}`).toBe(r1);
+        recovered = ((1 + total / 100) / (1 + r1 / 100) - 1) * 100;
+      } else {
+        throw new Error(`标答形态不认识：${answer}`);
+      }
+      // 代回 R＝r₁+r₂+r₁×r₂，误差只允许来自 R 保留一位小数的舍入
+      // （recovered 已经是百分点：分母折回的是 1+r₁，不是量级）
+      const rebuilt = r1 + recovered + (r1 * recovered) / 100;
+      expect(Math.abs(rebuilt - total), `反解算不回累计增速：${answer} @ ${text}`).toBeLessThan(0.2);
     }
   });
 });
